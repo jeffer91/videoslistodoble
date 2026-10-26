@@ -35,6 +35,25 @@ async function detectSilences(file,threshold){
  const ends=[...r.stderr.matchAll(/silence_end:\s*([0-9.]+)/g)].map(m=>Number(m[1]));
  return starts.map((s,i)=>({start:Math.max(0,s),end:Math.min(duration,ends[i]??duration),remove:true})).filter(s=>s.end-s.start>=sec-.05);
 }
+async function waveform(file){
+ return new Promise((resolve,reject)=>{
+  const child=spawn(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-i',file,'-vn','-ac','1','-ar','100','-t','180','-c:a','pcm_s16le','-f','s16le','pipe:1'],{windowsHide:true});
+  let parts=[],errors='',size=0;
+  child.stdout.on('data',d=>{size+=d.length;if(size<=1000000)parts.push(d)});
+  child.stderr.on('data',d=>errors+=d.toString().slice(-2000));
+  child.on('error',reject);
+  child.on('close',code=>{
+   if(code!==0)return reject(Error('No se pudo leer la forma de onda: '+errors.slice(-180)));
+   const bytes=Buffer.concat(parts),out=[];
+   for(let k=0;k+1<bytes.length;k+=20){
+    let n=0,sum=0;
+    for(let j=k;j<Math.min(bytes.length-1,k+20);j+=2){const v=bytes.readInt16LE(j)/32768;sum+=v*v;n++}
+    out.push(Math.min(1,Math.sqrt(Math.sqrt(sum/Math.max(1,n)))*1.3));
+   }
+   resolve(out.slice(0,1800));
+  });
+ });
+}
 function retainedRanges(scene,realDuration){
  const first=Math.max(0,Number(scene?.start)||0);
  const end=Math.min(realDuration,Number(scene?.end)>first?Number(scene.end):realDuration);
@@ -206,4 +225,4 @@ async function exportWeekly(root,id,signal,send){
   send({type:'complete',file:output});return {file:output,duration:sum};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={probe,detectSilences,retainedRanges,selectedDuration,timeline,exportShort,exportWeekly,toolPath};
+module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,exportShort,exportWeekly,toolPath};
