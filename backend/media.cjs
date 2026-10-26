@@ -70,6 +70,7 @@ function selectedDuration(scene,dur){return retainedRanges(scene,dur).reduce((n,
 function sanitizeTitle(title){return String(title||'RÉCORD DEL FÚTBOL').replace(/[\r\n\t]/g,' ').trim().slice(0,92)}
 function chooseMedia(scene){return scene.media||[]}
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
+function ffFont(){return process.platform==='win32'?"fontfile='"+ffFilterPath(path.join(process.env.WINDIR||'C:/Windows','Fonts','arialbd.ttf'))+"'":'font=Sans'}
 function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme){
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const contentW=wide?1380:930,contentH=wide?825:1160;
@@ -94,7 +95,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  f.push('[visual]drawbox=x=0:y='+ (H-16) +':w='+W+':h=16:color='+strip+':t=fill[decorated]');
  let input='decorated';
  if(titleFile){
-  f.push('['+input+']drawtext=textfile=\''+ffFilterPath(titleFile)+'\':fontcolor=white:fontsize='+(wide?54:50)+':font=Sans:box=1:boxcolor=black@0.65:boxborderw=22:x=(w-text_w)/2:y='+(wide?56:160)+'[titled]');
+  f.push('['+input+']drawtext=textfile=\''+ffFilterPath(titleFile)+'\':fontcolor=white:fontsize='+(wide?54:50)+':'+ffFont()+':box=1:boxcolor=black@0.65:boxborderw=22:x=(w-text_w)/2:y='+(wide?56:160)+'[titled]');
   input='titled';
  }
  if(withLogo){
@@ -195,7 +196,7 @@ async function exportShort(root,id,signal,send){
 async function renderTransition(tmp,title,signal){
  const output=path.join(tmp,'transition-'+Date.now()+'.mp4'),textfile=path.join(tmp,'tr-'+Date.now()+'.txt');
  fs.writeFileSync(textfile,sanitizeTitle(title),'utf8');
- const f="drawtext=textfile='"+path.basename(textfile)+"':fontcolor=white:fontsize=70:font=Sans:x=(w-text_w)/2:y=(h-text_h)/2";
+ const f="drawtext=textfile='"+path.basename(textfile)+"':fontcolor=white:fontsize=70:"+ffFont()+":x=(w-text_w)/2:y=(h-text_h)/2";
  await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','color=c=0x122c1c:s=1920x1080:r=30:d=1',
   '-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000','-vf',f,'-t','1','-r','30','-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2',output],signal,null,tmp);
  return output;
