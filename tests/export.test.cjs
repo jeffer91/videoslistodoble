@@ -29,7 +29,7 @@ test('prueba integral: FFmpeg genera un Short MP4 real, con título, audio y log
     fresh.scenes[key]=p.scenes[key];
   }
   store.saveProject(root,fresh);
-  const output=await media.exportShort(root,p.id,new AbortController().signal,()=>{});
+  const output=await media.exportShort(root,p.id,new AbortController().signal,e=>console.error('[render]',JSON.stringify(e)));
   assert.ok(fs.statSync(output.file).size>1000);
   const info=await media.probe(output.file);
   assert.ok(info.duration>.6&&info.duration<3,'duración inesperada '+info.duration);
