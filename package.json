@@ -28,7 +28,7 @@
       "node_modules/ffmpeg-static/**",
       "node_modules/ffprobe-static/**"
     ],
-    "files": ["main.cjs", "preload.cjs", "renderer/**", "backend/**", "legacy/**", "package.json", "node_modules/**"],
+    "files": ["main.cjs", "preload.cjs", "renderer/**", "backend/**", "legacy/**", "assets/**", "package.json", "node_modules/**"],
     "directories": {"output": "dist"},
     "win": {"target": "nsis"},
     "nsis": {
