@@ -27,6 +27,7 @@ app.whenReady().then(()=>{
   protocol.handle('records',request=>{
     try{
       const u=new URL(request.url);
+      if(u.hostname==='settings'&&u.pathname==='/logo') { const settings=store.getSettings(ROOT);if(!settings.logo)throw Error('No hay logo');const {net}=require('electron');return net.fetch(require('node:url').pathToFileURL(settings.logo).toString()) }
       if(u.hostname!=='asset') throw Error('Host no permitido');
       const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       if(pieces.length!==2)throw Error('Ruta inválida');
@@ -77,6 +78,9 @@ app.whenReady().then(()=>{
     const file=store.resolveManagedPath(ROOT,x.path);
     await shell.openPath(file);return true;
   });
+  // Conceder acceso a cámara/micrófono solo desde una interacción en el editor local.
+  const ses=require('electron').session.defaultSession;
+  ses.setPermissionRequestHandler((webContents,permission,callback,details)=>{const local=webContents===win?.webContents||webContents.getURL().startsWith('file://');callback(local&&['media','audioCapture','videoCapture'].includes(permission))});
   openWindow();
 });
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});
