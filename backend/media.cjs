@@ -13,13 +13,15 @@ async function command(exe,args,signal,onLine){
  return new Promise((resolve,reject)=>{
   const child=spawn(exe,args,{windowsHide:true,stdio:['ignore','pipe','pipe']});
   let stderr='',stdout='',done=false;
+  const hardLimit=process.env.RECORDS_RENDER_TEST_MODE==='1'?15000:0;
+  const timer=hardLimit?setTimeout(()=>{child.kill('SIGKILL');finish(Error('Proceso multimedia agotó tiempo de prueba: '+args.slice(0,7).join(' ')+' '+stderr.slice(-700)))},hardLimit):null;
   const onAbort=()=>child.kill('SIGTERM');
   if(signal){if(signal.aborted)child.kill('SIGTERM');signal.addEventListener('abort',onAbort,{once:true})}
   child.stdout.on('data',d=>{stdout+=d.toString();if(stdout.length>250000)stdout=stdout.slice(-250000)});
   child.stderr.on('data',d=>{const s=d.toString();stderr=(stderr+s).slice(-70000);if(onLine)onLine(s)});
   child.on('error',e=>finish(e));
   child.on('close',code=>finish(code===0?null:Error((signal&&signal.aborted?'Cancelado. ':'' )+(stderr.slice(-1800)||'Proceso terminado con código '+code))));
-  function finish(err){if(done)return;done=true;if(signal)signal.removeEventListener('abort',onAbort);if(err)reject(err);else resolve({stdout,stderr})}
+  function finish(err){if(done)return;done=true;if(timer)clearTimeout(timer);if(signal)signal.removeEventListener('abort',onAbort);if(err)reject(err);else resolve({stdout,stderr})}
  });
 }
 async function probe(file){
