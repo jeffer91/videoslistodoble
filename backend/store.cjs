@@ -8,7 +8,7 @@ const makeScenes=()=>({
  body:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65,media:[]},
  closing:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'center',scale:80}
 });
-function ensureRoot(root){for(const dir of ['Proyectos','Compilaciones','Exportaciones/Shorts','Exportaciones/Videos-Largos','Recursos','Respaldos','Configuracion'])fs.mkdirSync(path.join(root,dir),{recursive:true})}
+function ensureRoot(root){for(const dir of ['Proyectos','Compilaciones','Exportaciones/Shorts','Exportaciones/Videos-Largos','Recursos','Respaldos','Configuracion'])fs.mkdirSync(path.join(root,dir),{recursive:true});const logo=path.join(root,'Recursos','logo-11-records.png'),source=path.join(__dirname,'..','assets','logo-11-records.png');if(!fs.existsSync(logo)&&fs.existsSync(source))fs.copyFileSync(source,logo);const settings=getSettings(root);if(!settings.logo&&fs.existsSync(logo))saveSettings(root,{logo})}
 function readJSON(file){return JSON.parse(fs.readFileSync(file,'utf8'))}
 function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(obj,null,2),'utf8');fs.renameSync(tmp,file)}
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
