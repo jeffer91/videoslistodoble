@@ -18,7 +18,7 @@ test('prueba integral: FFmpeg genera un Short MP4 real, con título, audio y log
     p.assets.push(a);
     p.scenes[key].video=a.id;
     p.scenes[key].start=0;
-    p.scenes[key].end=.35;
+    p.scenes[key].end=0.6;
     p.scenes[key].approved=true;
     p.scenes[key].title='PRUEBA DE FUTBOL';
   }
