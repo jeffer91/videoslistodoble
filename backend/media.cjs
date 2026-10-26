@@ -63,7 +63,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo){
  if(withPresenter){
   f.push('[0:v]scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
- }else f.push('[base]copy[visual]');
+ }else f.push('[base]null[visual]');
  let input='visual';
  if(titleFile){
   f.push('['+input+']drawtext=textfile=\''+ffFilterPath(titleFile)+'\':fontcolor=white:fontsize='+(wide?54:50)+':font=Sans:box=1:boxcolor=black@0.65:boxborderw=22:x=(w-text_w)/2:y='+(wide?56:160)+'[titled]');
@@ -71,11 +71,11 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo){
  }
  if(withLogo){
   const s=wide?68:58;
-  f.push('[2:v]format=rgba,colorkey=white:0.24:0.1,scale='+s+':-1[logo]');
+  f.push('['+(withPresenter?2:1)+':v]format=rgba,colorkey=white:0.24:0.1,scale='+s+':-1[logo]');
   const xx='if(lt(mod(t,24),6),(W-w)*mod(t,24)/6,if(lt(mod(t,24),12),W-w,if(lt(mod(t,24),18),(W-w)*(1-(mod(t,24)-12)/6),0)))';
   const yy='if(lt(mod(t,24),6),0,if(lt(mod(t,24),12),(H-h)*(mod(t,24)-6)/6,if(lt(mod(t,24),18),H-h,(H-h)*(1-(mod(t,24)-18)/6))))';
   f.push('['+input+'][logo]overlay=x=\''+xx+'\':y=\''+yy+'\':eval=frame:shortest=0[vout]');
- }else f.push('['+input+']copy[vout]');
+ }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
 async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1){
@@ -91,11 +91,12 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
   else args.push('-stream_loop','-1','-ss',String(mediaStart),'-i',mediaAsset.file);
  }
  if(hasLogo)args.push('-loop','1','-i',logo);
+ if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
  const filter=fillAndContain(null,wide,withPresenter,titleFile,hasLogo);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
  if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0');
- else args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
+ else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0))+':a:0');
  args.push('-t',String(length),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
  await command(toolPath('ffmpeg'),args,signal);
