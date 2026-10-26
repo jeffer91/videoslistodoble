@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' records: data: blob:; img-src 'self' records: data: blob:; media-src 'self' records: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' records:;">
+<title>11 Récords Studio Desktop</title><link rel="stylesheet" href="./style.css">
+</head><body>
+<div id="app" class="shell">
+<aside id="sidebar">
+ <div class="brand"><span class="brand-mark">11</span><div><strong>11 RÉCORDS</strong><small>STUDIO DESKTOP</small></div></div>
+ <nav>
+  <button data-action="home" class="nav active">▦ &nbsp; Mis proyectos</button>
+  <button data-action="new" class="nav">＋ &nbsp; Nuevo récord</button>
+  <button data-action="weeks" class="nav">▣ &nbsp; Videos largos</button>
+  <button data-action="settings" class="nav">⚙ &nbsp; Configuración</button>
+  <button data-action="legacy" class="nav">◫ &nbsp; Editor web original</button>
+ </nav>
+ <div class="asidefoot"><strong>Almacenamiento local</strong><span>Disco D: · 11-Records-Studio</span><small>Los originales se guardan dentro del proyecto.</small></div>
+</aside>
+<main id="main"><div id="view" aria-live="polite"></div></main>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<div id="modal-root" hidden></div>
+<script defer src="./app.js"></script>
+</body></html>
