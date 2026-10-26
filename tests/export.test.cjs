@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const path=require('node:path'),fs=require('node:fs'),os=require('node:os'),{spawnSync}=require('node:child_process');
+process.env.RECORDS_RENDER_TEST_MODE='1';
 const store=require('../backend/store.cjs'),media=require('../backend/media.cjs');
 test('prueba integral: FFmpeg genera un Short MP4 real, con título, audio y logo', {timeout:180000},async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'records-smoke-'));
