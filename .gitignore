@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+build/
+*.log
+.DS_Store
+.env
+*.mp4
+*.webm
+*.mov
+*.mp3
+*.wav
+*.png
+*.jpg
+!assets/**
