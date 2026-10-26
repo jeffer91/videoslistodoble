@@ -7,9 +7,9 @@ test('prueba integral: FFmpeg genera un Short MP4 real, con título, audio y log
  try{
   store.ensureRoot(root);
   const video=path.join(root,'voz.mp4');
-  const args=['-y','-loglevel','error','-f','lavfi','-i','testsrc=size=320x240:rate=30:duration=.8',
-    '-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=.8',
-    '-t','.8','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',video];
+  const args=['-y','-loglevel','error','-f','lavfi','-i','testsrc=size=320x240:rate=30:duration=0.8',
+    '-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=0.8',
+    '-t','0.8','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',video];
   const make=spawnSync(media.toolPath('ffmpeg'),args,{encoding:'utf8',timeout:30000});
   assert.equal(make.status,0,make.stderr);
   const p=store.createProject(root,{title:'Un récord de prueba'});
