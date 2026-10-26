@@ -49,14 +49,18 @@ function selectedDuration(scene,dur){return retainedRanges(scene,dur).reduce((n,
 function sanitizeTitle(title){return String(title||'RÉCORD DEL FÚTBOL').replace(/[\r\n\t]/g,' ').trim().slice(0,92)}
 function chooseMedia(scene){return scene.media||[]}
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
-function fillAndContain(src,wide,withPresenter,titleFile,withLogo){
+function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme){
  const W=wide?1920:1080,H=wide?1080:1920;
  const contentW=wide?1380:930,contentH=wide?825:1160;
- const px=wide?480:58,py=wide?180:365;
- const pw=wide?420:400,ph=wide?660:580;
+ const pos=appearance?.position||(wide?'right':'left');
+ const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||65)/65));
+ const px=wide?(pos==='right'?1440:pos==='center'?760:65):(pos==='right'?600:pos==='center'?350:58),py=wide?235:820;
+ const pw=Math.round((wide?420:400)*factor),ph=Math.round((wide?660:580)*factor);
  const pad=withPresenter?'[1:v]':'[0:v]';
  const f=[];
- f.push(pad+'split=2[back][foreground]');
+ if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed))).toFixed(3)+'[timed]');
+ const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
+ f.push(bgInput+'split=2[back][foreground]');
  f.push('[back]scale='+W+':'+H+':force_original_aspect_ratio=increase,crop='+W+':'+H+',boxblur=24:1[blur]');
  f.push('[foreground]scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
  f.push('[blur][center]overlay=(W-w)/2:'+(wide?'(H-h)/2':'(H-h)/2')+'[base]');
@@ -64,7 +68,9 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo){
   f.push('[0:v]scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
  }else f.push('[base]null[visual]');
- let input='visual';
+ const strip=theme==='numbers'?'0xb92d42':theme==='legends'?'0xd8b56a':'0x2fcb6b';
+ f.push('[visual]drawbox=x=0:y='+ (H-16) +':w='+W+':h=16:color='+strip+':t=fill[decorated]');
+ let input='decorated';
  if(titleFile){
   f.push('['+input+']drawtext=textfile=\''+ffFilterPath(titleFile)+'\':fontcolor=white:fontsize='+(wide?54:50)+':font=Sans:box=1:boxcolor=black@0.65:boxborderw=22:x=(w-text_w)/2:y='+(wide?56:160)+'[titled]');
   input='titled';
@@ -78,7 +84,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo){
  }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
-async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1){
+async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic'){
  if(!(length>.06))return;
  const W=wide?1920:1080,H=wide?1080:1920;
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
@@ -92,10 +98,10 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  }
  if(hasLogo)args.push('-loop','1','-i',logo);
  if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
- const filter=fillAndContain(null,wide,withPresenter,titleFile,hasLogo);
+ const filter=fillAndContain(null,wide,withPresenter,titleFile,hasLogo,appearance,speed,theme);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
- if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0');
+ if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,dynaudnorm=f=150:g=15');
  else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0))+':a:0');
  args.push('-t',String(length),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
@@ -115,7 +121,7 @@ function timeline(scene,duration,mediaEntries){
   if(cut<=.04)break;
   const effectiveSpeed=item.type==='video'?speed:1;
   const sourceDuration=Math.max(.01,(Number(item.sourceEnd)||0)-(Number(item.sourceStart)||0));
-  const clipStart=item.type==='video'?(Number(item.sourceStart)||0)+(accumulated-index*slot)*effectiveSpeed%sourceDuration:0;
+  const clipStart=item.type==='video'?(Number(item.sourceStart)||0)+(((accumulated-index*slot)*effectiveSpeed + (Math.floor(accumulated/4)*.12))%sourceDuration):0;
   output.push({start,end:start+cut,medium:item,mediaStart:clipStart,speed:effectiveSpeed});
   start+=cut;accumulated+=cut;
  }}
@@ -126,17 +132,20 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
  const voice=store.resolveAsset(root,p.id,scene.video),voiceInfo=await probe(voice);
  const length=selectedDuration(scene,voiceInfo.duration);
  if(length<.5)throw Error('La escena '+key+' quedó vacía');
- const media=chooseMedia(scene).map(m=>{
+ const media=await Promise.all(chooseMedia(scene).map(async m=>{
   const asset=p.assets.find(a=>a.id===m.assetId);
   if(!asset)throw Error('Recurso ausente');
-  return {file:store.resolveAsset(root,p.id,asset.id),type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Number(m.end)||voiceInfo.duration,speed:Math.max(.5,Math.min(2,Number(m.speed)||1))}
- });
+  const file=store.resolveAsset(root,p.id,asset.id);
+  const duration=asset.type==='video'?(await probe(file)).duration:0;
+  return {file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1))}
+ }));
  const entries=timeline(scene,voiceInfo.duration,media);
+ const appearance=scene.formats?.[wide?'wide':'short']||scene;
  const segments=[];
  for(let i=0;i<entries.length;i++){
   if(signal.aborted)throw Error('Cancelado');
   const m=entries[i],output=path.join(tmp,'part-'+String(fs.readdirSync(tmp).length).padStart(5,'0')+'.mp4');
-  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed);
+  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style);
   segments.push(output);
  }
  return {segments,duration:length};
@@ -148,9 +157,9 @@ async function concat(tmp,segments,destination,signal){
  fs.writeFileSync(manifest,segments.map(s=>"file '"+s.replace(/\\/g,'/').replace(/'/g,"'\\''")+"'").join('\n'));
  await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-f','concat','-safe','0','-i',manifest,'-c','copy','-movflags','+faststart',destination],signal);
 }
-function temporary(){return fs.mkdtempSync(path.join(os.tmpdir(),'records-render-'))}
+function temporary(root){const dir=path.join(root,'Temporales');fs.mkdirSync(dir,{recursive:true});return fs.mkdtempSync(path.join(dir,'render-'))}
 async function exportShort(root,id,signal,send){
- const p=store.getProject(root,id),tmp=temporary(),settings=store.getSettings(root);const pieces=[];
+ const p=store.getProject(root,id),tmp=temporary(root),settings=store.getSettings(root);const pieces=[];
  try{
   let count=0;const progress=()=>send({type:'segment',done:++count,stage:'Short'});
   for(const key of ['hook','body','closing']){send({type:'status',message:'Procesando '+key});const r=await compileScene(root,p,key,false,tmp,signal,progress,settings.logo);pieces.push(...r.segments)}
@@ -169,7 +178,7 @@ async function renderTransition(tmp,title,signal){
  return output;
 }
 async function exportWeekly(root,id,signal,send){
- const week=store.getWeek(root,id),tmp=temporary(),settings=store.getSettings(root),pieces=[];
+ const week=store.getWeek(root,id),tmp=temporary(root),settings=store.getSettings(root),pieces=[];
  try{
   if(!week.projectIds.length)throw Error('No existen récords para recopilar');
   if(!week.intro||!week.closing)throw Error('Graba o importa la introducción y el cierre del video largo');
