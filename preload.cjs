@@ -3,7 +3,7 @@ const {contextBridge,ipcRenderer} = require('electron');
 const allowed = new Set([
   'projects:list','projects:create','projects:get','projects:save','projects:delete',
   'assets:import','assets:record','assets:import-logo','settings:get','settings:set',
-  'media:analyze','media:metadata','render:short','render:weekly','render:cancel',
+  'media:analyze','media:metadata','media:waveform','render:short','render:weekly','render:cancel',
   'weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
 ]);
 contextBridge.exposeInMainWorld('studio', {
