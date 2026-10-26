@@ -69,7 +69,7 @@ function sanitizeTitle(title){return String(title||'RÉCORD DEL FÚTBOL').replac
 function chooseMedia(scene){return scene.media||[]}
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
 function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme){
- const W=wide?1920:1080,H=wide?1080:1920;
+ const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const contentW=wide?1380:930,contentH=wide?825:1160;
  const pos=appearance?.position||(wide?'right':'left');
  const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||65)/65));
@@ -80,7 +80,8 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed))).toFixed(3)+'[timed]');
  const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
  f.push(bgInput+'split=2[back][foreground]');
- f.push('[back]scale='+W+':'+H+':force_original_aspect_ratio=increase,crop='+W+':'+H+',boxblur=24:1[blur]');
+ const lowW=Math.ceil(W/5),lowH=Math.ceil(H/5);
+ f.push('[back]scale='+lowW+':'+lowH+':force_original_aspect_ratio=increase,crop='+lowW+':'+lowH+',boxblur=8:1,scale='+W+':'+H+':flags=bicubic[blur]');
  f.push('[foreground]scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
  f.push('[blur][center]overlay=(W-w)/2:'+(wide?'(H-h)/2':'(H-h)/2')+'[base]');
  if(withPresenter){
@@ -105,7 +106,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
 }
 async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic'){
  if(!(length>.06))return;
- const W=wide?1920:1080,H=wide?1080:1920;
+ const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
  const titleFile=path.join(ctx,'title-'+path.basename(target)+'.txt');
  fs.writeFileSync(titleFile,sanitizeTitle(title),'utf8');
