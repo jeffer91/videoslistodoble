@@ -1,0 +1,42 @@
+{
+  "name": "11-records-studio-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Editor local para Shorts y recopilaciones semanales de 11 Récords",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check renderer/app.js",
+    "dist:win": "electron-builder --win nsis",
+    "dist:dir": "electron-builder --dir"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  },
+  "devDependencies": {
+    "electron": "^34.3.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.records11.studio",
+    "productName": "11 Récords Studio",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
+    "files": ["main.cjs", "preload.cjs", "renderer/**", "backend/**", "legacy/**", "package.json", "node_modules/**"],
+    "directories": {"output": "dist"},
+    "win": {"target": "nsis"},
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
