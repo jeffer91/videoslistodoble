@@ -140,7 +140,7 @@ function timeline(scene,duration,mediaEntries){
   if(cut<=.04)break;
   const effectiveSpeed=item.type==='video'?speed:1;
   const sourceDuration=Math.max(.01,(Number(item.sourceEnd)||0)-(Number(item.sourceStart)||0));
-  const clipStart=item.type==='video'?(Number(item.sourceStart)||0)+(((accumulated-index*slot)*effectiveSpeed + (Math.floor(accumulated/4)*.12))%sourceDuration):0;
+  const clipStart=item.type==='video'?(Number(item.sourceStart)||0)+(((accumulated-index*slot)*effectiveSpeed + (item.microcuts===false?0:Math.floor(accumulated/4)*.12))%sourceDuration):0;
   output.push({start,end:start+cut,medium:item,mediaStart:clipStart,speed:effectiveSpeed});
   start+=cut;accumulated+=cut;
  }}
@@ -151,12 +151,13 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
  const voice=store.resolveAsset(root,p.id,scene.video),voiceInfo=await probe(voice);
  const length=selectedDuration(scene,voiceInfo.duration);
  if(length<.5)throw Error('La escena '+key+' quedó vacía');
+ const autoMicrocuts=store.getSettings(root).autoMicrocuts!==false;
  const media=await Promise.all(chooseMedia(scene).map(async m=>{
   const asset=p.assets.find(a=>a.id===m.assetId);
   if(!asset)throw Error('Recurso ausente');
   const file=store.resolveAsset(root,p.id,asset.id);
   const duration=asset.type==='video'?(await probe(file)).duration:0;
-  return {file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1))}
+  return {file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
  }));
  const entries=timeline(scene,voiceInfo.duration,media);
  const appearance=scene.formats?.[wide?'wide':'short']||scene;
