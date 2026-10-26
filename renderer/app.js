@@ -34,12 +34,14 @@ function silenceTimeline(scene){const chunks=[],begin=Math.max(0,Number(scene.st
 }
 function sceneView(){
  const p=state.project,s=p.scenes[state.scene],video=p.assets.find(a=>a.id===s.video),media=(s.media||[]).map(m=>p.assets.find(a=>a.id===m.assetId)).filter(Boolean),first=media[0];
- const wide=state.orientation==='wide',style=p.style;
+ const wide=state.orientation==='wide',style=p.style,appearance=(s.formats||{})[state.orientation]||s;
  const preview=video?'<video class="speaker" id="speaker-preview" src="'+url(p,video.id)+'" playsinline preload="metadata"></video>':'';
  let bg='';
  if(first)bg=first.type==='image'?'<img class="back" src="'+url(p,first.id)+'"><img class="photo" src="'+url(p,first.id)+'">':'<video class="back" src="'+url(p,first.id)+'" muted loop autoplay playsinline></video><video class="photo" src="'+url(p,first.id)+'" muted loop autoplay playsinline></video>';
  else if(video)bg='<video class="back" src="'+url(p,video.id)+'" muted loop autoplay playsinline></video>';
- const previewHTML='<div class="stage '+(wide?'wide ':'')+'style-'+style+'">'+bg+'<div class="headline">'+esc(s.title||p.title)+'</div>'+preview+(state.scene==='closing'?'<div class="follow">SÍGUENOS</div>':'')+(state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="Logo del canal">':'')+'</div>';
+ const speakerPos=appearance.position==='right'?(wide?'73%':'55%'):appearance.position==='center'?(wide?'40%':'31%'):(wide?'3%':'8%');
+ const resizedPreview=preview.replace('class="speaker"','class="speaker" style="left:'+speakerPos+';transform:scale('+(Number(appearance.scale||65)/65).toFixed(2)+');transform-origin:bottom center"');
+ const previewHTML='<div class="stage '+(wide?'wide ':'')+'style-'+style+'">'+bg+'<div class="headline">'+esc(s.title||p.title)+'</div>' +resizedPreview+(state.scene==='closing'?'<div class="follow">SÍGUENOS</div>':'')+(state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="Logo del canal">':'')+'</div>';
  const approved=order.every(k=>p.scenes[k].approved);
  return titlebar(p.title,'Proyecto local · se guarda automáticamente',btn('back','← Biblioteca','secondary')+(state.editingWeekId?btn('return-week','Volver al video semanal','secondary'):'')+btn('export-short','Exportar Short MP4','',''+(!approved?'disabled title="Aprueba las tres escenas primero"':'')))+
  '<div class="steps">'+order.map(k=>'<button data-action="scene" data-id="'+k+'" class="step '+(k===state.scene?'active':'')+'">'+(p.scenes[k].approved?'✓ ':'')+names[k]+'</button>').join('')+'</div>'+
@@ -51,8 +53,8 @@ function sceneView(){
  '<div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
  '<div class="two"><div class="field"><label>Cifra (opcional)</label><input maxlength="18" data-field="number" value="'+esc(s.number||'')+'"></div><div class="field"><label>Protagonista (opcional)</label><input maxlength="50" data-field="name" value="'+esc(s.name||'')+'"></div></div>'+
  '<div class="field"><label>Plantilla visual del proyecto</label><select data-project-field="style"><option value="historic" '+(style==='historic'?'selected':'')+'>Récord histórico</option><option value="numbers" '+(style==='numbers'?'selected':'')+'>Récord en cifras</option><option value="legends" '+(style==='legends'?'selected':'')+'>Leyendas y récords</option></select></div>'+
- '<div class="two"><div class="field"><label>Composición</label><select data-field="layout"><option value="auto" '+(s.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(s.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label><select data-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(s.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select></div></div>'+
- '<div class="field"><label>Tamaño del presentador ('+(s.scale||65)+'%)</label><input type="range" min="30" max="100" data-field="scale" value="'+(s.scale||65)+'"></div>'+
+ '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label><select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select></div></div>'+
+ '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>'+
  '<div class="row between"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></div>'+
  '<div class="panel"><div class="row between"><h2>Recursos visuales</h2>'+(state.scene==='closing'?'':btn('import-media','＋ Fotos o videos','secondary'))+'</div>'+mediaRows()+'</div></section></div>'+
  (state.status?'<div class="panel"><strong>'+esc(state.status)+'</strong><div class="progressbar"><div style="width:'+state.progress+'%"></div></div>'+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
@@ -207,6 +209,12 @@ document.addEventListener('change',e=>{
  const p=state.project;if(!p||state.page!=='project')return;
  const s=p.scenes[state.scene],el=e.target;
  if(el.dataset.field){s[el.dataset.field]=['start','end','scale'].includes(el.dataset.field)?Number(el.value):el.value;s.approved=false;queueSave();if(el.dataset.field==='layout'||el.dataset.field==='position')render()}
+ else if(el.dataset.formatField){
+   if(!s.formats)s.formats={};
+   if(!s.formats[state.orientation])s.formats[state.orientation]={};
+   s.formats[state.orientation][el.dataset.formatField]=el.dataset.formatField==='scale'?Number(el.value):el.value;
+   s.approved=false;queueSave();render();
+ }
  else if(el.dataset.projectField){p[el.dataset.projectField]=el.value;order.forEach(k=>p.scenes[k].approved=false);queueSave();render()}
  else if(el.dataset.mediaSpeed!==undefined){s.media[Number(el.dataset.mediaSpeed)].speed=Number(el.value)||1;s.approved=false;queueSave()}
 });
