@@ -1,6 +1,6 @@
 'use strict';
 const $=s=>document.querySelector(s);
-const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},status:'',progress:0,recordStream:null,recorder:null,recordParts:[],recTarget:null,editingWeekId:null};
+const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},status:'',progress:0,recordStream:null,recorder:null,recordParts:[],recTarget:null,editingWeekId:null,waveforms:{},videoDurations:{},showSafe:false,previewIndex:-1};
 const names={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
 const order=['hook','body','closing'];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -22,6 +22,23 @@ function mediaRows(){const p=state.project,s=p.scenes[state.scene];if(state.scen
   const a=p.assets.find(x=>x.id===m.assetId);if(!a)return '';
   return '<div class="asset"><div class="row"><span class="fileicon">'+assetLabel(a)+'</span><div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div><div class="row wrap">'+(a.type==='video'?'<label class="mini">Velocidad <select data-media-speed="'+i+'"><option value="1" '+(m.speed===1?'selected':'')+'>1,0×</option><option value="1.1" '+(m.speed===1.1?'selected':'')+'>1,1×</option><option value="1.2" '+(m.speed===1.2?'selected':'')+'>1,2×</option></select></label>':'')+btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>';
  }).join('')+'</div>'+(state.scene==='hook'?'<small>En el gancho se utiliza el primer recurso como fotografía o video de apoyo.</small>':'<small>En desarrollo puedes combinar fotos y clips; se distribuyen automáticamente durante la narración.</small>')}
+function waveformHTML(scene){
+ const project=state.project;if(!project||!scene.video)return '';
+ const id=project.id+':'+scene.video,peaks=state.waveforms[id]||[];
+ const duration=state.videoDurations[id]||scene.end||1;
+ if(!peaks.length)return '<p class="muted mini">Carga la grabación para mostrar su forma de onda.</p>';
+ const count=Math.min(260,peaks.length),width=840,space=width/count;
+ const shapes=[];
+ for(let k=0;k<count;k++){
+  const idx=Math.floor(k*peaks.length/count);
+  const timestamp=idx*.1;
+  const gap=(scene.silences||[]).find(g=>timestamp>=g.start&&timestamp<g.end);
+  const color=gap?(gap.remove?'#d44d60':'#78877d'):'#5cadd5';
+  const height=Math.max(3,peaks[idx]*68);
+  shapes.push('<rect x="'+(k*space).toFixed(2)+'" y="'+((75-height)/2).toFixed(1)+'" width="'+Math.max(1,space-1).toFixed(2)+'" height="'+height.toFixed(1)+'" fill="'+color+'" rx=".6"/>');
+ }
+ return '<svg viewBox="0 0 840 75" style="display:block;width:100%;margin-bottom:8px;background:#102116;border-radius:7px" role="img" aria-label="Forma de onda del audio">'+shapes.join('')+'</svg>';
+}
 function secondsToPixel(s,start,end){return Math.max(0,Math.min(100,(s-start)/(end-start)*100))}
 function silenceTimeline(scene){const chunks=[],begin=Math.max(0,Number(scene.start)||0),end=Number(scene.end)>begin?Number(scene.end):begin+1;
  const intervals=(scene.silences||[]).filter(g=>g.end>begin&&g.start<end).sort((a,b)=>a.start-b.start);
@@ -30,7 +47,7 @@ function silenceTimeline(scene){const chunks=[],begin=Math.max(0,Number(scene.st
   if(s>at)chunks.push({start:at,end:s,voice:true});
   chunks.push({start:s,end:e,voice:false,remove:q.remove!==false,index:i});at=e}
  if(end>at)chunks.push({start:at,end,voice:true});
- return '<div class="timeline">'+chunks.map(c=>'<div title="'+(c.voice?'Voz':c.remove?'Clic para conservar':'Clic para eliminar')+' · '+fmt(c.end-c.start)+'" class="audiochunk '+(c.voice?'voice':c.remove?'cut':'keep')+'" style="flex:'+(c.end-c.start).toFixed(3)+'" '+(c.voice?'':'data-action="toggle-silence" data-index="'+c.index+'"')+'>'+(c.voice?'▥':c.remove?'×':'✓')+'</div>').join('')+'</div>';
+ return waveformHTML(scene)+'<div class="timeline">'+chunks.map(c=>'<div title="'+(c.voice?'Voz':c.remove?'Clic para conservar':'Clic para eliminar')+' · '+fmt(c.end-c.start)+'" class="audiochunk '+(c.voice?'voice':c.remove?'cut':'keep')+'" style="flex:'+(c.end-c.start).toFixed(3)+'" '+(c.voice?'':'data-action="toggle-silence" data-index="'+c.index+'"')+'>'+(c.voice?'▥':c.remove?'×':'✓')+'</div>').join('')+'</div>';
 }
 function sceneView(){
  const p=state.project,s=p.scenes[state.scene],video=p.assets.find(a=>a.id===s.video),media=(s.media||[]).map(m=>p.assets.find(a=>a.id===m.assetId)).filter(Boolean),first=media[0];
@@ -48,6 +65,7 @@ function sceneView(){
  '<div class="stagegrid"><section><div class="panel"><div class="row between"><h2>Vista previa</h2><div class="row">'+btn('orientation-short','9:16','secondary')+btn('orientation-wide','16:9','secondary')+'</div></div>'+previewHTML+'<div class="row wrap" style="margin-top:16px;justify-content:center">'+btn('play-preview','▶ Reproducir')+btn('pause-preview','Ⅱ Pausa','secondary')+btn('stop-preview','■ Detener','secondary')+'</div><p class="muted mini">La vista previa permite revisar el encuadre; la composición MP4 final se procesa con FFmpeg.</p></div>'+
  '<div class="panel"><h2>Recortes de voz y silencios</h2><p class="muted mini">Silencios desde 0,5 segundos: rojo = se elimina; gris = se conserva. Nada se borra del original.</p>'+
  '<div class="two"><div class="field"><label>Inicio (segundos)</label><input type="number" min="0" step="0.1" data-field="start" value="'+(s.start||0)+'"></div><div class="field"><label>Final (segundos)</label><input type="number" min="0" step="0.1" data-field="end" value="'+(s.end||0)+'"></div></div>'+
+ '<div class="field"><label>Barras de recorte · inicio y final</label><input type="range" data-field="start" min="0" max="'+(state.videoDurations[p.id+':'+s.video]||Math.max(1,s.end||180))+'" step="0.1" value="'+(s.start||0)+'"><input type="range" data-field="end" min="0" max="'+(state.videoDurations[p.id+':'+s.video]||Math.max(1,s.end||180))+'" step="0.1" value="'+(s.end||0)+'"></div>'+
  silenceTimeline(s)+'<div class="row wrap" style="margin-top:12px">'+btn('detect-silences','Detectar silencios')+btn('mark-all','Marcar todos','secondary')+btn('unmark-all','Conservar todos','secondary')+'</div></div></section>'+
  '<section><div class="panel"><h2>'+names[state.scene]+'</h2><div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+'</div></div>'+
  '<div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
@@ -86,7 +104,19 @@ function render(){
  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.action===(page==='project'?'home':page==='week'?'weeks':page)));
 }
 async function navigate(page){state.page=page;state.status='';await loadLibrary();render()}
-async function openProject(id,scene='hook'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation='short';state.page='project';state.status='';render()}
+async function refreshWaveform(){
+ const p=state.project,s=p?.scenes[state.scene];if(!p||!s?.video)return;
+ const id=p.id+':'+s.video;
+ try{
+  const [points,info]=await Promise.all([
+   state.waveforms[id]||api('media:waveform',{projectId:p.id,assetId:s.video}),
+   state.videoDurations[id]?{duration:state.videoDurations[id]}:api('media:metadata',{projectId:p.id,assetId:s.video})
+  ]);
+  state.waveforms[id]=points;state.videoDurations[id]=info.duration;
+  if(state.page==='project'&&state.project?.id===p.id&&state.project.scenes[state.scene].video===s.video)render();
+ }catch(e){console.warn('No se pudo generar la forma de onda:',e)}
+}
+async function openProject(id,scene='hook'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation='short';state.page='project';state.status='';render();refreshWaveform()}
 async function openWeek(id){state.week=await api('weekly:get',{id});state.page='week';state.status='';state.weekLength=0;render();state.weekLength=await weeklyDuration();if(state.page==='week')render()}
 let saving=null;
 function queueSave(){clearTimeout(saving);saving=setTimeout(async()=>{try{if(state.project)await api('projects:save',state.project)}catch(e){notice(e.message,true)}},250)}
@@ -104,7 +134,7 @@ async function importFor(target){
   for(const item of files.filter(f=>f.type==='image'||f.type==='video'))s.media.push({assetId:item.id,start:0,end:0,speed:1});
   s.approved=false;
  }
- await saveNow();render();notice('Archivo copiado a la biblioteca local');
+ await saveNow();render();if(target==='voice')refreshWaveform();notice('Archivo copiado a la biblioteca local');
 }
 async function detect(){const p=state.project,s=p.scenes[state.scene];if(!s.video)throw Error('Importa primero un video');
  notice('Analizando pausas del audio…');
@@ -141,7 +171,7 @@ async function stopRecording(){
  state.project=await api('projects:get',{id:state.project.id});
  const s=state.project.scenes[state.scene];const info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
  s.video=item.id;s.start=0;s.end=Math.min(info.duration,180);s.silences=[];s.approved=false;
- await saveNow();$('#modal-root').hidden=true;render();notice('Grabación guardada en disco D');
+ await saveNow();$('#modal-root').hidden=true;render();refreshWaveform();notice('Grabación guardada en disco D');
 }
 async function exportNow(kind){const key=kind==='short'?'render:short':'render:weekly';state.status='Preparando exportación local con FFmpeg…';state.progress=3;render();try{
  const result=await api(key,kind==='short'?{projectId:state.project.id}:{id:state.week.id});
@@ -163,7 +193,7 @@ document.addEventListener('click',async e=>{
   if(action==='new-week'){
    const w=await api('weekly:create',{title:'Récords de la semana'});await loadLibrary();return await openWeek(w.id)
   }
-  if(action==='scene'){await saveNow();state.scene=b.dataset.id;return render()}
+  if(action==='scene'){await saveNow();state.scene=b.dataset.id;render();return refreshWaveform()}
   if(action==='import-voice')return await importFor('voice');
   if(action==='import-media')return await importFor('media');
   if(action==='detect-silences')return await detect();
@@ -208,7 +238,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('change',e=>{
  const p=state.project;if(!p||state.page!=='project')return;
  const s=p.scenes[state.scene],el=e.target;
- if(el.dataset.field){s[el.dataset.field]=['start','end','scale'].includes(el.dataset.field)?Number(el.value):el.value;s.approved=false;queueSave();if(el.dataset.field==='layout'||el.dataset.field==='position')render()}
+ if(el.dataset.field){s[el.dataset.field]=['start','end','scale'].includes(el.dataset.field)?Number(el.value):el.value;s.approved=false;queueSave();if(el.dataset.field==='start'||el.dataset.field==='end')render()}
  else if(el.dataset.formatField){
    if(!s.formats)s.formats={};
    if(!s.formats[state.orientation])s.formats[state.orientation]={};
