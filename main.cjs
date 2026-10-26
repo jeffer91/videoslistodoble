@@ -55,6 +55,7 @@ app.whenReady().then(()=>{
   });
   register('settings:get',()=>store.getSettings(ROOT));
   register('settings:set',x=>store.saveSettings(ROOT,x));
+  register('media:waveform',x=>media.waveform(store.resolveAsset(ROOT,x.projectId,x.assetId)));
   register('media:metadata',x=>media.probe(store.resolveAsset(ROOT,x.projectId,x.assetId)));
   register('media:analyze',x=>media.detectSilences(store.resolveAsset(ROOT,x.projectId,x.assetId),x.threshold));
   register('weekly:list',()=>store.listWeeks(ROOT));
