@@ -17,11 +17,24 @@ function home(){const list=state.projects.filter(p=>p.status!=='auxiliary');retu
 function weeksPage(){return titlebar('Compilaciones semanales','La app incorpora automáticamente los Shorts exportados que aún no se han utilizado.',btn('new-week','＋ Crear recopilación'))+(state.weeks.length?'<div class="grid">'+state.weeks.map(w=>'<article class="card" data-action="open-week" data-id="'+esc(w.id)+'"><div class="row between"><span class="pill">'+(w.exportedAt?'Exportada':'En edición')+'</span><small>'+new Date(w.createdAt).toLocaleDateString('es-EC')+'</small></div><h3>'+esc(w.title)+'</h3><small>'+w.projectIds.length+' récords</small><strong>Revisar →</strong></article>').join('')+'</div>':'<div class="empty">Todavía no hay recopilaciones. Exporta Shorts y crea el primer video largo.</div>')}
 function assetLabel(asset){return asset.type==='video'?'▣':asset.type==='image'?'▧':'♫'}
 function assetPicker(p,onlyVideo){const as=p.assets.filter(a=>onlyVideo?a.type==='video':a.type==='video'||a.type==='image');return as.map(a=>'<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>').join('')}
-function mediaRows(){const p=state.project,s=p.scenes[state.scene];if(state.scene==='closing')return '<p class="muted mini">El cierre presenta al narrador en primer plano, sin fotografías de apoyo.</p>';
+function mediaRows(){
+ const p=state.project,s=p.scenes[state.scene];
+ if(state.scene==='closing')return '<p class="muted mini">El cierre presenta al narrador en primer plano y no necesita recursos de apoyo.</p>';
  return '<div class="list">'+(s.media||[]).map((m,i)=>{
   const a=p.assets.find(x=>x.id===m.assetId);if(!a)return '';
-  return '<div class="asset"><div class="row"><span class="fileicon">'+assetLabel(a)+'</span><div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div><div class="row wrap">'+(a.type==='video'?'<label class="mini">Velocidad <select data-media-speed="'+i+'"><option value="1" '+(m.speed===1?'selected':'')+'>1,0×</option><option value="1.1" '+(m.speed===1.1?'selected':'')+'>1,1×</option><option value="1.2" '+(m.speed===1.2?'selected':'')+'>1,2×</option></select></label>':'')+btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>';
- }).join('')+'</div>'+(state.scene==='hook'?'<small>En el gancho se utiliza el primer recurso como fotografía o video de apoyo.</small>':'<small>En desarrollo puedes combinar fotos y clips; se distribuyen automáticamente durante la narración.</small>')}
+  let controls='';
+  if(a.type==='video'){
+   controls='<div class="row wrap" style="margin-top:9px">'+
+    '<label class="mini">Desde (s) <input style="width:76px" type="number" min="0" step=".1" data-media-start="'+i+'" value="'+(m.start||0)+'"></label>'+
+    '<label class="mini">Hasta (s, 0 = final) <input style="width:80px" type="number" min="0" step=".1" data-media-end="'+i+'" value="'+(m.end||0)+'"></label>'+
+    '<label class="mini">Velocidad <select data-media-speed="'+i+'">'+[1,1.1,1.2].map(v=>'<option value="'+v+'" '+(Number(m.speed||1)===v?'selected':'')+'>'+v.toFixed(1)+'×</option>').join('')+'</select></label>'+
+    '<label class="mini"><input type="checkbox" data-media-micro="'+i+'" '+(m.microcuts!==false?'checked':'')+'> Microcortes</label>'+
+    '</div>';
+  }
+  return '<div class="asset" style="display:block"><div class="row between"><div class="row"><span class="fileicon">'+assetLabel(a)+'</span><div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
+   '<div class="row">'+btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
+ }).join('')+'</div><p class="muted mini">Los recursos se muestran en secuencia. Para videos, marca la parte interesante de la jugada: el programa distribuye clips cortos dentro de esa selección.</p>';
+}
 function waveformHTML(scene){
  const project=state.project;if(!project||!scene.video)return '';
  const id=project.id+':'+scene.video,peaks=state.waveforms[id]||[];
@@ -131,7 +144,7 @@ async function importFor(target){
   const s=state.project.scenes[state.scene];s.video=item.id;s.start=0;s.end=Math.min(180,info.duration);s.silences=[];s.approved=false;
  }else{
   const s=state.project.scenes[state.scene];if(!s.media)s.media=[];
-  for(const item of files.filter(f=>f.type==='image'||f.type==='video'))s.media.push({assetId:item.id,start:0,end:0,speed:1});
+  for(const item of files.filter(f=>f.type==='image'||f.type==='video'))s.media.push({assetId:item.id,start:0,end:0,speed:1,microcuts:true});
   s.approved=false;
  }
  await saveNow();render();if(target==='voice')refreshWaveform();notice('Archivo copiado a la biblioteca local');
@@ -247,6 +260,9 @@ document.addEventListener('change',e=>{
  }
  else if(el.dataset.projectField){p[el.dataset.projectField]=el.value;order.forEach(k=>p.scenes[k].approved=false);queueSave();render()}
  else if(el.dataset.mediaSpeed!==undefined){s.media[Number(el.dataset.mediaSpeed)].speed=Number(el.value)||1;s.approved=false;queueSave()}
+ else if(el.dataset.mediaStart!==undefined){s.media[Number(el.dataset.mediaStart)].start=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
+ else if(el.dataset.mediaEnd!==undefined){s.media[Number(el.dataset.mediaEnd)].end=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
+ else if(el.dataset.mediaMicro!==undefined){s.media[Number(el.dataset.mediaMicro)].microcuts=el.checked;s.approved=false;queueSave()}
 });
 document.addEventListener('input',e=>{
  const el=e.target;if(el.dataset.field==='title'&&state.page==='project'){state.project.scenes[state.scene].title=el.value;state.project.scenes[state.scene].approved=false;queueSave()}
