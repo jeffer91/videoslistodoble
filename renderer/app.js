@@ -198,8 +198,15 @@ document.addEventListener('click',async e=>{
   if(['home','weeks','settings','legacy'].includes(action))return await navigate(action);
   if(action==='back')return await navigate('home');
   if(action==='new'){
-   const name=prompt('Título del nuevo récord:','Nuevo récord');if(!name||!name.trim())return;
-   const p=await api('projects:create',{title:name.trim()});await loadLibrary();return await openProject(p.id)
+   const modal=$('#modal-root');modal.hidden=false;
+   modal.innerHTML='<div class="modalback"><div class="modal"><h2>Crear nuevo récord</h2><div class="field"><label>Título del récord</label><input id="new-project-title" maxlength="120" placeholder="Escribe el récord que vas a producir"></div><div class="row">'+btn('confirm-new','Crear proyecto')+btn('modal-close','Cancelar','secondary')+'</div></div></div>';
+   $('#new-project-title').focus();return;
+  }
+  if(action==='confirm-new'){
+   const title=$('#new-project-title')?.value.trim();
+   if(!title)throw Error('Escribe un título antes de crear el proyecto');
+   $('#modal-root').hidden=true;
+   const p=await api('projects:create',{title});await loadLibrary();return await openProject(p.id);
   }
   if(action==='open-project'){state.editingWeekId=null;return await openProject(b.dataset.id)}
   if(action==='open-week')return await openWeek(b.dataset.id);
@@ -217,7 +224,7 @@ document.addEventListener('click',async e=>{
    if(action==='remove-media')s.media.splice(i,1);else if(j>=0&&j<s.media.length)[s.media[i],s.media[j]]=[s.media[j],s.media[i]];
    s.approved=false;queueSave();return render();
   }
-  if(action==='approve-scene'){const s=state.project.scenes[state.scene];if(!s.video)throw Error('Primero sube o graba el video principal');
+  if(action==='approve-scene'){const s=state.project.scenes[state.scene];if(!s.video)throw Error('Primero sube o graba el video principal');if(state.scene!=='closing'&&!(s.media||[]).length)throw Error('Añade al menos una fotografía o video de apoyo');if(Number(s.end)<=Number(s.start))throw Error('El fragmento debe tener una duración positiva');
    s.approved=!s.approved;await saveNow();return render()}
   if(action==='orientation-short'||action==='orientation-wide'){state.orientation=action==='orientation-wide'?'wide':'short';return render()}
   if(action==='play-preview')return playback();
