@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+concurrency:
+  group: windows-desktop-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test-and-build:
     runs-on: windows-latest
