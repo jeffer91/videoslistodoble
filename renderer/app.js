@@ -289,7 +289,7 @@ async function ensurePreview(projectId,assetId,force=false){
  if(!force&&state.previewUrls[key])return state.previewUrls[key];
  if(state.previewPending[key])return state.previewPending[key];
  const task=(async()=>{
-  const result=await api('media:preview',{projectId,assetId});
+  const result=await api('media:preview',{projectId,assetId,force});
   state.previewUrls[key]=result.url;delete state.previewErrors[key];
   return result.url;
  })().finally(()=>{delete state.previewPending[key]});
@@ -318,14 +318,15 @@ async function prepareScenePreview(force=false){
   previewMessage(message,true);return;
  }
  const src=tasks[0].value,video=$('#speaker-preview'),frozen=$('#speaker-frozen');
- if(video&&video.dataset.asset===assetId&&video.getAttribute('src')!==src){video.src=src;video.load()}
- if(frozen&&frozen.getAttribute('src')!==src)frozen.src=src;
+ if(video&&video.dataset.asset===assetId&&(force||video.getAttribute('src')!==src)){video.src=src;video.load()}
+ if(frozen&&(force||frozen.getAttribute('src')!==src)){frozen.src=src;frozen.load()}
  previewMessage(tasks[1].status==='fulfilled'?'Video y secuencia listos':'Video listo. No se pudo calcular la secuencia.',tasks[1].status!=='fulfilled');
  updateMediaPreview(Number(video?.currentTime)||0);
 }
 function updateMediaPreview(t){
  if(state.page!=='project'||!state.project)return;
  const segments=state.previewTimelines[mediaKey()]||[];
+ if(!segments.length)return;
  const part=segments.find(x=>t>=x.start-.002&&t<x.end-.002);
  const assetId=part?.assetId,kind=part?.type;
  const photo=$('#support-image'),clip=$('#support-video');

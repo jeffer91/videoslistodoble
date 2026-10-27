@@ -12,6 +12,7 @@ const logos = require('./backend/logo.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.platform === 'win32' ? 'D:\\11-Records-Studio' : (process.env.RECORDS_TEST_ROOT || path.join(os.homedir(),'11-Records-Studio'));
+app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 protocol.registerSchemesAsPrivileged([{scheme:'records',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 function safeError(e){return String(e && e.message || e).slice(0,500)}
 function assetUrl(projectId,assetId){return 'records://asset/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId)}
@@ -143,7 +144,7 @@ app.whenReady().then(()=>{
   register('templates:delete',x=>templates.remove(ROOT,x.id,store));
   register('settings:get',()=>store.getSettings(ROOT));
   register('settings:set',x=>store.saveSettings(ROOT,x));
-  register('media:preview',x=>media.preparePreview(ROOT,x.projectId,x.assetId));
+  register('media:preview',x=>media.preparePreview(ROOT,x.projectId,x.assetId,x.force===true));
   register('media:timeline',x=>media.getPreviewTimeline(ROOT,x.projectId,x.scene));
   register('media:waveform',x=>media.waveform(store.resolveAsset(ROOT,x.projectId,x.assetId)));
   register('media:metadata',x=>media.probe(store.resolveAsset(ROOT,x.projectId,x.assetId)));

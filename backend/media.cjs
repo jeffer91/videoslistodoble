@@ -114,7 +114,7 @@ function splitByEdits(entries,cuts=[]){
 
 const crypto=require('node:crypto');
 const previewPromises=new Map();
-async function preparePreview(root,projectId,assetId){
+async function preparePreview(root,projectId,assetId,force=false){
  const source=store.resolveAsset(root,projectId,assetId);
  const asset=store.getProject(root,projectId).assets.find(a=>a.id===assetId);
  if(!asset||asset.type!=='video')throw Error('El recurso no es un video');
@@ -122,7 +122,7 @@ async function preparePreview(root,projectId,assetId){
  const fingerprint=crypto.createHash('sha256').update(String(stat.size)+':'+String(stat.mtimeMs)).digest('hex').slice(0,12);
  const folder=path.join(root,'Proyectos',projectId,'Previews');
  const out=path.join(folder,assetId+'-'+fingerprint+'.mp4');
- if(fs.existsSync(out)&&fs.statSync(out).size>1000)return {url:'records://preview/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId),duration:(await probe(out)).duration};
+ if(!force&&fs.existsSync(out)&&fs.statSync(out).size>1000)return {url:'records://preview/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId),duration:(await probe(out)).duration};
  const key=projectId+':'+assetId+':'+fingerprint;
  if(!previewPromises.has(key)){
   previewPromises.set(key,(async()=>{
@@ -137,6 +137,7 @@ async function preparePreview(root,projectId,assetId){
      '-avoid_negative_ts','make_zero','-movflags','+faststart',
      '-max_muxing_queue_size','1024',temp]);
     if(!fs.existsSync(temp)||fs.statSync(temp).size<1000)throw Error('No se produjo un video compatible');
+    if(force&&fs.existsSync(out))fs.rmSync(out,{force:true});
     fs.renameSync(temp,out);
    }finally{if(fs.existsSync(temp))fs.rmSync(temp,{force:true})}
   })().finally(()=>previewPromises.delete(key)));
