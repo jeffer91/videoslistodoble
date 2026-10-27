@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const store = require('./backend/store.cjs');
 const media = require('./backend/media.cjs');
 const images = require('./backend/image-import.cjs');
+const templates = require('./backend/templates.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.platform === 'win32' ? 'D:\\11-Records-Studio' : (process.env.RECORDS_TEST_ROOT || path.join(os.homedir(),'11-Records-Studio'));
@@ -28,6 +29,13 @@ app.whenReady().then(()=>{
   protocol.handle('records',request=>{
     try{
       const u=new URL(request.url);
+      if(u.hostname==='template'){
+        const ids=u.pathname.split('/').filter(Boolean);
+        if(ids.length!==1)throw Error('Ruta de plantilla inválida');
+        const filename=templates.resolve(ROOT,decodeURIComponent(ids[0]));
+        const {net}=require('electron');
+        return net.fetch(require('node:url').pathToFileURL(filename).toString());
+      }
       if(u.hostname==='settings'&&u.pathname==='/logo') { const settings=store.getSettings(ROOT);if(!settings.logo)throw Error('No hay logo');const {net}=require('electron');return net.fetch(require('node:url').pathToFileURL(settings.logo).toString()) }
       if(u.hostname!=='asset') throw Error('Host no permitido');
       const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
@@ -82,6 +90,32 @@ app.whenReady().then(()=>{
     if(sel.canceled||!sel.filePaths.length)return null;
     return store.importLogo(ROOT,sel.filePaths[0]);
   });
+  register('templates:list',()=>templates.list(ROOT));
+  register('templates:import',async x=>{
+    const format=x.format;
+    if(!['short','wide'].includes(format))throw Error('Formato inválido');
+    const imagesTypes=images.IMAGE_EXTENSIONS.map(e=>e.slice(1));
+    const choice=await dialog.showOpenDialog(win,{
+      title:format==='wide'?'Importar fondos para videos 16:9':'Importar fondos para Shorts 9:16',
+      properties:['openFile','multiSelections'],
+      filters:[{name:'Imágenes',extensions:imagesTypes},{name:'Todos los archivos',extensions:['*']}]
+    });
+    const files=[],errors=[];
+    if(choice.canceled)return {files,errors};
+    for(const file of choice.filePaths){
+      try{files.push(await templates.importFile(ROOT,file,format))}
+      catch(e){errors.push({name:path.basename(file),message:safeError(e)})}
+    }
+    return {files,errors};
+  });
+  register('templates:paste',async x=>{
+    const picture=clipboard.readImage();
+    if(picture.isEmpty())throw Error('Copia primero una imagen al portapapeles');
+    return templates.pasteImage(ROOT,picture.toPNG(),x.format);
+  });
+  register('templates:set-default',x=>templates.setDefault(ROOT,x.format,x.id,store));
+  register('templates:rename',x=>templates.rename(ROOT,x.id,x.name));
+  register('templates:delete',x=>templates.remove(ROOT,x.id,store));
   register('settings:get',()=>store.getSettings(ROOT));
   register('settings:set',x=>store.saveSettings(ROOT,x));
   register('media:waveform',x=>media.waveform(store.resolveAsset(ROOT,x.projectId,x.assetId)));

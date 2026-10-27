@@ -1,6 +1,7 @@
 'use strict';
 const path=require('node:path'),fs=require('node:fs'),os=require('node:os'),{spawn}=require('node:child_process');
 const store=require('./store.cjs');
+const templates=require('./templates.cjs');
 const bins={};
 function toolPath(which){
  if(bins[which])return bins[which];
@@ -111,7 +112,7 @@ function splitByEdits(entries,cuts=[]){
 }
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
 function ffFont(){return process.platform==='win32'?"fontfile='"+ffFilterPath(path.join(process.env.WINDIR||'C:/Windows','Fonts','arialbd.ttf'))+"'":'font=Sans'}
-function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme,freezeVideo=false){
+function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme,freezeVideo=false,templateIndex=null){
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const contentW=wide?1380:930,contentH=wide?825:1160;
  const pos=appearance?.position||(wide?'right':'left');
@@ -124,10 +125,16 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  if(freezeVideo)f.push('[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3600[frozen]');
  if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed))).toFixed(3)+'[timed]');
  const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
- f.push(bgInput+'split=2[back][foreground]');
- const lowW=Math.ceil(W/5),lowH=Math.ceil(H/5);
- f.push('[back]scale='+lowW+':'+lowH+':force_original_aspect_ratio=increase,crop='+lowW+':'+lowH+',boxblur=8:1,scale='+W+':'+H+':flags=bicubic[blur]');
- f.push('[foreground]scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
+ if(Number.isInteger(templateIndex)){
+  // La plantilla sustituye solo el fondo. La fotografía o clip de apoyo permanece delante.
+  f.push('['+templateIndex+':v]scale='+W+':'+H+':force_original_aspect_ratio=increase,crop='+W+':'+H+',setsar=1[blur]');
+  f.push(bgInput+'scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
+ }else{
+  f.push(bgInput+'split=2[back][foreground]');
+  const lowW=Math.ceil(W/5),lowH=Math.ceil(H/5);
+  f.push('[back]scale='+lowW+':'+lowH+':force_original_aspect_ratio=increase,crop='+lowW+':'+lowH+',boxblur=8:1,scale='+W+':'+H+':flags=bicubic[blur]');
+  f.push('[foreground]scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
+ }
  f.push('[blur][center]overlay=(W-w)/2:'+(wide?'(H-h)/2':'(H-h)/2')+'[base]');
  if(withPresenter){
   f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
@@ -149,7 +156,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
-async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={}){
+async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={},templateFile=null){
  if(!(length>.06))return;
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
@@ -162,12 +169,14 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
   else args.push('-stream_loop','-1','-ss',String(mediaStart),'-i',mediaAsset.file);
  }
  if(hasLogo)args.push('-loop','1','-i',logo);
+ const templateIndex=templateFile?1+(withPresenter?1:0)+(hasLogo?1:0):null;
+ if(templateFile)args.push('-loop','1','-i',templateFile);
  if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
- const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,appearance,speed,theme,edit.freezeVideo===true);
+ const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,appearance,speed,theme,edit.freezeVideo===true,templateIndex);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
  if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,dynaudnorm=f=150:g=15'+(edit.muteAudio?',volume=0':''));
- else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0))+':a:0');
+ else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0))+':a:0');
  args.push('-t',String(length),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
  await command(toolPath('ffmpeg'),args,signal,null,ctx);
@@ -206,12 +215,14 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   return {file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
  }));
  const entries=splitByEdits(timeline(scene,voiceInfo.duration,media),scene.cuts||[]);
+ const templateId=p.backgrounds?.[wide?'wide':'short'];
+ const templateFile=templateId?templates.resolve(root,templateId,wide?'wide':'short'):null;
  const appearance=scene.formats?.[wide?'wide':'short']||scene;
  const segments=[];
  for(let i=0;i<entries.length;i++){
   if(signal.aborted)throw Error('Cancelado');
   const m=entries[i],output=path.join(tmp,'part-'+String(fs.readdirSync(tmp).length).padStart(5,'0')+'.mp4');
-  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,m);
+  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,m,templateFile);
   segments.push(output);
  }
  return {segments,duration:length};
@@ -272,4 +283,4 @@ async function exportWeekly(root,id,signal,send){
   send({type:'complete',file:output});return {file:output,duration:sum};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,exportShort,exportWeekly,toolPath};
+module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,exportShort,exportWeekly,toolPath};

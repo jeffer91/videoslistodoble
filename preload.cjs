@@ -3,6 +3,7 @@ const {contextBridge,ipcRenderer} = require('electron');
 const allowed = new Set([
   'projects:list','projects:create','projects:get','projects:save','projects:delete',
   'assets:import','assets:paste-image','assets:record','assets:import-logo','settings:get','settings:set',
+  'templates:list','templates:import','templates:paste','templates:set-default','templates:rename','templates:delete',
   'media:analyze','media:metadata','media:waveform','render:short','render:weekly','render:cancel',
   'weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
 ]);

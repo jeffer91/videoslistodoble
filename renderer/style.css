@@ -109,3 +109,31 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .wave-loading button{justify-self:start}
 .wave-error{background:#392e18;color:#f6dca1;padding:8px 10px;border-radius:7px;font-size:11px;line-height:1.5}
 .wave-error button{margin-left:8px;padding:3px 8px}
+
+
+/* Biblioteca de plantillas de fondo */
+.stage .template-back{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
+.template-project-choice{padding:7px;border:1px solid var(--line);border-radius:8px;background:#0e2016;min-height:66px}
+.template-project-choice>img{width:48px;height:58px;object-fit:cover;border-radius:6px;flex:none}
+.template-empty{width:48px;height:58px;border-radius:6px;border:1px dashed #54735b;display:grid;place-items:center;background:#263b2d;color:#a7bdab;font-size:10px;flex:none;text-align:center}
+.template-choice-info{flex:1;min-width:0;display:grid;gap:4px}
+.template-choice-info strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.template-choice-info small{display:block;font-size:10px}
+.template-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.template-section h3{margin-bottom:5px}
+.template-toolbar{margin:10px 0}
+.template-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:10px}
+.template-tile{background:#15291e;border:1px solid #355640;padding:8px;border-radius:10px;display:grid;align-content:start;gap:8px;min-width:0}
+.template-tile>img{width:100%;height:132px;object-fit:contain;background:#0a160f;border-radius:5px}
+.template-tile>strong{font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.template-tile>.pill{justify-self:start}
+.template-tile .row{gap:4px}
+.template-tile button{font-size:10px;padding:6px 7px}
+.template-picker{width:min(820px,100%);max-height:88vh;overflow-y:auto}
+.template-picker h2{margin-bottom:0}
+.template-picker>.row.wrap{margin:12px 0}
+.template-choice{border:1px solid #416e50;padding:8px;background:#172c20;border-radius:9px;display:grid;gap:6px;text-align:center;align-content:start;font-size:11px;min-height:130px}
+.template-choice.selected{border:2px solid #50d988;background:#19522f}
+.template-choice img{width:100%;height:115px;object-fit:contain;background:#08160f;border-radius:6px}
+.template-choice span{overflow-wrap:anywhere}
+@media(max-width:920px){.template-project-choice{flex-wrap:wrap}.template-project-choice button{width:100%}}
