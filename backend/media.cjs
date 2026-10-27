@@ -25,9 +25,24 @@ async function command(exe,args,signal,onLine,cwd){
  });
 }
 async function probe(file){
- const r=await command(toolPath('ffprobe'),['-v','error','-show_entries','format=duration:stream=codec_type','-of','json',file]);
- const data=JSON.parse(r.stdout);
- return {duration:Math.max(0,Number(data.format?.duration)||0),hasAudio:(data.streams||[]).some(x=>x.codec_type==='audio')};
+ const r=await command(toolPath('ffprobe'),['-v','error','-show_entries',
+  'format=duration:stream=codec_type,duration','-of','json',file]);
+ const data=JSON.parse(r.stdout),streams=data.streams||[];
+ const numeric=x=>Number.isFinite(Number(x))&&Number(x)>0?Number(x):0;
+ let duration=Math.max(numeric(data.format?.duration),...streams.map(s=>numeric(s.duration)),0);
+ // MediaRecorder de Electron genera WebM sin duración en los encabezados.
+ // Recuperamos el tiempo del último paquete real sin alterar la grabación.
+ if(!duration){
+  const packets=await command(toolPath('ffprobe'),['-v','error','-select_streams','v:0',
+   '-show_entries','packet=pts_time,dts_time,duration_time','-of','compact=p=0:nk=0',file]);
+  for(const line of packets.stdout.split(/\r?\n/)){
+   const pts=/\bpts_time=([0-9.]+)/.exec(line)||/\bdts_time=([0-9.]+)/.exec(line);
+   if(!pts)continue;
+   const packetDuration=/\bduration_time=([0-9.]+)/.exec(line);
+   duration=Math.max(duration,Number(pts[1])+(packetDuration?Number(packetDuration[1]):0));
+  }
+ }
+ return {duration,hasAudio:streams.some(x=>x.codec_type==='audio')};
 }
 async function detectSilences(file,threshold){
  const sec=Math.max(.5,Math.min(5,Number(threshold)||.5));

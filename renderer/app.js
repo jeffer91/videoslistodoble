@@ -1,6 +1,6 @@
 'use strict';
 const $=s=>document.querySelector(s);
-const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},status:'',progress:0,recordStream:null,recordCapture:null,recordTimer:null,recorder:null,recordParts:[],recordDraft:null,recordDraftUrl:null,recordFormat:'square',recordStartAt:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},videoDurations:{},showSafe:false,previewIndex:-1};
+const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},status:'',progress:0,recordStream:null,recordCapture:null,recordTimer:null,recorder:null,recordParts:[],recordDraft:null,recordDraftUrl:null,recordFormat:'square',recordStartAt:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},waveErrors:{},videoDurations:{},showSafe:false,previewIndex:-1};
 const names={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
 const order=['hook','body','closing'];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -39,7 +39,9 @@ function mediaRows(){
 function editorDuration(){
  if(!state.project)return 0;
  const scene=state.project.scenes[state.scene];
- return Math.min(180,Math.max(0,Number(state.videoDurations[state.project.id+':'+scene.video]||scene.end||0)));
+ const id=state.project.id+':'+scene.video,el=$('#speaker-preview');
+ const fromVideo=Number(el?.duration),duration=Number(state.videoDurations[id])||Number(scene.end)|| (Number.isFinite(fromVideo)?fromVideo:0);
+ return Math.min(180,Math.max(0,duration));
 }
 function rangeSelection(){
  const duration=editorDuration(),a=Math.max(0,Math.min(duration,Number(state.cutSelection.start)||0));
@@ -69,15 +71,16 @@ function editTypeName(mode){return mode==='audio'?'Silenciar audio':mode==='vide
 function waveformEditorHTML(scene){
  const id=state.project.id+':'+scene.video,peaks=state.waveforms[id]||[],duration=editorDuration();
  if(!scene.video)return '<p class="muted mini">Importa o graba un video para editarlo.</p>';
- if(!duration||!peaks.length)return '<p class="muted mini">Preparando ondas y duración del audio…</p>';
+ if(!duration)return '<div class="wave-loading"><strong>Preparando editor de recortes…</strong><p class="muted mini">'+esc(state.waveErrors[id]||'Leyendo duración de la grabación. Los marcadores aparecerán automáticamente.')+'</p>'+btn('retry-waveform','↻ Reintentar carga','secondary')+'</div>';
  const selection=rangeSelection(),zoom=Math.max(1,Math.min(8,Number(state.cutZoom)||1));
  const width=Math.min(23000,Math.round(Math.max(590,duration*4)*zoom));
- const count=Math.min(peaks.length,Math.ceil(width/2.6)),barWidth=width/count;
+ const viewPeaks=peaks.length?peaks:Array.from({length:Math.min(1800,Math.ceil(duration*10))},()=>0);
+ const count=Math.min(viewPeaks.length,Math.ceil(width/2.6)),barWidth=width/count;
  const rendered=[];
- const actualWaveDuration=Math.min(180,duration),sampleStep=actualWaveDuration/peaks.length;
+ const actualWaveDuration=Math.min(180,duration),sampleStep=actualWaveDuration/viewPeaks.length;
  for(let i=0;i<count;i++){
-  const index=Math.min(peaks.length-1,Math.floor(i*peaks.length/count));
-  const t=index*sampleStep,peak=Math.min(1,Number(peaks[index])||0);
+  const index=Math.min(viewPeaks.length-1,Math.floor(i*viewPeaks.length/count));
+  const t=index*sampleStep,peak=Math.min(1,Number(viewPeaks[index])||0);
   const height=Math.max(2,peak*56);
   rendered.push('<rect x="'+(i*barWidth).toFixed(2)+'" y="'+((66-height)/2).toFixed(2)+'" width="'+Math.max(1,barWidth-.8).toFixed(2)+'" height="'+height.toFixed(2)+'" fill="#76bce8" rx=".6"/>');
  }
@@ -92,7 +95,7 @@ function waveformEditorHTML(scene){
  }).join('');
  const ticks=[];const step=duration<=12?1:duration<=30?2:duration<=70?5:10;
  for(let t=0;t<=duration;t+=step)ticks.push('<span class="wave-tick" style="left:'+(100*t/duration)+'%">'+fmt(t)+'</span>');
- return '<div class="wave-editor">'+
+ return '<div class="wave-editor">'+(state.waveErrors[id]?'<p class="wave-error">'+esc(state.waveErrors[id])+' '+btn('retry-waveform','Reintentar','secondary')+'</p>':'')+
   '<div class="row between wave-controls"><strong>Ondas de voz</strong><label class="row mini">Zoom <input type="range" data-cut-zoom min="1" max="8" step="1" value="'+zoom+'"> '+zoom+'×</label></div>'+
   '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px" data-wave-seek="1">'+
    '<div class="wave-ruler">'+ticks.join('')+'</div>'+
@@ -194,20 +197,48 @@ function render(){
 }
 async function navigate(page){state.page=page;state.status='';await loadLibrary();render()}
 async function refreshWaveform(){
- const p=state.project,s=p?.scenes[state.scene];if(!p||!s?.video)return;
- const id=p.id+':'+s.video;
- try{
-  const [points,info]=await Promise.all([
-   state.waveforms[id]||api('media:waveform',{projectId:p.id,assetId:s.video}),
-   state.videoDurations[id]?{duration:state.videoDurations[id]}:api('media:metadata',{projectId:p.id,assetId:s.video})
-  ]);
-  state.waveforms[id]=points;state.videoDurations[id]=info.duration;
-  if(state.page==='project'&&state.project?.id===p.id&&state.project.scenes[state.scene].video===s.video){
-   if(!(Number(s.end)>Number(s.start))&&info.duration>0){s.start=0;s.end=Math.min(180,info.duration);queueSave()}
+ const p=state.project,sceneKey=state.scene,s=p?.scenes[sceneKey];if(!p||!s?.video)return;
+ const asset=s.video,id=p.id+':'+asset,payload={projectId:p.id,assetId:asset};
+ const active=()=>state.page==='project'&&state.project?.id===p.id&&state.scene===sceneKey&&state.project.scenes[sceneKey].video===asset;
+ const draw=()=>{if(active())render()};
+ // Leer duración y onda por separado: un error de audio no debe bloquear los marcadores.
+ const durationTask=(async()=>{
+  try{
+   const info=state.videoDurations[id]?{duration:state.videoDurations[id]}:await api('media:metadata',payload);
+   if(!active())return;
+   const seconds=Number(info.duration);
+   if(!Number.isFinite(seconds)||seconds<=0)throw Error('No se pudo medir la duración de la grabación');
+   state.videoDurations[id]=seconds;
+   delete state.waveErrors[id];
+   if(!(Number(s.end)>Number(s.start))){s.start=0;s.end=Math.min(180,seconds);queueSave()}
    state.cutSelection.end=Math.min(editorDuration(),Math.max(.08,Number(state.cutSelection.end)||1));
-   render();
+   draw();
+  }catch(e){
+   if(!active())return;
+   const v=$('#speaker-preview'),fromVideo=Number(v?.duration);
+   if(Number.isFinite(fromVideo)&&fromVideo>0){
+    state.videoDurations[id]=fromVideo;
+    if(!(Number(s.end)>Number(s.start))){s.end=Math.min(180,fromVideo);queueSave()}
+   }else state.waveErrors[id]='No se pudo leer la duración: '+e.message;
+   draw();console.warn('Duración de video:',e);
   }
- }catch(e){console.warn('No se pudo generar la forma de onda:',e)}
+ })();
+ const audioTask=(async()=>{
+  try{
+   const peaks=Array.isArray(state.waveforms[id])?state.waveforms[id]:await api('media:waveform',payload);
+   if(!active())return;
+   state.waveforms[id]=Array.isArray(peaks)?peaks:[];
+   if(!state.waveforms[id].length)state.waveErrors[id]='La pista de audio no contiene ondas; todavía puedes marcar recortes.';
+   else delete state.waveErrors[id];
+   draw();
+  }catch(e){
+   if(!active())return;
+   state.waveforms[id]=[];
+   state.waveErrors[id]='No se pudo dibujar la onda: '+e.message;
+   draw();console.warn('Forma de onda:',e);
+  }
+ })();
+ await Promise.allSettled([durationTask,audioTask]);
 }
 async function openProject(id,scene='hook'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation='short';state.page='project';state.status='';resetCutEditor();render();refreshWaveform()}
 function resetCutEditor(){state.cutSelection={start:0,end:1};state.cutZoom=1;state.cutUndo=[];state.cutRedo=[];state.playSelectionOnly=false;state.editorPanel='audio'}
@@ -447,7 +478,7 @@ function updatePreviewEdits(){
   if(cut){video.currentTime=Math.min(scene.end||dur,cut.end);return}
  }
  if(state.playSelectionOnly&&t>=rangeSelection().end-.025){video.pause();state.playSelectionOnly=false;return}
- if((Number(scene.end)>0&&t>=Number(scene.end)-.025)||t>=dur-.025){video.pause();return}
+ if((Number(scene.end)>0&&t>=Number(scene.end)-.025)||(dur>0&&t>=dur-.025)){video.pause();return}
  video.muted=(scene.cuts||[]).some(c=>c.mode==='audio'&&t>=c.start&&t<c.end);
  const frozen=$('#speaker-frozen'),freeze=(scene.cuts||[]).find(c=>c.mode==='video'&&t>=c.start&&t<c.end);
  if(frozen&&freeze){
@@ -466,11 +497,25 @@ function playback(selection=false){
  const scene=state.project.scenes[state.scene];
  state.playSelectionOnly=selection;
  if(selection)video.currentTime=selectedCutRange().start;
- else if(video.currentTime<Number(scene.start)||video.currentTime>=Number(scene.end)||!Number(scene.end))video.currentTime=Number(scene.start)||0;
- updatePreviewEdits();
- video.play().catch(e=>notice(e.message,true));
+ else if(video.currentTime<Number(scene.start)||(Number(scene.end)>0&&video.currentTime>=Number(scene.end)))video.currentTime=Number(scene.start)||0;
+ video.play().then(()=>updatePreviewEdits()).catch(e=>notice('No se pudo reproducir la grabación: '+e.message,true));
 }
 document.addEventListener('timeupdate',e=>{if(e.target?.id==='speaker-preview')updatePreviewEdits()},true);
+document.addEventListener('loadedmetadata',e=>{
+ if(e.target?.id!=='speaker-preview'||!state.project)return;
+ const video=e.target,scene=state.project.scenes[state.scene];
+ const seconds=Number(video.duration),id=state.project.id+':'+scene.video;
+ if(Number.isFinite(seconds)&&seconds>0){
+  state.videoDurations[id]=seconds;
+  if(!(Number(scene.end)>Number(scene.start))){scene.start=0;scene.end=Math.min(180,seconds);queueSave()}
+  const waiting=$('.wave-loading');if(waiting)render();
+ }
+},true);
+document.addEventListener('error',e=>{
+ if(e.target?.id!=='speaker-preview')return;
+ const error=e.target.error;
+ notice('El video no pudo cargarse para reproducirlo'+(error?' (código '+error.code+')':''),true);
+},true);
 document.addEventListener('click',async e=>{
  const b=e.target.closest('[data-action]');if(!b)return;
  const action=b.dataset.action;try{
@@ -497,6 +542,7 @@ document.addEventListener('click',async e=>{
   if(action==='import-media')return await importFor('media');
   if(action==='paste-image')return await pasteImage();
   if(action==='detect-silences')return await detect();
+  if(action==='retry-waveform'){const id=state.project.id+':'+state.project.scenes[state.scene].video;delete state.videoDurations[id];delete state.waveforms[id];delete state.waveErrors[id];return await refreshWaveform()}
   if(action==='cut-mode'){state.cutMode=b.dataset.mode;return render()}
   if(action==='cut-add')return applyCut();
   if(action==='cut-undo')return undoRedoCut();

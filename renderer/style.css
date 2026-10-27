@@ -102,3 +102,10 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .silence-item.removed{background:#713841}
 .silence-item.kept{background:#35453b}
 @media(max-width:1100px){.approval-panel{position:static}}
+
+/* Indicadores de carga y recuperación del editor de audio */
+.wave-loading{padding:16px 12px;background:#10221a;border:1px dashed #3b7152;border-radius:8px;display:grid;gap:7px;margin:10px 0}
+.wave-loading strong{font-size:13px;color:#d5f2df}
+.wave-loading button{justify-self:start}
+.wave-error{background:#392e18;color:#f6dca1;padding:8px 10px;border-radius:7px;font-size:11px;line-height:1.5}
+.wave-error button{margin-left:8px;padding:3px 8px}
