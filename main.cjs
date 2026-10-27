@@ -1,11 +1,12 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,dialog,shell,protocol} = require('electron');
+const {app,BrowserWindow,ipcMain,dialog,shell,protocol,clipboard} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const store = require('./backend/store.cjs');
 const media = require('./backend/media.cjs');
+const images = require('./backend/image-import.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.platform === 'win32' ? 'D:\\11-Records-Studio' : (process.env.RECORDS_TEST_ROOT || path.join(os.homedir(),'11-Records-Studio'));
@@ -42,10 +43,38 @@ app.whenReady().then(()=>{
   register('projects:save',x=>store.saveProject(ROOT,x));
   register('projects:delete',x=>store.deleteProject(ROOT,x.id));
   register('assets:import',async x=>{
-    const selections=await dialog.showOpenDialog(win,{title:'Agregar videos, fotografías o audios',properties:['openFile','multiSelections'],
-      filters:[{name:'Medios',extensions:['mp4','mov','mkv','webm','avi','jpg','jpeg','png','webp','gif','wav','mp3','m4a','aac']}]});
-    if(selections.canceled)return [];
-    return selections.filePaths.map(p=>store.importAsset(ROOT,x.projectId,p));
+    const imageTypes=images.IMAGE_EXTENSIONS.map(e=>e.slice(1));
+    const videos=['mp4','mov','mkv','webm','avi'];
+    const voice=x.kind==='voice';
+    const filters=voice
+      ?[{name:'Videos de narración',extensions:videos}]
+      :[{name:'Imágenes y videos',extensions:[...new Set([...imageTypes,...videos])]},
+        {name:'Solo imágenes',extensions:imageTypes},
+        {name:'Todos los archivos',extensions:['*']}];
+    const selection=await dialog.showOpenDialog(win,{
+      title:voice?'Importar narración':'Importar imágenes o videos',
+      properties:['openFile','multiSelections'],filters
+    });
+    const files=[],errors=[];
+    if(selection.canceled)return {files,errors};
+    for(const source of selection.filePaths){
+      try{
+        const ext=path.extname(source).toLowerCase();
+        if(voice&&!videos.includes(ext.slice(1)))throw Error('Para la narración selecciona un video');
+        if(!voice&&!images.IMAGE_SET.has(ext)&&!videos.includes(ext.slice(1)))
+          throw Error('Selecciona un archivo de imagen o video');
+        const item=images.IMAGE_SET.has(ext)
+          ?await images.importImage(ROOT,x.projectId,source,store)
+          :store.importAsset(ROOT,x.projectId,source);
+        files.push(item);
+      }catch(err){errors.push({name:path.basename(source),message:safeError(err)})}
+    }
+    return {files,errors};
+  });
+  register('assets:paste-image',x=>{
+    const picture=clipboard.readImage();
+    if(picture.isEmpty())return null;
+    return store.saveImageBuffer(ROOT,x.projectId,picture.toPNG());
   });
   register('assets:record',x=>store.saveRecording(ROOT,x.projectId,x.name,x.data));
   register('assets:import-logo',async()=>{

@@ -21,14 +21,26 @@ function saveProject(root,x){const original=getProject(root,x.id);
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
  assertAssetRefs(next);next.updatedAt=new Date().toISOString();atomic(projectFile(root,next.id),next);return next}
-function importAsset(root,id,source){
+function importAsset(root,id,source,displayName){
  const p=getProject(root,id),ext=path.extname(source).toLowerCase(),type=TYPES[ext];
  if(!type)throw Error('Formato de medio no admitido: '+ext);
  const stat=fs.statSync(source);if(!stat.isFile()||stat.size>2*1024*1024*1024)throw Error('Archivo inválido o superior a 2 GB');
  const assetId=uid();const filename=assetId+ext;const dest=path.join(root,'Proyectos',id,'Originales',filename);
  fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(source,dest);
- const item={id:assetId,type,name:path.basename(source),file:'Originales/'+filename,size:stat.size};
+ const item={id:assetId,type,name:displayName||path.basename(source),file:'Originales/'+filename,size:stat.size};
  p.assets.push(item);p.updatedAt=new Date().toISOString();atomic(projectFile(root,id),p);return {...item,url:'records://asset/'+id+'/'+assetId};
+}
+function saveImageBuffer(root,id,data){
+ const buffer=Buffer.isBuffer(data)?data:Buffer.from(data||[]);
+ const signature=Buffer.from([137,80,78,71,13,10,26,10]);
+ if(buffer.length<24||buffer.length>50*1024*1024||!buffer.subarray(0,8).equals(signature))
+  throw Error('El portapapeles no contiene una imagen PNG válida o es demasiado grande');
+ const p=getProject(root,id),assetId=uid(),rel='Originales/'+assetId+'.png';
+ const dest=path.join(root,'Proyectos',id,rel);
+ fs.mkdirSync(path.dirname(dest),{recursive:true});fs.writeFileSync(dest,buffer);
+ const now=new Date(),item={id:assetId,type:'image',name:'Imagen pegada '+now.toLocaleString('es-EC')+'.png',file:rel,size:buffer.length};
+ p.assets.push(item);p.updatedAt=now.toISOString();atomic(projectFile(root,id),p);
+ return {...item,url:'records://asset/'+id+'/'+assetId};
 }
 function saveRecording(root,id,name,data){if(typeof data!=='string'||data.length>280000000)throw Error('Grabación demasiado grande');
  const buffer=Buffer.from(data,'base64');if(buffer.length<100)throw Error('Grabación vacía');
@@ -59,4 +71,4 @@ function getWeek(root,id){return readJSON(weekFile(root,id))}
 function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing'])if(x[k]!==undefined)w[k]=x[k];if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
 function listWeeks(root){return fs.readdirSync(path.join(root,'Compilaciones'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{return [getWeek(root,e.name)]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function resolveManagedPath(root,filename){const file=path.resolve(filename),base=path.resolve(root);if(!file.startsWith(base+path.sep))throw Error('Solo se pueden abrir rutas dentro de la biblioteca');return file}
-module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};
+module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};

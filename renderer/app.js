@@ -31,9 +31,9 @@ function mediaRows(){
     '<label class="mini"><input type="checkbox" data-media-micro="'+i+'" '+(m.microcuts!==false?'checked':'')+'> Microcortes</label>'+
     '</div>';
   }
-  return '<div class="asset" style="display:block"><div class="row between"><div class="row"><span class="fileicon">'+assetLabel(a)+'</span><div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
+  return '<div class="asset" style="display:block"><div class="row between"><div class="row">'+(a.type==='image'?'<img class="asset-thumb" src="'+url(p,a.id)+'" alt="">':'<span class="fileicon">'+assetLabel(a)+'</span>')+'<div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
    '<div class="row">'+btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
- }).join('')+'</div><p class="muted mini">Los recursos se muestran en secuencia. Para videos, marca la parte interesante de la jugada: el programa distribuye clips cortos dentro de esa selección.</p>';
+ }).join('')+'</div><p class="muted mini">Puedes seleccionar múltiples imágenes o pegar una captura desde Windows o el navegador con Ctrl+V. Los recursos se muestran en secuencia.</p>';
 }
 function waveformHTML(scene){
  const project=state.project;if(!project||!scene.video)return '';
@@ -84,7 +84,7 @@ function sceneView(){
  '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label><select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select></div></div>'+
  '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>'+
  '<div class="row between"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></div>'+
- '<div class="panel"><div class="row between"><h2>Recursos visuales</h2>'+(state.scene==='closing'?'':btn('import-media','＋ Fotos o videos','secondary'))+'</div>'+mediaRows()+'</div>'+
+ '<div class="panel"><div class="row between"><h2>Recursos visuales</h2>'+(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+'</div>')+'</div>'+mediaRows()+'</div>'+
  '<details class="panel panel-fold"'+(state.silencesOpen?' open':'')+'><summary>Recortes de voz y silencios</summary><p class="muted mini">Silencios desde 0,5 segundos: rojo = se elimina; gris = se conserva. Nada se borra del original.</p>'+
  '<div class="two"><div class="field"><label>Inicio (segundos)</label><input type="number" min="0" step="0.1" data-field="start" value="'+(s.start||0)+'"></div><div class="field"><label>Final (segundos)</label><input type="number" min="0" step="0.1" data-field="end" value="'+(s.end||0)+'"></div></div>'+
  '<div class="field"><label>Barras de recorte · inicio y final</label><input type="range" data-field="start" min="0" max="'+(state.videoDurations[p.id+':'+s.video]||Math.max(1,s.end||180))+'" step="0.1" value="'+(s.start||0)+'"><input type="range" data-field="end" min="0" max="'+(state.videoDurations[p.id+':'+s.video]||Math.max(1,s.end||180))+'" step="0.1" value="'+(s.end||0)+'"></div>'+
@@ -136,20 +136,45 @@ async function openWeek(id){state.week=await api('weekly:get',{id});state.page='
 let saving=null;
 function queueSave(){clearTimeout(saving);saving=setTimeout(async()=>{try{if(state.project)await api('projects:save',state.project)}catch(e){notice(e.message,true)}},250)}
 async function saveNow(){clearTimeout(saving);if(state.project)await api('projects:save',state.project)}
-async function importFor(target){
- const files=await api('assets:import',{projectId:state.project.id});
+async function appendSceneMedia(files){
  if(!files.length)return;
  state.project=await api('projects:get',{id:state.project.id});
- if(target==='voice'){
-  const item=files.find(f=>f.type==='video');if(!item)throw Error('Selecciona un video con tu narración');
-  const info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
-  const s=state.project.scenes[state.scene];s.video=item.id;s.start=0;s.end=Math.min(180,info.duration);s.silences=[];s.approved=false;
- }else{
-  const s=state.project.scenes[state.scene];if(!s.media)s.media=[];
-  for(const item of files.filter(f=>f.type==='image'||f.type==='video'))s.media.push({assetId:item.id,start:0,end:0,speed:1,microcuts:true});
-  s.approved=false;
+ const scene=state.project.scenes[state.scene];
+ if(!scene.media)scene.media=[];
+ for(const item of files.filter(f=>f.type==='image'||f.type==='video')){
+  scene.media.push({assetId:item.id,start:0,end:0,speed:1,microcuts:true});
  }
- await saveNow();render();if(target==='voice')refreshWaveform();notice('Archivo copiado a la biblioteca local');
+ scene.approved=false;await saveNow();render();
+}
+async function importFor(target){
+ await saveNow();
+ const response=await api('assets:import',{projectId:state.project.id,kind:target});
+ const files=Array.isArray(response)?response:response.files||[],errors=response.errors||[];
+ if(!files.length){
+  if(errors.length)notice(errors[0].name+': '+errors[0].message,true);
+  return;
+ }
+ if(target==='voice'){
+  state.project=await api('projects:get',{id:state.project.id});
+  const item=files.find(f=>f.type==='video');
+  if(!item)throw Error('Selecciona un video con tu narración');
+  const info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
+  const s=state.project.scenes[state.scene];
+  s.video=item.id;s.start=0;s.end=Math.min(180,info.duration);s.silences=[];s.approved=false;
+  await saveNow();render();refreshWaveform();
+ }else await appendSceneMedia(files);
+ notice(files.length+' archivo(s) agregado(s) al proyecto'+(errors.length?' · '+errors.length+' no se pudieron importar: '+errors[0].name+': '+errors[0].message:''),errors.length>0);
+}
+async function pasteImage(silent=false){
+ if(state.page!=='project'||state.scene==='closing'||!state.project)return;
+ await saveNow();
+ const image=await api('assets:paste-image',{projectId:state.project.id});
+ if(!image){
+  if(!silent)notice('No hay una imagen en el portapapeles. Copia una captura primero.',true);
+  return;
+ }
+ await appendSceneMedia([image]);
+ notice('Imagen pegada en los recursos visuales y guardada en D:');
 }
 async function detect(){const p=state.project,s=p.scenes[state.scene];if(!s.video)throw Error('Importa primero un video');
  notice('Analizando pausas del audio…');
@@ -328,6 +353,7 @@ document.addEventListener('click',async e=>{
   if(action==='scene'){await saveNow();state.scene=b.dataset.id;render();return refreshWaveform()}
   if(action==='import-voice')return await importFor('voice');
   if(action==='import-media')return await importFor('media');
+  if(action==='paste-image')return await pasteImage();
   if(action==='detect-silences')return await detect();
   if(action==='toggle-silence'){const s=state.project.scenes[state.scene];s.silences[Number(b.dataset.index)].remove=!s.silences[Number(b.dataset.index)].remove;s.approved=false;queueSave();return render()}
   if(action==='mark-all'||action==='unmark-all'){const s=state.project.scenes[state.scene];s.silences.forEach(q=>q.remove=action==='mark-all');s.approved=false;queueSave();return render()}
@@ -386,6 +412,14 @@ document.addEventListener('change',async e=>{
  else if(el.dataset.mediaStart!==undefined){s.media[Number(el.dataset.mediaStart)].start=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
  else if(el.dataset.mediaEnd!==undefined){s.media[Number(el.dataset.mediaEnd)].end=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
  else if(el.dataset.mediaMicro!==undefined){s.media[Number(el.dataset.mediaMicro)].microcuts=el.checked;s.approved=false;queueSave()}
+});
+document.addEventListener('paste',async e=>{
+ if(state.page!=='project'||state.scene==='closing'||!state.project)return;
+ if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+ const items=Array.from(e.clipboardData?.items||[]);
+ if(!items.some(item=>item.type.startsWith('image/')))return;
+ e.preventDefault();
+ try{await pasteImage(true)}catch(err){notice(err.message,true)}
 });
 document.addEventListener('toggle',e=>{if(e.target.matches?.('details.panel-fold'))state.silencesOpen=e.target.open},true);
 document.addEventListener('input',e=>{

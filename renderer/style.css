@@ -56,3 +56,8 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
  #view{padding:12px}.topbar{flex-wrap:wrap}.topbar h1{font-size:18px}
  .two{grid-template-columns:1fr}
 }
+
+/* Miniaturas y acciones de portapapeles */
+.asset-thumb{width:42px;height:42px;object-fit:cover;border-radius:7px;border:1px solid var(--line);flex:none;background:#16291e}
+.panel>.row.between{gap:10px;flex-wrap:wrap}
+.panel>.row.between h2{margin:0}
