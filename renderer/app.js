@@ -145,7 +145,7 @@ function templateGallery(format){
  btn('template-paste','▣ Pegar imagen','outline','data-format="'+format+'"')+'</div>'+
  '<div class="template-grid">'+(items.length?items.map(item=>'<div class="template-tile">'+
  '<img loading="lazy" src="'+templateUrl(item)+'" alt="'+esc(item.name)+'"><strong title="'+esc(item.name)+'">'+esc(item.name)+'</strong>'+
- (defaultId===item.id?'<span class="pill">Predeterminada</span>':btn('template-default','Usar por defecto','secondary','data-format="'+format+'" data-id="'+item.id+'"'))+
+ (defaultId===item.id?'<span class="pill">Predeterminada</span>'+btn('template-clear-default','Quitar predeterminado','secondary','data-format="'+format+'"'):btn('template-default','Usar por defecto','secondary','data-format="'+format+'" data-id="'+item.id+'"'))+
  '<div class="row wrap">'+btn('template-rename','Renombrar','secondary','data-id="'+item.id+'"')+
  btn('template-delete','Eliminar','danger','data-id="'+item.id+'"')+'</div></div>').join(''):'<p class="muted mini">Sin fondos. Sube una imagen para empezar.</p>')+
  '</div></section>';
@@ -176,7 +176,7 @@ async function importTemplate(format,paste=false,assign=false){
   state.templates=await api('templates:list');
   if(assign&&state.project){
    state.project.backgrounds={...(state.project.backgrounds||{short:null,wide:null}),[format]:files[0].id};
-   state.project.scenes[state.scene].approved=false;
+   order.forEach(k=>state.project.scenes[k].approved=false);
    await saveNow();
    const modal=$('#modal-root');modal.hidden=true;modal.innerHTML='';
   }
@@ -617,10 +617,11 @@ document.addEventListener('click',async e=>{
    const id=b.dataset.id||null;
    if(id&&!state.templates.some(t=>t.id===id&&t.format===state.orientation))throw Error('Selecciona un fondo compatible');
    state.project.backgrounds={...(state.project.backgrounds||{short:null,wide:null}),[state.orientation]:id};
-   state.project.scenes[state.scene].approved=false;
+   order.forEach(k=>state.project.scenes[k].approved=false);
    await saveNow();
    const modal=$('#modal-root');modal.hidden=true;modal.innerHTML='';render();notice('Fondo actualizado en este proyecto');return;
   }
+  if(action==='template-clear-default'){state.settings=await api('templates:set-default',{format:b.dataset.format,id:null});render();notice('Fondo predeterminado desactivado');return}
   if(action==='template-default'){
    state.settings=await api('templates:set-default',{format:b.dataset.format,id:b.dataset.id});
    render();notice('Fondo predeterminado actualizado para nuevos proyectos');return;
