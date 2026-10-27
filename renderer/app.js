@@ -415,7 +415,7 @@ async function appendSceneMedia(files){
  for(const item of files.filter(f=>f.type==='image'||f.type==='video')){
   scene.media.push({assetId:item.id,start:0,end:0,speed:1,microcuts:true});
  }
- scene.approved=false;await saveNow();render();
+ scene.approved=false;await saveNow();render();prepareScenePreview();
 }
 async function importFor(target){
  await saveNow();
@@ -789,7 +789,7 @@ document.addEventListener('click',async e=>{
   if(action==='remove-media'||action==='move-media'){
    const s=state.project.scenes[state.scene],i=Number(b.dataset.index),j=i+Number(b.dataset.delta);
    if(action==='remove-media')s.media.splice(i,1);else if(j>=0&&j<s.media.length)[s.media[i],s.media[j]]=[s.media[j],s.media[i]];
-   s.approved=false;queueSave();return render();
+   s.approved=false;await saveNow();render();return prepareScenePreview();
   }
   if(action==='approve-scene'){const s=state.project.scenes[state.scene];if(!s.video)throw Error('Primero sube o graba el video principal');if(state.scene!=='closing'&&!(s.media||[]).length)throw Error('Añade al menos una fotografía o video de apoyo');if(Number(s.end)<=Number(s.start))throw Error('El fragmento debe tener una duración positiva');
    s.approved=!s.approved;await saveNow();return render()}
@@ -840,10 +840,10 @@ document.addEventListener('change',async e=>{
    s.approved=false;queueSave();render();
  }
  else if(el.dataset.projectField){p[el.dataset.projectField]=el.value;order.forEach(k=>p.scenes[k].approved=false);queueSave();render()}
- else if(el.dataset.mediaSpeed!==undefined){s.media[Number(el.dataset.mediaSpeed)].speed=Number(el.value)||1;s.approved=false;queueSave()}
- else if(el.dataset.mediaStart!==undefined){s.media[Number(el.dataset.mediaStart)].start=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
- else if(el.dataset.mediaEnd!==undefined){s.media[Number(el.dataset.mediaEnd)].end=Math.max(0,Number(el.value)||0);s.approved=false;queueSave()}
- else if(el.dataset.mediaMicro!==undefined){s.media[Number(el.dataset.mediaMicro)].microcuts=el.checked;s.approved=false;queueSave()}
+ else if(el.dataset.mediaSpeed!==undefined){s.media[Number(el.dataset.mediaSpeed)].speed=Number(el.value)||1;s.approved=false;await saveNow();prepareScenePreview()}
+ else if(el.dataset.mediaStart!==undefined){s.media[Number(el.dataset.mediaStart)].start=Math.max(0,Number(el.value)||0);s.approved=false;await saveNow();prepareScenePreview()}
+ else if(el.dataset.mediaEnd!==undefined){s.media[Number(el.dataset.mediaEnd)].end=Math.max(0,Number(el.value)||0);s.approved=false;await saveNow();prepareScenePreview()}
+ else if(el.dataset.mediaMicro!==undefined){s.media[Number(el.dataset.mediaMicro)].microcuts=el.checked;s.approved=false;await saveNow();prepareScenePreview()}
 });
 document.addEventListener('paste',async e=>{
  if(state.page!=='project'||state.scene==='closing'||!state.project)return;
