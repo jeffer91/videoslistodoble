@@ -685,9 +685,12 @@ document.addEventListener('loadedmetadata',e=>{
  const video=e.target,scene=state.project.scenes[state.scene];
  const seconds=Number(video.duration),id=state.project.id+':'+scene.video;
  if(Number.isFinite(seconds)&&seconds>0){
+  const previous=Number(state.videoDurations[id]);
+  const changed=!Number.isFinite(previous)||previous<=0;
   state.videoDurations[id]=seconds;
   if(!(Number(scene.end)>Number(scene.start))){scene.start=0;scene.end=Math.min(180,seconds);queueSave()}
-  const waiting=$('.wave-loading');if(waiting)render();
+  // No reconstruir el reproductor en cada evento metadata; causa un bucle de recargas.
+  if(changed&&$('.wave-loading'))render();
  }
 },true);
 document.addEventListener('error',e=>{
