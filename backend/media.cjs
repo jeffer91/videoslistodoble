@@ -60,7 +60,7 @@ function retainedRanges(scene,realDuration){
  const first=Math.max(0,Number(scene?.start)||0);
  const end=Math.min(realDuration,Number(scene?.end)>first?Number(scene.end):realDuration);
  if(!(end>first))return [];
- const toRemove=(scene.silences||[]).filter(x=>x.remove).map(x=>({start:Math.max(first,Number(x.start)||0),end:Math.min(end,Number(x.end)||0)})).filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start);
+ const toRemove=[...(scene.silences||[]).filter(x=>x.remove),...(scene.cuts||[]).filter(x=>x.mode==='both')].map(x=>({start:Math.max(first,Number(x.start)||0),end:Math.min(end,Number(x.end)||0)})).filter(x=>x.end>x.start).sort((a,b)=>a.start-b.start);
  const intervals=[];let at=first;
  for(const gap of toRemove){if(gap.start>at+.04)intervals.push({start:at,end:gap.start});at=Math.max(at,gap.end)}
  if(end>at+.04)intervals.push({start:at,end});
@@ -69,17 +69,44 @@ function retainedRanges(scene,realDuration){
 function selectedDuration(scene,dur){return retainedRanges(scene,dur).reduce((n,x)=>n+x.end-x.start,0)}
 function sanitizeTitle(title){return String(title||'RÉCORD DEL FÚTBOL').replace(/[\r\n\t]/g,' ').trim().slice(0,92)}
 function chooseMedia(scene){return scene.media||[]}
+// Divide en los límites de recortes por pista; el audio y el video conservan el mismo reloj.
+// Las acciones audio/video no acortan el archivo. Únicamente 'both' quita tiempo.
+function splitByEdits(entries,cuts=[]){
+ const edits=cuts.filter(c=>c&&['audio','video'].includes(c.mode)&&Number(c.end)>Number(c.start));
+ const result=[];
+ for(const entry of entries){
+  const bounds=[entry.start,entry.end];
+  for(const c of edits){
+   if(c.end<=entry.start||c.start>=entry.end)continue;
+   bounds.push(Math.max(entry.start,Number(c.start)),Math.min(entry.end,Number(c.end)));
+  }
+  bounds.sort((a,b)=>a-b);
+  for(let i=0;i<bounds.length-1;i++){
+   const start=bounds[i],end=bounds[i+1];
+   if(end-start<0.0001)continue;
+   const mid=(start+end)/2;
+   const muted=edits.some(c=>c.mode==='audio'&&mid>=c.start&&mid<c.end);
+   const frozen=edits.some(c=>c.mode==='video'&&mid>=c.start&&mid<c.end);
+   result.push({...entry,start,end,
+    mediaStart:entry.medium?.type==='video'?(Number(entry.mediaStart)||0)+(start-entry.start)*(Number(entry.speed)||1):entry.mediaStart,
+    muteAudio:muted,freezeVideo:frozen});
+  }
+ }
+ return result;
+}
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
 function ffFont(){return process.platform==='win32'?"fontfile='"+ffFilterPath(path.join(process.env.WINDIR||'C:/Windows','Fonts','arialbd.ttf'))+"'":'font=Sans'}
-function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme){
+function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme,freezeVideo=false){
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const contentW=wide?1380:930,contentH=wide?825:1160;
  const pos=appearance?.position||(wide?'right':'left');
  const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||65)/65));
  const px=wide?(pos==='right'?1440:pos==='center'?760:65):(pos==='right'?600:pos==='center'?350:58),py=wide?235:820;
  const pw=Math.round((wide?420:400)*factor),ph=Math.round((wide?660:580)*factor);
- const pad=withPresenter?'[1:v]':'[0:v]';
+ const voiceInput=freezeVideo?'[frozen]':'[0:v]';
+ const pad=withPresenter?'[1:v]':voiceInput;
  const f=[];
+ if(freezeVideo)f.push('[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3600[frozen]');
  if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed))).toFixed(3)+'[timed]');
  const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
  f.push(bgInput+'split=2[back][foreground]');
@@ -88,7 +115,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  f.push('[foreground]scale='+contentW+':'+contentH+':force_original_aspect_ratio=decrease,setsar=1[center]');
  f.push('[blur][center]overlay=(W-w)/2:'+(wide?'(H-h)/2':'(H-h)/2')+'[base]');
  if(withPresenter){
-  f.push('[0:v]scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
+  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
  }else f.push('[base]null[visual]');
  const strip=theme==='numbers'?'0xb92d42':theme==='legends'?'0xd8b56a':'0x2fcb6b';
@@ -107,7 +134,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
-async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic'){
+async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={}){
  if(!(length>.06))return;
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
@@ -121,10 +148,10 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  }
  if(hasLogo)args.push('-loop','1','-i',logo);
  if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
- const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,appearance,speed,theme);
+ const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,appearance,speed,theme,edit.freezeVideo===true);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
- if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,dynaudnorm=f=150:g=15');
+ if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,dynaudnorm=f=150:g=15'+(edit.muteAudio?',volume=0':''));
  else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0))+':a:0');
  args.push('-t',String(length),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
@@ -163,13 +190,13 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   const duration=asset.type==='video'?(await probe(file)).duration:0;
   return {file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
  }));
- const entries=timeline(scene,voiceInfo.duration,media);
+ const entries=splitByEdits(timeline(scene,voiceInfo.duration,media),scene.cuts||[]);
  const appearance=scene.formats?.[wide?'wide':'short']||scene;
  const segments=[];
  for(let i=0;i<entries.length;i++){
   if(signal.aborted)throw Error('Cancelado');
   const m=entries[i],output=path.join(tmp,'part-'+String(fs.readdirSync(tmp).length).padStart(5,'0')+'.mp4');
-  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style);
+  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,m);
   segments.push(output);
  }
  return {segments,duration:length};
@@ -230,4 +257,4 @@ async function exportWeekly(root,id,signal,send){
   send({type:'complete',file:output});return {file:output,duration:sum};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,exportShort,exportWeekly,toolPath};
+module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,exportShort,exportWeekly,toolPath};
