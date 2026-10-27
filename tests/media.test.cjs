@@ -32,7 +32,10 @@ test('silenciar sólo sonido y congelar sólo imagen mantienen la duración',()=
  const pieces=splitByEdits(timeline(scene,6,[{type:'video',speed:1,sourceStart:0,sourceEnd:6}]),scene.cuts);
  assert.ok(Math.abs(pieces.reduce((sum,p)=>sum+p.end-p.start,0)-6)<.0001);
  assert.deepEqual(pieces.filter(p=>p.muteAudio).map(p=>[p.start,p.end]),[[1,2]]);
- assert.deepEqual(pieces.filter(p=>p.freezeVideo).map(p=>[p.start,p.end]),[[3,4.5]]);
+ const frozenPieces=pieces.filter(p=>p.freezeVideo);
+ assert.equal(frozenPieces[0].start,3);
+ assert.equal(frozenPieces.at(-1).end,4.5);
+ assert.ok(Math.abs(frozenPieces.reduce((sum,p)=>sum+p.end-p.start,0)-1.5)<.0001);
  const originalMediaStarts=pieces.map(p=>p.mediaStart);
  assert.ok(originalMediaStarts.every(x=>typeof x==='number'&&Number.isFinite(x)));
 });

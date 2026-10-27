@@ -71,7 +71,7 @@ function waveformEditorHTML(scene){
  if(!scene.video)return '<p class="muted mini">Importa o graba un video para editarlo.</p>';
  if(!duration||!peaks.length)return '<p class="muted mini">Preparando ondas y duración del audio…</p>';
  const selection=rangeSelection(),zoom=Math.max(1,Math.min(8,Number(state.cutZoom)||1));
- const width=Math.min(23000,Math.max(590,Math.round(duration*39*zoom)));
+ const width=Math.min(23000,Math.round(Math.max(590,duration*4)*zoom));
  const count=Math.min(peaks.length,Math.ceil(width/2.6)),barWidth=width/count;
  const rendered=[];
  const actualWaveDuration=Math.min(180,duration),sampleStep=actualWaveDuration/peaks.length;
