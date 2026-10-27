@@ -137,3 +137,15 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .template-choice img{width:100%;height:115px;object-fit:contain;background:#08160f;border-radius:6px}
 .template-choice span{overflow-wrap:anywhere}
 @media(max-width:920px){.template-project-choice{flex-wrap:wrap}.template-project-choice button{width:100%}}
+
+.stage .logo-moving{mix-blend-mode:normal;filter:drop-shadow(0 2px 5px #000) drop-shadow(0 0 3px #f5cf68);border-radius:0}
+.preview-status{margin-top:6px;text-align:center;font-size:11px;color:#b7d6bf;min-height:16px}
+.preview-status.preview-error{color:#ffb1aa}
+.stage .fallback-back{position:absolute;inset:0;background:linear-gradient(145deg,#123a23,#06120c);z-index:0}
+.stage .photo[hidden],.stage .speaker[hidden]{display:none!important}
+.stage.closing .speaker{left:50%!important;bottom:18%;width:76%;height:59%;object-fit:contain;
+ transform:translateX(-50%) scale(var(--closing-scale,1))!important;transform-origin:bottom center;background:transparent;border:0;z-index:6}
+.stage.closing .follow{bottom:4%;z-index:7;text-shadow:0 3px 6px #000}
+.stage.closing .headline{top:5%;z-index:7}
+.stage.wide.closing .speaker{bottom:8%;width:50%;height:74%}
+.stage.closing .speaker-frozen{z-index:6!important}

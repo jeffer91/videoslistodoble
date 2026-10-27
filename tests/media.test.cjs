@@ -66,23 +66,79 @@ test('WebM de MediaRecorder sin duración en cabecera recupera duración y ondas
  }finally{fs.rmSync(dir,{force:true,recursive:true})}
 });
 
-test('Reproducir no detiene un video aunque sus metadatos indiquen 0 segundos',async()=>{
+test('Reproducir usa la copia compatible y no detiene videos con duración cero',async()=>{
  const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
  const source=fs.readFileSync(path.join(__dirname,'..','renderer','app.js'),'utf8');
  const begin=source.indexOf('function updatePreviewEdits(){');
  const end=source.indexOf("document.addEventListener('timeupdate'",begin);
- assert.ok(begin>=0&&end>begin,'No se encontró el controlador de vista previa');
+ assert.ok(begin>=0&&end>begin,'Controlador de vista previa ausente');
  let played=0,paused=0;
- const video={currentTime:0,paused:true,muted:false,style:{},
+ const video={dataset:{asset:'recording'},currentTime:0,readyState:1,paused:true,muted:false,style:{},
+  getAttribute:()=> 'records://preview/project/recording',
   play(){played++;this.paused=false;return Promise.resolve()},
   pause(){paused++;this.paused=true}};
  const sandbox={
   $:selector=>selector==='#speaker-preview'?video:null,
-  state:{project:{scenes:{hook:{start:0,end:0,cuts:[],silences:[]}}},scene:'hook',playSelectionOnly:false},
-  editorDuration:()=>0,rangeSelection:()=>({start:0,end:1}),notice:msg=>{throw Error(msg)}
+  state:{project:{id:'project',scenes:{hook:{video:'recording',start:0,end:0,cuts:[],silences:[]}}},page:'project',scene:'hook',
+   previewUrls:{'project:recording':'records://preview/project/recording'},previewTimelines:{'project:hook':[]},playSelectionOnly:false},
+  editorDuration:()=>0,rangeSelection:()=>({start:0,end:1}),previewAssetKey:(p,a)=>p+':'+a,mediaKey:()=> 'project:hook',
+  updateMediaPreview:()=>{},previewMessage:()=>{},notice:msg=>{throw Error(msg)}
  };
  vm.runInNewContext(source.slice(begin,end)+'\nplayback(false);',sandbox);
  await new Promise(resolve=>setImmediate(resolve));
- assert.equal(played,1,'El botón debe llamar a play()');
- assert.equal(paused,0,'Duración 0 no debe interpretarse como final de video');
+ assert.equal(played,1);
+ assert.equal(paused,0);
+});
+test('normaliza un WebM antiguo a MP4 H.264 y conserva el original',{timeout:80000},async()=>{
+ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawnSync}=require('node:child_process');
+ const store=require('../backend/store.cjs'),media=require('../backend/media.cjs');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'records-preview-'));
+ try{
+  store.ensureRoot(dir);const project=store.createProject(dir,{title:'Reproducción'});
+  const source=path.join(dir,'original.webm');
+  const r=spawnSync(media.toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y',
+   '-f','lavfi','-i','testsrc=size=128x128:rate=12:duration=2',
+   '-f','lavfi','-i','sine=frequency=400:sample_rate=48000:duration=2',
+   '-t','2','-c:v','libvpx','-b:v','180k','-c:a','libopus',source],{timeout:35000});
+  assert.equal(r.status,0,String(r.stderr));
+  const asset=store.importAsset(dir,project.id,source);
+  const oldSize=fs.statSync(store.resolveAsset(dir,project.id,asset.id)).size;
+  const result=await media.preparePreview(dir,project.id,asset.id);
+  assert.match(result.url,/^records:\/\/preview\//);
+  assert.ok(result.duration>1.8);
+  const normalized=media.resolvePreview(dir,project.id,asset.id);
+  assert.equal(path.extname(normalized),'.mp4');
+  assert.equal(fs.statSync(store.resolveAsset(dir,project.id,asset.id)).size,oldSize);
+  const meta=spawnSync(media.toolPath('ffprobe'),['-v','error','-select_streams','v:0','-show_entries','stream=codec_name','-of','default=noprint_wrappers=1',normalized]);
+  assert.match(String(meta.stdout),/codec_name=h264/);
+  const cached=await media.preparePreview(dir,project.id,asset.id);
+  assert.equal(cached.url,result.url);
+ }finally{fs.rmSync(dir,{force:true,recursive:true})}
+});
+test('previsualización distribuye tres imágenes según la narración',{timeout:45000},async()=>{
+ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawnSync}=require('node:child_process');
+ const store=require('../backend/store.cjs'),media=require('../backend/media.cjs');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'records-image-sequence-'));
+ try{
+  store.ensureRoot(root);const project=store.createProject(root,{title:'Tres imágenes'});
+  const recording=path.join(root,'voice.webm');
+  const r=spawnSync(media.toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','color=black:s=96x96:d=3:r=15',
+   '-f','lavfi','-i','sine=frequency=600:duration=3','-t','3','-c:v','libvpx','-b:v','150k','-c:a','libopus',recording],{timeout:30000});
+  assert.equal(r.status,0,String(r.stderr));
+  const voice=store.importAsset(root,project.id,recording);
+  const sharp=require('sharp');
+  const scene=project.scenes.body;scene.video=voice.id;scene.end=3;scene.media=[];
+  for(let i=0;i<3;i++){
+   const img=path.join(root,'image-'+i+'.png');
+   await sharp({create:{width:40,height:40,channels:3,background:{r:40*i,g:100,b:50}}}).png().toFile(img);
+   const imported=store.importAsset(root,project.id,img);
+   scene.media.push({assetId:imported.id,start:0,end:0,speed:1});
+  }
+  store.saveProject(root,project);
+  const parts=await media.getPreviewTimeline(root,project.id,'body');
+  const ids=parts.map(p=>p.assetId).filter(Boolean);
+  assert.equal(new Set(ids).size,3);
+  assert.equal(parts[0].start,0);
+  assert.ok(parts.at(-1).end>2.9);
+ }finally{fs.rmSync(root,{force:true,recursive:true})}
 });

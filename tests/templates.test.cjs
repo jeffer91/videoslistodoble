@@ -81,3 +81,39 @@ test('vista previa contiene biblioteca y selector de fondo por proyecto',()=>{
  assert.match(source,/templates:set-default/);
  assert.match(source,/function templateGallery/);
 });
+
+test('tres escenas pueden escoger fondos independientes y conservar fondo heredado',{timeout:30000},async()=>{
+ const rootDir=root();
+ try{
+  store.ensureRoot(rootDir);
+  const file=path.join(rootDir,'verde.png');
+  await sharp({create:{width:90,height:160,channels:4,background:'#125a33'}}).png().toFile(file);
+  const a=await backgrounds.importFile(rootDir,file,'short');
+  const b=await backgrounds.importFile(rootDir,file,'short');
+  const c=await backgrounds.importFile(rootDir,file,'short');
+  const project=store.createProject(rootDir,{title:'Escenas'});
+  project.scenes.hook.backgrounds={short:a.id};
+  project.scenes.body.backgrounds={short:b.id};
+  project.scenes.closing.backgrounds={short:c.id};
+  store.saveProject(rootDir,project);
+  const got=store.getProject(rootDir,project.id);
+  assert.deepEqual(['hook','body','closing'].map(key=>got.scenes[key].backgrounds.short),[a.id,b.id,c.id]);
+  assert.throws(()=>backgrounds.remove(rootDir,a.id,store),/utiliza en el proyecto/);
+  got.scenes.hook.backgrounds={};store.saveProject(rootDir,got);
+  assert.equal(backgrounds.remove(rootDir,a.id,store),true);
+ }finally{fs.rmSync(rootDir,{force:true,recursive:true})}
+});
+test('logo normalizado conserva dorado y elimina borde blanco',{timeout:30000},async()=>{
+ const logo=require('../backend/logo.cjs'),dir=root();
+ try{
+  store.ensureRoot(dir);const file=path.join(dir,'logo-fondo.png');
+  const gold=await sharp({create:{width:80,height:80,channels:4,background:'#ffffff'}})
+   .composite([{input:await sharp({create:{width:30,height:30,channels:4,background:'#d1a832'}}).png().toBuffer(),left:25,top:25}])
+   .png().toFile(file);
+  const dest=await logo.normalize(dir,file);
+  const {data,info}=await sharp(dest).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+  assert.ok(data[3]<50,'el blanco se elimina');
+  const off=(40*info.width+40)*4;
+  assert.ok(data[off+3]>200,'el centro dorado permanece');
+ }finally{fs.rmSync(dir,{force:true,recursive:true})}
+});

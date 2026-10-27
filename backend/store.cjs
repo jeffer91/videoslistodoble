@@ -14,13 +14,22 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const scene of Object.values(scenes))scene.formats={short:{layout:'auto',position:'left',scale:65},wide:{layout:'auto',position:'right',scale:65}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
 function assertAssetRefs(p){const ids=new Set((p.assets||[]).map(a=>a.id));for(const scene of Object.values(p.scenes||{})){if(scene.video&&!ids.has(scene.video))throw Error('Video no encontrado en la biblioteca');for(const m of scene.media||[])if(!ids.has(m.assetId))throw Error('Recurso no encontrado en el proyecto')}}
 function saveProject(root,x){const original=getProject(root,x.id);
  const editable=['title','style','scenes','status','backgrounds'];const next={...original};
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
  assertAssetRefs(next);
+ for(const scene of Object.values(next.scenes||{})){
+  if(scene.backgrounds===undefined)continue;
+  if(!scene.backgrounds||typeof scene.backgrounds!=='object'||Array.isArray(scene.backgrounds))throw Error('Fondos de escena inválidos');
+  for(const format of ['short','wide']){
+   if(!Object.prototype.hasOwnProperty.call(scene.backgrounds,format))continue;
+   const id=scene.backgrounds[format];
+   if(id!==null)require('./templates.cjs').getWithFormat(root,id,format);
+  }
+ }
  if(next.backgrounds!==undefined){
   if(!next.backgrounds||Array.isArray(next.backgrounds)||typeof next.backgrounds!=='object')throw Error('Fondos de proyecto inválidos');
   for(const format of ['short','wide']){

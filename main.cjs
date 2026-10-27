@@ -8,6 +8,7 @@ const store = require('./backend/store.cjs');
 const media = require('./backend/media.cjs');
 const images = require('./backend/image-import.cjs');
 const templates = require('./backend/templates.cjs');
+const logos = require('./backend/logo.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.platform === 'win32' ? 'D:\\11-Records-Studio' : (process.env.RECORDS_TEST_ROOT || path.join(os.homedir(),'11-Records-Studio'));
@@ -26,9 +27,33 @@ function openWindow(){
 }
 app.whenReady().then(()=>{
   try{store.ensureRoot(ROOT)}catch(e){dialog.showErrorBox('Disco de proyectos no disponible','No se pudo preparar la biblioteca en '+ROOT+': '+safeError(e)+'\nEn Windows es obligatorio disponer del disco D.');app.quit();return}
-  protocol.handle('records',request=>{
+  protocol.handle('records',async request=>{
     try{
       const u=new URL(request.url);
+      if(u.hostname==='preview'){
+        const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+        if(pieces.length!==2)throw Error('URL inválida para vista previa');
+        const file=media.resolvePreview(ROOT,pieces[0],pieces[1]);
+        const stat=fs.statSync(file),total=stat.size;
+        const range=request.headers.get('range');
+        const match=range&&/^bytes=(\d*)-(\d*)$/.exec(range);
+        let start=0,end=total-1,status=200;
+        if(range){
+          if(!match) return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+total}});
+          if(match[1]===''&&match[2]!==''){
+            const suffix=Number(match[2]);start=Math.max(0,total-suffix);
+          }else{
+            start=Number(match[1]);end=match[2]===''?total-1:Math.min(total-1,Number(match[2]));
+          }
+          if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>=total||end<start)
+            return new Response(null,{status:416,headers:{'Content-Range':'bytes */'+total}});
+          status=206;
+        }
+        const stream=require('node:stream').Readable.toWeb(fs.createReadStream(file,{start,end}));
+        const headers={'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(end-start+1),'Cache-Control':'no-store'};
+        if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+total;
+        return new Response(stream,{status,headers});
+      }
       if(u.hostname==='template'){
         const ids=u.pathname.split('/').filter(Boolean);
         if(ids.length!==1)throw Error('Ruta de plantilla inválida');
@@ -36,7 +61,7 @@ app.whenReady().then(()=>{
         const {net}=require('electron');
         return net.fetch(require('node:url').pathToFileURL(filename).toString());
       }
-      if(u.hostname==='settings'&&u.pathname==='/logo') { const settings=store.getSettings(ROOT);if(!settings.logo)throw Error('No hay logo');const {net}=require('electron');return net.fetch(require('node:url').pathToFileURL(settings.logo).toString()) }
+      if(u.hostname==='settings'&&u.pathname==='/logo') { const settings=store.getSettings(ROOT);if(!settings.logo)throw Error('No hay logo');const {net}=require('electron');return net.fetch(require('node:url').pathToFileURL(await logos.normalize(ROOT,settings.logo)).toString()) }
       if(u.hostname!=='asset') throw Error('Host no permitido');
       const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
       if(pieces.length!==2)throw Error('Ruta inválida');
@@ -118,6 +143,8 @@ app.whenReady().then(()=>{
   register('templates:delete',x=>templates.remove(ROOT,x.id,store));
   register('settings:get',()=>store.getSettings(ROOT));
   register('settings:set',x=>store.saveSettings(ROOT,x));
+  register('media:preview',x=>media.preparePreview(ROOT,x.projectId,x.assetId));
+  register('media:timeline',x=>media.getPreviewTimeline(ROOT,x.projectId,x.scene));
   register('media:waveform',x=>media.waveform(store.resolveAsset(ROOT,x.projectId,x.assetId)));
   register('media:metadata',x=>media.probe(store.resolveAsset(ROOT,x.projectId,x.assetId)));
   register('media:analyze',x=>media.detectSilences(store.resolveAsset(ROOT,x.projectId,x.assetId),x.threshold));

@@ -87,7 +87,9 @@ function remove(root,id,store){
  if(Object.values(settings.templateDefaults||{}).includes(id))throw Error('Primero cambia el fondo predeterminado');
  for(const p of store.listProjects(root)){
   const project=store.getProject(root,p.id);
-  if(Object.values(project.backgrounds||{}).includes(id))throw Error('Esta plantilla se utiliza en el proyecto '+project.title);
+  if(Object.values(project.backgrounds||{}).includes(id)||
+    Object.values(project.scenes||{}).some(scene=>Object.values(scene.backgrounds||{}).includes(id)))
+    throw Error('Esta plantilla se utiliza en el proyecto '+project.title);
  }
  const items=list(root).filter(t=>t.id!==id);
  write(root,items);
