@@ -155,38 +155,148 @@ async function detect(){const p=state.project,s=p.scenes[state.scene];if(!s.vide
  notice('Analizando pausas del audio…');
  const data=await api('media:analyze',{projectId:p.id,assetId:s.video,threshold:state.settings.silenceThreshold||.5});
  s.silences=data.map(d=>({...d,remove:true}));s.approved=false;queueSave();render();notice(data.length+' silencios detectados (rojo = borrar; gris = conservar)')}
-async function manageRecording(){
- const modal=$('#modal-root');modal.hidden=false;
+function releaseCamera(){
+ if(state.recordTimer){clearInterval(state.recordTimer);state.recordTimer=null}
+ if(state.recordCapture){state.recordCapture.getTracks().forEach(t=>t.stop());state.recordCapture=null}
+ if(state.recordStream){state.recordStream.getTracks().forEach(t=>t.stop());state.recordStream=null}
+ const v=$('#camera-preview');if(v){v.pause();v.srcObject=null}
+}
+function discardRecording(){
+ state.recordDraft=null;state.recordParts=[];
+ if(state.recordDraftUrl){URL.revokeObjectURL(state.recordDraftUrl);state.recordDraftUrl=null}
+ const v=$('#record-review');if(v){v.pause();v.removeAttribute('src');v.load()}
+}
+function closeRecorder(){
+ if(state.recorder&&state.recorder.state!=='inactive')state.recorder.stop();
+ state.recorder=null;releaseCamera();discardRecording();
+ const root=$('#modal-root');root.hidden=true;root.innerHTML='';
+}
+function captureDimensions(){
+ return state.recordFormat==='portrait'?[720,1280]:state.recordFormat==='wide'?[1280,720]:[720,720];
+}
+function selectRecordFormat(format){
+ if(!['square','portrait','wide'].includes(format)||state.recorder?.state==='recording')return;
+ state.recordFormat=format;
+ const el=$('#record-stage');if(el)el.className='record-stage format-'+format;
+ document.querySelectorAll('[data-action="record-format"]').forEach(b=>b.classList.toggle('active',b.dataset.format===format));
+ const [w,h]=captureDimensions(),hint=$('#record-resolution');
+ if(hint)hint.textContent=w+' × '+h+' px · 30 FPS';
+}
+async function openCamera(){
+ const video=$('#camera-preview');if(!video)return;
+ const camera=$('#camera-choice')?.value||state.settings.defaultCamera||undefined;
+ const mic=$('#mic-choice')?.value||state.settings.defaultMic||undefined;
+ releaseCamera();
+ const stream=await navigator.mediaDevices.getUserMedia({
+  video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30},...(camera?{deviceId:{ideal:camera}}:{})},
+  audio:mic?{deviceId:{ideal:mic}}:true
+ });
+ if(!$('#camera-preview')){stream.getTracks().forEach(t=>t.stop());return}
+ state.recordStream=stream;video.srcObject=stream;await video.play();
  const devices=await navigator.mediaDevices.enumerateDevices().catch(()=>[]);
- const cameras=devices.filter(d=>d.kind==='videoinput'),microphones=devices.filter(d=>d.kind==='audioinput');
- modal.innerHTML='<div class="modalback"><div class="modal"><h2>Grabar con cámara y micrófono</h2><p class="muted">Elige tus dispositivos. Se recordarán para la próxima vez.</p><div class="two"><div class="field"><label>Cámara</label><select id="camera-choice">'+cameras.map(c=>'<option value="'+esc(c.deviceId)+'" '+(state.settings.defaultCamera===c.deviceId?'selected':'')+'>'+esc(c.label||'Cámara')+'</option>').join('')+'</select></div><div class="field"><label>Micrófono</label><select id="mic-choice">'+microphones.map(c=>'<option value="'+esc(c.deviceId)+'" '+(state.settings.defaultMic===c.deviceId?'selected':'')+'>'+esc(c.label||'Micrófono')+'</option>').join('')+'</select></div></div><div class="recorder"><video id="camera-preview" autoplay muted playsinline></video><div class="row">'+btn('record-start','● Iniciar grabación')+btn('record-stop','■ Detener y guardar','danger','disabled')+'</div></div><div class="row" style="margin-top:12px">'+btn('modal-close','Cerrar','secondary')+'</div></div></div>';
+ for(const [id,kind,track] of [['camera-choice','videoinput',stream.getVideoTracks()[0]],['mic-choice','audioinput',stream.getAudioTracks()[0]]]){
+  const select=$('#'+id);if(!select)continue;
+  const list=devices.filter(d=>d.kind===kind),selected=track?.getSettings().deviceId||'';
+  select.innerHTML=list.map((d,k)=>'<option value="'+esc(d.deviceId)+'" '+(selected===d.deviceId?'selected':'')+'>'+esc(d.label||((kind==='videoinput'?'Cámara ':'Micrófono ')+(k+1)))+'</option>').join('');
+ }
+}
+async function manageRecording(){
+ if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')throw Error('La cámara o el grabador no están disponibles en este equipo');
+ closeRecorder();state.recordFormat='square';
+ const modal=$('#modal-root');modal.hidden=false;
+ modal.innerHTML='<div class="modalback"><div class="modal recorder-modal">'+
+ '<div class="row between"><div><h2>Grabar presentador</h2><p class="muted mini">La proporción elegida se guarda en el video real.</p></div>'+btn('modal-close','× Cerrar','secondary')+'</div>'+
+ '<div class="two"><div class="field"><label>Cámara</label><select id="camera-choice"></select></div><div class="field"><label>Micrófono</label><select id="mic-choice"></select></div></div>'+
+ '<div class="record-format-options">'+
+ '<button class="record-format active" data-action="record-format" data-format="square">□ 1:1 Cuadrado</button>'+
+ '<button class="record-format" data-action="record-format" data-format="portrait">▯ 9:16 Vertical</button>'+
+ '<button class="record-format" data-action="record-format" data-format="wide">▭ 16:9 Horizontal</button></div>'+
+ '<div class="record-stage format-square" id="record-stage"><video id="camera-preview" autoplay muted playsinline></video><video id="record-review" controls playsinline hidden></video><span id="record-guide">Encuadre de cámara</span></div>'+
+ '<div class="row between recorder-meta"><span id="record-resolution">720 × 720 px · 30 FPS</span><strong id="record-clock">0:00</strong></div>'+
+ '<div class="row wrap recorder-actions" id="record-live-actions">'+btn('record-start','● Iniciar grabación')+btn('record-stop','■ Detener','danger','disabled')+'</div>'+
+ '<div class="row wrap recorder-actions" id="record-review-actions" hidden>'+btn('record-retry','↻ Repetir','secondary')+btn('record-save','✓ Guardar grabación')+'</div>'+
+ '</div></div>';
+ try{await openCamera()}catch(e){closeRecorder();throw Error('No se pudo activar cámara y micrófono: '+e.message)}
 }
 async function startRecording(){
- const camera=$('#camera-choice')?.value||undefined,mic=$('#mic-choice')?.value||undefined;
- state.settings.defaultCamera=camera||'';state.settings.defaultMic=mic||'';await api('settings:set',state.settings);
- const constraints={video:camera?{deviceId:{ideal:camera}}:true,audio:mic?{deviceId:{ideal:mic}}:true};
- const stream=await navigator.mediaDevices.getUserMedia(constraints);state.recordStream=stream;
- const el=$('#camera-preview');el.srcObject=stream;await el.play();
+ if(state.recorder?.state==='recording')return;
+ if(!state.recordStream)await openCamera();
+ const camera=$('#camera-preview');
+ if(!camera?.videoWidth||!camera.videoHeight)throw Error('La cámara todavía no está lista');
+ const [width,height]=captureDimensions(),canvas=document.createElement('canvas');
+ canvas.width=width;canvas.height=height;
+ const ctx=canvas.getContext('2d',{alpha:false});
+ if(!ctx)throw Error('No se pudo preparar la captura');
+ state.recordStartAt=Date.now();
+ const draw=()=>{
+  if(camera.readyState<2)return;
+  const sw=camera.videoWidth,sh=camera.videoHeight,target=width/height,actual=sw/sh;
+  const cw=actual>target?sh*target:sw,ch=actual>target?sh:sw/target;
+  ctx.drawImage(camera,(sw-cw)/2,(sh-ch)/2,cw,ch,0,0,width,height);
+  const clock=$('#record-clock');if(clock)clock.textContent=fmt((Date.now()-state.recordStartAt)/1000);
+ };
+ draw();
+ const videoStream=canvas.captureStream(30);
+ state.recordCapture=new MediaStream([...videoStream.getVideoTracks(),...state.recordStream.getAudioTracks()]);
  const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(x=>MediaRecorder.isTypeSupported(x));
- if(!mime)throw Error('No hay grabador de video compatible en este equipo');
- state.recordParts=[];state.recorder=new MediaRecorder(stream,{mimeType:mime});
- state.recorder.ondataavailable=e=>{if(e.data.size)state.recordParts.push(e.data)};
- state.recorder.start(1000);
- document.querySelector('[data-action="record-start"]').disabled=true;
- document.querySelector('[data-action="record-stop"]').disabled=false;
+ if(!mime){releaseCamera();throw Error('No se encontró un codificador de video compatible')}
+ try{
+  state.recordParts=[];
+  state.recorder=new MediaRecorder(state.recordCapture,{mimeType:mime,videoBitsPerSecond:4000000,audioBitsPerSecond:128000});
+  state.recorder.ondataavailable=e=>{if(e.data.size)state.recordParts.push(e.data)};
+  state.recorder.start(1000);
+  state.recordTimer=setInterval(draw,1000/30);
+ }catch(e){state.recorder=null;releaseCamera();throw e}
+ const start=$('[data-action="record-start"]'),stop=$('[data-action="record-stop"]');
+ if(start)start.disabled=true;if(stop)stop.disabled=false;
+ document.querySelectorAll('[data-action="record-format"],#camera-choice,#mic-choice').forEach(el=>el.disabled=true);
+ state.settings.defaultCamera=$('#camera-choice')?.value||'';
+ state.settings.defaultMic=$('#mic-choice')?.value||'';
+ try{await api('settings:set',state.settings)}catch(e){console.warn('No se guardó el dispositivo predeterminado',e)}
 }
 async function stopRecording(){
- if(!state.recorder)return;
- const r=state.recorder;await new Promise(resolve=>{r.addEventListener('stop',resolve,{once:true});r.stop()});
- if(state.recordStream)state.recordStream.getTracks().forEach(t=>t.stop());
- state.recordStream=null;state.recorder=null;
- const blob=new Blob(state.recordParts,{type:'video/webm'}),base64=await new Promise((resolve,reject)=>{
-  const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=reject;reader.readAsDataURL(blob)});
- const item=await api('assets:record',{projectId:state.project.id,name:'Grabación '+new Date().toLocaleString('es-EC'),data:base64});
+ const rec=state.recorder;if(!rec||rec.state==='inactive')return;
+ await new Promise((resolve,reject)=>{
+  rec.addEventListener('stop',resolve,{once:true});
+  rec.addEventListener('error',e=>reject(e.error||Error('Falló la grabación')),{once:true});
+  rec.stop();
+ });
+ state.recorder=null;releaseCamera();
+ const blob=new Blob(state.recordParts,{type:'video/webm'});
+ if(blob.size<100)throw Error('La grabación quedó vacía');
+ state.recordDraft=blob;
+ state.recordDraftUrl=URL.createObjectURL(blob);
+ const live=$('#record-live-actions'),actions=$('#record-review-actions'),camera=$('#camera-preview'),review=$('#record-review');
+ if(live)live.hidden=true;if(actions)actions.hidden=false;if(camera)camera.hidden=true;
+ if(review){review.hidden=false;review.src=state.recordDraftUrl;review.load()}
+ const guide=$('#record-guide');if(guide)guide.textContent='Revisa antes de guardar';
+ notice('Grabación lista para revisar');
+}
+async function retryRecording(){
+ discardRecording();
+ const live=$('#record-live-actions'),actions=$('#record-review-actions'),camera=$('#camera-preview'),review=$('#record-review');
+ if(live)live.hidden=false;if(actions)actions.hidden=true;if(camera)camera.hidden=false;if(review)review.hidden=true;
+ const clock=$('#record-clock');if(clock)clock.textContent='0:00';
+ const guide=$('#record-guide');if(guide)guide.textContent='Encuadre de cámara';
+ const start=$('[data-action="record-start"]'),stop=$('[data-action="record-stop"]');
+ if(start)start.disabled=false;if(stop)stop.disabled=true;
+ document.querySelectorAll('[data-action="record-format"],#camera-choice,#mic-choice').forEach(el=>el.disabled=false);
+ await openCamera();
+}
+async function saveRecordedVideo(){
+ if(!state.recordDraft)throw Error('No hay grabación pendiente');
+ const data=await new Promise((resolve,reject)=>{
+  const reader=new FileReader();
+  reader.onload=()=>resolve(String(reader.result).split(',')[1]);
+  reader.onerror=reject;reader.readAsDataURL(state.recordDraft);
+ });
+ const type={square:'cuadrada 1-1',portrait:'vertical 9-16',wide:'horizontal 16-9'}[state.recordFormat];
+ const item=await api('assets:record',{projectId:state.project.id,name:'Grabación '+type+' '+new Date().toLocaleString('es-EC'),data});
  state.project=await api('projects:get',{id:state.project.id});
- const s=state.project.scenes[state.scene];const info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
+ const s=state.project.scenes[state.scene],info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
  s.video=item.id;s.start=0;s.end=Math.min(info.duration,180);s.silences=[];s.approved=false;
- await saveNow();$('#modal-root').hidden=true;render();refreshWaveform();notice('Grabación guardada en disco D');
+ await saveNow();
+ closeRecorder();render();refreshWaveform();notice('Grabación guardada en disco D · '+type);
 }
 async function exportNow(kind){const key=kind==='short'?'render:short':'render:weekly';state.status='Preparando exportación local con FFmpeg…';state.progress=3;render();try{
  const result=await api(key,kind==='short'?{projectId:state.project.id}:{id:state.week.id});
@@ -235,9 +345,12 @@ document.addEventListener('click',async e=>{
   if(action==='export-short'){await saveNow();if(!order.every(k=>state.project.scenes[k].approved))throw Error('Aprueba todas las escenas');return await exportNow('short')}
   if(action==='cancel-render'){await api('render:cancel');return notice('Cancelando proceso…')}
   if(action==='start-recorder')return await manageRecording();
+  if(action==='record-format')return selectRecordFormat(b.dataset.format);
   if(action==='record-start')return await startRecording();
   if(action==='record-stop')return await stopRecording();
-  if(action==='modal-close'){if(state.recordStream)state.recordStream.getTracks().forEach(t=>t.stop());state.recordStream=null;$('#modal-root').hidden=true;return}
+  if(action==='record-retry')return await retryRecording();
+  if(action==='record-save')return await saveRecordedVideo();
+  if(action==='modal-close'){closeRecorder();return}
   if(action==='import-logo'){await api('assets:import-logo');state.settings=await api('settings:get');return render()}
   if(action==='save-settings'){state.settings.silenceThreshold=Number($('#silenceThreshold').value)||.5;state.settings.autoMicrocuts=$('#autoMicrocuts').checked;state.settings=await api('settings:set',state.settings);return notice('Preferencias guardadas')}
   if(action==='edit-week-intro'||action==='edit-week-closing'){
@@ -257,7 +370,8 @@ document.addEventListener('click',async e=>{
   if(action==='export-week')return await exportNow('week');
  }catch(err){notice(err.message,true);console.error(err)}
 });
-document.addEventListener('change',e=>{
+document.addEventListener('change',async e=>{
+ if(e.target.id==='camera-choice'||e.target.id==='mic-choice'){if(!state.recorder)try{await openCamera()}catch(err){notice(err.message,true)}return}
  const p=state.project;if(!p||state.page!=='project')return;
  const s=p.scenes[state.scene],el=e.target;
  if(el.dataset.field){s[el.dataset.field]=['start','end','scale'].includes(el.dataset.field)?Number(el.value):el.value;s.approved=false;queueSave();if(el.dataset.field==='start'||el.dataset.field==='end')render()}
