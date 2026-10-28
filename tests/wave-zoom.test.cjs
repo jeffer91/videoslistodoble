@@ -10,8 +10,9 @@ test('ampliar multiplica realmente el ancho visible de la onda',()=>{
 test('el segmento final sigue localizable tras ampliar',()=>{
  const seconds=45.671,width=zoom.widthFor(seconds,830,8),left=zoom.scrollForTime(45,seconds,width,830);
  assert.ok(left>0);
- const center=(left+830/2)/width*seconds;
- assert.ok(Math.abs(center-45)<.03);
+ const marker=45/seconds*width;
+ assert.ok(marker>=left&&marker<=left+830,'el segundo 45 debe permanecer visible');
+ assert.ok(left<=width-830,'el desplazamiento no excede el contenido');
  assert.equal(zoom.timeAtPointer(-5,100,830,seconds),0);
  assert.ok(zoom.timeAtPointer(515,100,830,seconds)>22);
 });
