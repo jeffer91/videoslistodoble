@@ -1,6 +1,6 @@
 'use strict';
 const $=s=>document.querySelector(s);
-const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},templates:[],status:'',progress:0,recordStream:null,recordCapture:null,recordTimer:null,recorder:null,recordParts:[],recordDraft:null,recordDraftUrl:null,recordFormat:'square',recordStartAt:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},waveErrors:{},videoDurations:{},showSafe:false,previewIndex:-1,previewUrls:{},previewErrors:{},previewTimelines:{},previewPending:{}};
+const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},templates:[],globalAssets:[],globalTab:'backgrounds',projectFilter:'all',status:'',progress:0,recordStream:null,recordCapture:null,recordTimer:null,recorder:null,recordParts:[],recordDraft:null,recordDraftUrl:null,recordFormat:'square',recordStartAt:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},waveErrors:{},videoDurations:{},showSafe:false,previewIndex:-1,previewUrls:{},previewErrors:{},previewTimelines:{},previewPending:{}};
 const names={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
 const order=['hook','body','closing'];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9,7 +9,7 @@ const value=(a,k,f)=>a?.[k]??f;
 const fmt=s=>{const n=Number(s)||0;return Math.floor(n/60)+':'+String(Math.floor(n%60)).padStart(2,'0')};
 async function api(key,payload){const r=await window.studio.call(key,payload||{});if(!r.ok)throw Error(r.error||'Error desconocido');return r.data}
 function notice(msg,error=false){const el=$('#toast');el.textContent=msg;el.hidden=false;el.classList.toggle('error',error);clearTimeout(notice.timer);notice.timer=setTimeout(()=>el.hidden=true,6500)}
-async function loadLibrary(){const [projects,weeks,templates]=await Promise.all([api('projects:list'),api('weekly:list'),api('templates:list')]);state.projects=projects;state.weeks=weeks;state.templates=templates}
+async function loadLibrary(){const [projects,weeks,templates,globalAssets]=await Promise.all([api('projects:list'),api('weekly:list'),api('templates:list'),api('global:list')]);state.projects=projects;state.weeks=weeks;state.templates=templates;state.globalAssets=globalAssets}
 function titlebar(title,description,buttons=''){return '<div class="topbar"><div><h1>'+esc(title)+'</h1><p>'+esc(description||'')+'</p></div><div class="row wrap">'+buttons+'</div></div>'}
 function btn(action,label,cls='',attrs=''){return '<button data-action="'+action+'" class="'+cls+'" '+attrs+'>'+label+'</button>'}
 function projectTile(p){return '<article class="card" data-action="open-project" data-id="'+esc(p.id)+'"><div class="row between"><span class="pill">'+(p.status==='exported'?'Short exportado':p.status==='auxiliary'?'Complementario':'En edición')+'</span><span class="muted mini">'+new Date(p.updatedAt).toLocaleDateString('es-EC')+'</span></div><h3>'+esc(p.title)+'</h3><div class="row between"><small>'+(p.exports||[]).length+' exportaciones · '+(p.usedBy||[]).length+' compilaciones</small><strong>Editar →</strong></div></article>'}
@@ -136,9 +136,13 @@ function silenceTimeline(scene){
 function selectedTemplate(project,format,sceneKey=state.scene){
  const scene=project?.scenes?.[sceneKey],id=Object.prototype.hasOwnProperty.call(scene?.backgrounds||{},format)
   ?scene.backgrounds[format]:(project?.backgrounds?.[format]||null);
+ if(id&&typeof id==='object'&&id.scope==='project'){
+  const asset=project.assets.find(a=>a.id===id.assetId);
+  return asset?.type==='image'?{id:asset.id,assetId:asset.id,scope:'project',name:asset.name,format}:null;
+ }
  return state.templates.find(t=>t.id===id&&t.format===format)||null;
 }
-function templateUrl(t){return t?'records://template/'+encodeURIComponent(t.id):''}
+function templateUrl(t){return t?(t.scope==='project'?url(state.project,t.assetId):'records://template/'+encodeURIComponent(t.id)):''}
 function templateGallery(format){
  const items=state.templates.filter(t=>t.format===format),defaultId=state.settings.templateDefaults?.[format]||null;
  return '<section class="template-section"><h3>'+(format==='short'?'Shorts 9:16':'Videos largos 16:9')+'</h3>'+
@@ -154,18 +158,22 @@ function templateGallery(format){
 function backgroundChooser(){
  const format=state.orientation,scene=state.project?.scenes?.[state.scene];
  const current=Object.prototype.hasOwnProperty.call(scene?.backgrounds||{},format)?scene.backgrounds[format]:state.project?.backgrounds?.[format]||null;
- const list=state.templates.filter(t=>t.format===format),root=$('#modal-root');
+ const list=state.templates.filter(t=>t.format===format),local=(state.project?.assets||[]).filter(a=>a.type==='image'),root=$('#modal-root');
  root.hidden=false;
  root.innerHTML='<div class="modalback"><div class="modal template-picker">'+
  '<div class="row between"><h2>Fondo '+(format==='short'?'9:16':'16:9')+'</h2>'+btn('template-picker-close','× Cerrar','secondary')+'</div>'+
  '<p class="muted mini">Fondo exclusivo para '+names[state.scene]+'. Las otras escenas conservan el suyo.</p>'+
  '<div class="row wrap">'+btn('project-template-upload','＋ Subir fondo','secondary')+
- btn('project-template-paste','▣ Pegar imagen','outline')+
+ btn('project-template-paste','▣ Pegar al proyecto','outline')+
  btn('project-template-inherit','Heredar fondo general','secondary')+
  btn('project-template-select','Sin fondo','secondary','data-id=""')+'</div>'+
+ '<h3 class="library-heading">Biblioteca general</h3>'+
  '<div class="template-grid template-modal-grid">'+list.map(t=>
  '<button class="template-choice '+(t.id===current?'selected':'')+'" data-action="project-template-select" data-id="'+t.id+'">'+
- '<img src="'+templateUrl(t)+'" alt=""><span>'+esc(t.name)+'</span></button>').join('')+'</div></div></div>';
+ '<img src="'+templateUrl(t)+'" alt=""><span>'+esc(t.name)+'</span></button>').join('')+'</div>'+
+ '<h3 class="library-heading">Imágenes de este proyecto</h3>'+
+ (local.length?'<div class="template-grid template-modal-grid">'+local.map(a=>
+ '<button class="template-choice" data-action="project-template-local" data-id="'+a.id+'"><img src="'+url(state.project,a.id)+'" alt=""><span>'+esc(a.name)+'</span></button>').join('')+'</div>':'<p class="muted mini">No hay imágenes exclusivas. Usa «Subir fondo» para añadir una.</p>')+'</div></div>';
 }
 async function importTemplate(format,paste=false,assign=false){
  let files=[],errors=[];
@@ -175,7 +183,7 @@ async function importTemplate(format,paste=false,assign=false){
   files=response.files||[];errors=response.errors||[];
  }
  if(files.length){
-  if(!state.settings.templateDefaults?.[format])state.settings=await api('templates:set-default',{format,id:files[0].id});
+  // La importación no cambia los fondos predeterminados sin una elección explícita.
   state.templates=await api('templates:list');
   if(assign&&state.project){
    const scene=state.project.scenes[state.scene];scene.backgrounds={...(scene.backgrounds||{}),[format]:files[0].id};
@@ -215,11 +223,11 @@ function sceneView(){
  '<div class="field"><label>Plantilla visual del proyecto</label><select data-project-field="style"><option value="historic" '+(style==='historic'?'selected':'')+'>Récord histórico</option><option value="numbers" '+(style==='numbers'?'selected':'')+'>Récord en cifras</option><option value="legends" '+(style==='legends'?'selected':'')+'>Leyendas y récords</option></select></div>'+
  '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label>'+(state.scene==='closing'?'<input value="Centro · primer plano" disabled>':'<select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select>')+'</div></div>'+
  '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>';
- const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+'</div>')+mediaRows();
+ const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+btn('choose-project-media','Desde biblioteca del proyecto','secondary')+'</div>')+mediaRows();
  const audio='<p class="muted mini">Mueve A y B sobre la onda para seleccionar el suspiro u otra parte. El original nunca se borra.</p>'+
  '<div class="two"><div class="field"><label>Inicio del video (s)</label><input type="number" min="0" step="0.1" data-field="start" value="'+(s.start||0)+'"></div><div class="field"><label>Final del video (s)</label><input type="number" min="0" step="0.1" data-field="end" value="'+(s.end||0)+'"></div></div>'+
  waveformEditorHTML(s)+recutListHTML(s)+silenceTimeline(s);
- return titlebar(p.title,'Proyecto local · se guarda automáticamente',btn('back','← Biblioteca','secondary')+(state.editingWeekId?btn('return-week','Volver al video semanal','secondary'):'')+btn('export-short','Exportar Short MP4','',''+(!approved?'disabled title="Aprueba las tres escenas primero"':'')))+
+ return titlebar(p.title,'Proyecto local · se guarda automáticamente',btn('back','← Mis proyectos','secondary')+btn('project-library','Biblioteca del proyecto','secondary')+(state.editingWeekId?btn('return-week','Volver al video semanal','secondary'):'')+btn('export-short','Exportar Short MP4','',''+(!approved?'disabled title="Aprueba las tres escenas primero"':'')))+
  '<div class="steps">'+order.map(k=>'<button data-action="scene" data-id="'+k+'" class="step '+(k===state.scene?'active':'')+'">'+(p.scenes[k].approved?'✓ ':'')+names[k]+'</button>').join('')+'</div>'+
  '<div class="stagegrid"><section><div class="panel preview-panel"><div class="row between"><h2>Vista previa</h2><div class="row">'+btn('orientation-short','9:16','secondary')+btn('orientation-wide','16:9','secondary')+'</div></div>'+
  previewHTML+'<div class="preview-status" id="preview-status">'+(video?(previewSrc?'Video listo':'Preparando reproducción compatible…'):'Importa una grabación')+'</div><div class="row wrap playback-controls">'+btn('play-preview','▶ Reproducir')+btn('pause-preview','Ⅱ Pausa','secondary')+btn('stop-preview','■ Detener','secondary')+btn('retry-preview','↻ Reparar video','secondary')+'</div></div></section>'+
@@ -230,12 +238,115 @@ function sceneView(){
  '<div class="panel approval-panel"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></section></div>'+
  (state.status?'<div class="panel"><strong>'+esc(state.status)+'</strong><div class="progressbar"><div style="width:'+state.progress+'%"></div></div>'+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
 }
+
+function globalMediaUrl(item){return 'records://global-media/'+encodeURIComponent(item.id)}
+function globalLibraryPage(){
+ const tab=state.globalTab,buttons=btn('global-tab','Fondos',tab==='backgrounds'?'active':'secondary','data-tab="backgrounds"')+
+  btn('global-tab','Fotos y clips',tab==='media'?'active':'secondary','data-tab="media"');
+ const current=state.project?'<span class="pill">Proyecto conectado: '+esc(state.project.title)+'</span>':'<span class="muted mini">Abre un proyecto para copiar recursos directamente.</span>';
+ const mediaControls='<div class="row wrap">'+btn('global-import','＋ Importar fotos o clips','secondary')+btn('global-paste','▣ Pegar imagen','outline')+'</div>';
+ const cards=state.globalAssets.length?'<div class="library-grid">'+state.globalAssets.map(item=>'<article class="library-card">'+
+  (item.type==='image'?'<img loading="lazy" src="'+globalMediaUrl(item)+'" alt="'+esc(item.name)+'">':'<div class="library-video">▣ Video</div>')+
+  '<strong title="'+esc(item.name)+'">'+esc(item.name)+'</strong><small>'+esc(item.type==='image'?'Imagen compartida':'Video compartido')+'</small>'+
+  '<div class="row wrap">'+(state.project?btn('global-copy-project','Copiar al proyecto','','data-id="'+item.id+'"'):'')+
+  btn('global-rename','Renombrar','secondary','data-id="'+item.id+'"')+btn('global-delete','Eliminar','danger','data-id="'+item.id+'"')+'</div></article>').join('')+'</div>':'<div class="empty">No hay fotos ni clips compartidos. Importa tus primeros recursos.</div>';
+ return titlebar('Biblioteca general','Fondos y medios disponibles para todos tus proyectos')+
+  '<div class="panel"><div class="row wrap">'+buttons+'</div><p class="muted mini">Los fondos y medios se guardan en Recursos del disco D; los proyectos mantienen sus propios originales.</p>'+current+'</div>'+
+  (tab==='backgrounds'?'<div class="panel"><h2>Fondos reutilizables</h2>'+templateGallery('short')+templateGallery('wide')+'</div>':
+   '<div class="panel"><div class="row between"><h2>Fotografías y videos compartidos</h2>'+mediaControls+'</div>'+cards+'</div>');
+}
+function assetUsedInProject(project,item){
+ return order.flatMap(key=>{
+  const scene=project.scenes[key];if(!scene)return [];
+  const used=[];
+  if(scene.video===item.id)used.push(names[key]+' · narración');
+  if((scene.media||[]).some(m=>m.assetId===item.id))used.push(names[key]+' · apoyo');
+  if(Object.values(scene.backgrounds||{}).some(bg=>bg?.scope==='project'&&bg.assetId===item.id))used.push(names[key]+' · fondo');
+  return used;
+ });
+}
+function projectLibraryPage(){
+ const p=state.project;if(!p)return titlebar('Biblioteca del proyecto','Abre un proyecto para acceder a sus recursos')+btn('home','Mis proyectos','secondary');
+ const filters=['all','image','video'];
+ const tabs=filters.map(k=>btn('project-filter',({all:'Todos',image:'Fotos',video:'Videos'}[k]),state.projectFilter===k?'active':'secondary','data-type="'+k+'"')).join('');
+ const items=p.assets.filter(a=>state.projectFilter==='all'||a.type===state.projectFilter);
+ const cards=items.length?'<div class="library-grid">'+items.map(a=>{
+  const usage=assetUsedInProject(p,a),isVideo=a.type==='video';
+  return '<article class="library-card">'+(a.type==='image'?'<img loading="lazy" src="'+url(p,a.id)+'" alt="'+esc(a.name)+'">':'<div class="library-video">'+(isVideo?'▣ Video':'♫ Audio')+'</div>')+
+   '<strong title="'+esc(a.name)+'">'+esc(a.name)+'</strong>'+
+   '<small>'+(usage.length?esc(usage.join(' · ')):'Sin asignar · disponible para reutilizar')+'</small>'+
+   '<div class="row wrap">'+(a.type==='image'?btn('project-asset-background','Fondo '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
+   ((isVideo||a.type==='image')&&state.scene!=='closing'?btn('project-asset-attach','Apoyo '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
+   (isVideo?btn('project-asset-voice','Narración '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
+   btn('project-asset-publish','Compartir en general','secondary','data-id="'+a.id+'"')+
+   btn('project-asset-rename','Renombrar','secondary','data-id="'+a.id+'"')+
+   btn('project-asset-delete','Eliminar','danger','data-id="'+a.id+'"')+'</div></article>';
+ }).join('')+'</div>':'<div class="empty">No hay recursos de este tipo en el proyecto.</div>';
+ return titlebar('Biblioteca del proyecto',p.title,btn('open-current-project','← Volver al editor','secondary'))+
+ '<div class="panel"><div class="row between"><h2>Mis recursos</h2><div class="row wrap">'+btn('project-assets-upload','＋ Subir fotos o videos','secondary')+btn('project-assets-paste','▣ Pegar imagen','outline')+'</div></div>'+
+ '<p class="muted mini">Las imágenes y grabaciones permanecen aquí aunque las quites de una escena. Eliminar definitivamente requiere que no estén en uso.</p>'+
+ '<div class="row wrap">'+tabs+'</div>'+cards+'</div>';
+}
+function projectMediaPicker(){
+ const p=state.project,usable=(p?.assets||[]).filter(a=>a.type==='image'||a.type==='video'),root=$('#modal-root');
+ root.hidden=false;root.innerHTML='<div class="modalback"><div class="modal template-picker">'+
+ '<div class="row between"><h2>Elegir apoyo para '+names[state.scene]+'</h2>'+btn('template-picker-close','× Cerrar','secondary')+'</div>'+
+ '<p class="muted mini">Estas fotografías y clips ya están guardados en este proyecto. No se duplican.</p>'+
+ '<div class="library-grid">'+usable.map(a=>'<div class="library-card">'+(a.type==='image'?'<img src="'+url(p,a.id)+'" alt="">':'<div class="library-video">▣ Video</div>')+
+ '<strong>'+esc(a.name)+'</strong>'+btn('picker-attach','Usar en '+names[state.scene],'secondary','data-id="'+a.id+'"')+'</div>').join('')+'</div></div></div>';
+}
+async function refreshProjectAssets(){state.project=await api('projects:get',{id:state.project.id});render()}
+async function setSceneBackground(id){
+ const a=state.project?.assets.find(x=>x.id===id);
+ if(!a||a.type!=='image')throw Error('Selecciona una imagen de la biblioteca del proyecto');
+ const scene=state.project.scenes[state.scene];
+ scene.backgrounds={...(scene.backgrounds||{}),[state.orientation]:{scope:'project',assetId:id}};
+ scene.approved=false;await saveNow();render();
+}
+async function attachExisting(id){
+ const a=state.project?.assets.find(x=>x.id===id);
+ if(!a||!['image','video'].includes(a.type))throw Error('Recurso inexistente');
+ if(state.scene==='closing')throw Error('El cierre está reservado para el presentador y su fondo');
+ const scene=state.project.scenes[state.scene];
+ if(!scene.media)scene.media=[];
+ scene.media.push({assetId:id,start:0,end:0,speed:1,microcuts:true});
+ scene.approved=false;await saveNow();render();prepareScenePreview();
+}
+async function assignNarration(id){
+ const a=state.project.assets.find(x=>x.id===id);
+ if(!a||a.type!=='video')throw Error('Selecciona un video');
+ const info=await api('media:metadata',{projectId:state.project.id,assetId:id});
+ const scene=state.project.scenes[state.scene];
+ scene.video=id;scene.start=0;scene.end=Math.min(180,info.duration||0);scene.cuts=[];scene.silences=[];scene.approved=false;
+ await saveNow();resetCutEditor();render();refreshWaveform();prepareScenePreview();
+}
+async function uploadProjectOnly(kind='media',paste=false){
+ if(!state.project)throw Error('Abre un proyecto primero');
+ await saveNow();
+ const response=paste?{files:[await api('assets:paste-image',{projectId:state.project.id})],errors:[]}
+  :await api('assets:import',{projectId:state.project.id,kind});
+ await refreshProjectAssets();
+ const files=(response.files||[]).filter(Boolean),errors=response.errors||[];
+ if(errors.length)notice(errors[0].name+': '+errors[0].message,true);
+ else if(files.length)notice(files.length+' recurso(s) guardado(s) en la biblioteca del proyecto');
+ return files;
+}
+function renameResourceModal(scope,id,name){
+ const modal=$('#modal-root');modal.hidden=false;
+ modal.innerHTML='<div class="modalback"><div class="modal"><h2>Renombrar recurso</h2>'+
+ '<div class="field"><label>Nombre</label><input id="library-rename-name" maxlength="120" value="'+esc(name)+'"></div>'+
+ '<div class="row wrap">'+btn('library-rename-confirm','Guardar','','data-scope="'+scope+'" data-id="'+id+'"')+btn('template-picker-close','Cancelar','secondary')+'</div></div></div>';
+}
+function deleteResourceModal(scope,id,name){
+ const modal=$('#modal-root');modal.hidden=false;
+ modal.innerHTML='<div class="modalback"><div class="modal"><h2>Eliminar recurso</h2><p>¿Eliminar <strong>'+esc(name)+'</strong>? Esta operación borra el archivo de esa biblioteca. Los recursos en uso en el proyecto están protegidos.</p>'+
+ '<div class="row wrap">'+btn('library-delete-confirm','Eliminar','danger','data-scope="'+scope+'" data-id="'+id+'"')+
+ btn('template-picker-close','Cancelar','secondary')+'</div></div></div>';
+}
 function settingsPage(){
  const s=state.settings;
  return titlebar('Configuración','Fondos y preferencias locales')+
- '<div class="panel"><h2>Biblioteca de fondos</h2>'+
- '<p class="muted mini">Guarda imágenes reutilizables. La primera imagen de cada formato se establece como predeterminada para los proyectos nuevos. Los existentes no cambian solos.</p>'+
- templateGallery('short')+templateGallery('wide')+'</div>'+
+ '<div class="panel"><h2>Bibliotecas</h2><p>Los fondos compartidos y archivos del proyecto se gestionan por separado. Las imágenes originales no se borran al retirarlas de una escena.</p>'+btn('global-library','Abrir Biblioteca general','secondary')+'</div>'+
  '<div class="panel"><h2>Biblioteca y dispositivos</h2><p>Los originales y exportaciones se guardan en <code>D:\\11-Records-Studio</code>.</p>'+
  '<div class="field"><label>Umbral de detección de silencios (segundos)</label><input type="number" id="silenceThreshold" min=".5" max="5" step=".1" value="'+(s.silenceThreshold||.5)+'"></div>'+
  '<label class="row"><input type="checkbox" id="autoMicrocuts" '+(s.autoMicrocuts?'checked':'')+'> Montaje de apoyo con microcortes opcionales</label>'+
@@ -268,8 +379,11 @@ function render(){
  const waveLeft=$('#edit-wave-scroll')?.scrollLeft||0;
  const oldVideo=$('#speaker-preview'),oldAsset=oldVideo?.dataset.asset;
  const wasPlaying=Boolean(oldVideo&&!oldVideo.paused&&!oldVideo.ended),oldTime=Number(oldVideo?.currentTime)||0;
- el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='project'?sceneView():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':home();
+ el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='project'?sceneView():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':home();
  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.action===(page==='project'?'home':page==='week'?'weeks':page)));
+ const sidebar=$('#sidebar-project'),title=$('#sidebar-project-title');
+ if(sidebar)sidebar.hidden=!state.project;
+ if(title&&state.project)title.textContent=state.project.title;
  const wave=$('#edit-wave-scroll');if(wave)wave.scrollLeft=waveLeft;
  const current=$('#speaker-preview');
  if(current&&oldAsset===current.dataset.asset&&current.getAttribute('src')){
@@ -701,7 +815,38 @@ document.addEventListener('error',e=>{
 document.addEventListener('click',async e=>{
  const b=e.target.closest('[data-action]');if(!b)return;
  const action=b.dataset.action;try{
-  if(['home','weeks','settings','legacy'].includes(action))return await navigate(action);
+  if(['home','weeks','settings','legacy','global-library','project-library'].includes(action))return await navigate(action);
+  if(action==='open-current-project'){if(!state.project)throw Error('Abre un proyecto');return openProject(state.project.id,state.scene)}
+  if(action==='global-tab'){state.globalTab=b.dataset.tab;return render()}
+  if(action==='project-filter'){state.projectFilter=b.dataset.type;return render()}
+  if(action==='global-import'){const result=await api('global:import');state.globalAssets=await api('global:list');render();if(result.errors?.length)notice(result.errors[0].message,true);else if(result.files?.length)notice(result.files.length+' recurso(s) añadidos');return}
+  if(action==='global-paste'){await api('global:paste');state.globalAssets=await api('global:list');render();return}
+  if(action==='global-copy-project'){if(!state.project)throw Error('Abre un proyecto primero');await api('global:to-project',{projectId:state.project.id,id:b.dataset.id});await refreshProjectAssets();notice('Recurso copiado a la biblioteca del proyecto');return}
+  if(action==='global-rename'||action==='global-delete'){const item=state.globalAssets.find(x=>x.id===b.dataset.id);if(!item)return;return action==='global-rename'?renameResourceModal('global',item.id,item.name):deleteResourceModal('global',item.id,item.name)}
+  if(action==='project-assets-upload')return await uploadProjectOnly('media');
+  if(action==='project-assets-paste')return await uploadProjectOnly('media',true);
+  if(action==='project-asset-attach')return attachExisting(b.dataset.id);
+  if(action==='project-asset-background')return setSceneBackground(b.dataset.id);
+  if(action==='project-asset-voice')return assignNarration(b.dataset.id);
+  if(action==='project-asset-publish'){await api('global:from-project',{projectId:state.project.id,assetId:b.dataset.id});state.globalAssets=await api('global:list');notice('Copia compartida en Biblioteca general');return}
+  if(action==='project-asset-rename'||action==='project-asset-delete'){
+   const item=state.project?.assets.find(x=>x.id===b.dataset.id);if(!item)return;
+   return action==='project-asset-rename'?renameResourceModal('project',item.id,item.name):deleteResourceModal('project',item.id,item.name);
+  }
+  if(action==='library-rename-confirm'||action==='library-delete-confirm'){
+   const isGlobal=b.dataset.scope==='global',id=b.dataset.id;
+   if(action==='library-rename-confirm'){
+    const name=$('#library-rename-name')?.value;
+    await api(isGlobal?'global:rename':'assets:rename',isGlobal?{id,name}:{projectId:state.project.id,assetId:id,name});
+   }else await api(isGlobal?'global:delete':'assets:delete',isGlobal?{id}:{projectId:state.project.id,assetId:id});
+   const modal=$('#modal-root');modal.hidden=true;modal.innerHTML='';
+   if(isGlobal)state.globalAssets=await api('global:list');
+   else state.project=await api('projects:get',{id:state.project.id});
+   render();notice(action==='library-rename-confirm'?'Nombre actualizado':'Recurso eliminado');return;
+  }
+  if(action==='choose-project-media')return projectMediaPicker();
+  if(action==='picker-attach'){await attachExisting(b.dataset.id);const modal=$('#modal-root');modal.hidden=true;modal.innerHTML='';return}
+
   if(action==='back')return await navigate('home');
   if(action==='new'){
    const modal=$('#modal-root');modal.hidden=false;
@@ -724,13 +869,26 @@ document.addEventListener('click',async e=>{
   if(action==='template-picker-close'){const modal=$('#modal-root');modal.hidden=true;modal.innerHTML='';return}
   if(action==='template-upload')return await importTemplate(b.dataset.format,false,false);
   if(action==='template-paste')return await importTemplate(b.dataset.format,true,false);
-  if(action==='project-template-upload')return await importTemplate(state.orientation,false,true);
-  if(action==='project-template-paste')return await importTemplate(state.orientation,true,true);
+  if(action==='project-template-upload'){
+   const files=await uploadProjectOnly('image');
+   if(files.length)await setSceneBackground(files.find(a=>a.type==='image')?.id);
+   const root=$('#modal-root');root.hidden=true;root.innerHTML='';return;
+  }
+  if(action==='project-template-paste'){
+   const files=await uploadProjectOnly('image',true);
+   if(files.length)await setSceneBackground(files[0].id);
+   const root=$('#modal-root');root.hidden=true;root.innerHTML='';return;
+  }
   if(action==='project-template-inherit'){
    const scene=state.project.scenes[state.scene];if(scene.backgrounds)delete scene.backgrounds[state.orientation];
    scene.approved=false;await saveNow();
    const root=$('#modal-root');root.hidden=true;root.innerHTML='';
    render();notice('La escena utiliza el fondo general');return;
+  }
+  if(action==='project-template-local'){
+   await setSceneBackground(b.dataset.id);
+   const root=$('#modal-root');root.hidden=true;root.innerHTML='';
+   return;
   }
   if(action==='project-template-select'){
    const id=b.dataset.id||null;
@@ -849,10 +1007,16 @@ document.addEventListener('change',async e=>{
  else if(el.dataset.mediaMicro!==undefined){s.media[Number(el.dataset.mediaMicro)].microcuts=el.checked;s.approved=false;await saveNow();prepareScenePreview()}
 });
 document.addEventListener('paste',async e=>{
- if(state.page!=='project'||state.scene==='closing'||!state.project)return;
  if(e.target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;
  const items=Array.from(e.clipboardData?.items||[]);
  if(!items.some(item=>item.type.startsWith('image/')))return;
+ if(state.page==='global-library'&&state.globalTab==='media'){
+  e.preventDefault();try{await api('global:paste');state.globalAssets=await api('global:list');render()}catch(err){notice(err.message,true)}return;
+ }
+ if(state.page==='project-library'&&state.project){
+  e.preventDefault();try{await uploadProjectOnly('image',true)}catch(err){notice(err.message,true)}return;
+ }
+ if(state.page!=='project'||state.scene==='closing'||!state.project)return;
  e.preventDefault();
  try{await pasteImage(true)}catch(err){notice(err.message,true)}
 });

@@ -274,7 +274,9 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
  const entries=splitByEdits(timeline(scene,voiceInfo.duration,media),scene.cuts||[]);
  const format=wide?'wide':'short';
  const templateId=Object.prototype.hasOwnProperty.call(scene.backgrounds||{},format)?scene.backgrounds[format]:p.backgrounds?.[format];
- const templateFile=templateId?templates.resolve(root,templateId,wide?'wide':'short'):null;
+ const templateFile=templateId?(typeof templateId==='string'
+  ?templates.resolve(root,templateId,wide?'wide':'short')
+  :templateId.scope==='project'?store.resolveAsset(root,p.id,templateId.assetId):null):null;
  const appearance=scene.formats?.[wide?'wide':'short']||scene;
  const segments=[];
  for(let i=0;i<entries.length;i++){

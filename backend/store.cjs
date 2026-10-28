@@ -8,7 +8,7 @@ const makeScenes=()=>({
  body:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65,media:[]},
  closing:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'center',scale:80}
 });
-function ensureRoot(root){for(const dir of ['Proyectos','Compilaciones','Exportaciones/Shorts','Exportaciones/Videos-Largos','Recursos','Recursos/Plantillas','Respaldos','Configuracion','Temporales'])fs.mkdirSync(path.join(root,dir),{recursive:true});const logo=path.join(root,'Recursos','logo-11-records.png'),source=path.join(__dirname,'..','assets','logo-11-records.png');if(!fs.existsSync(logo)&&fs.existsSync(source))fs.copyFileSync(source,logo);const settings=getSettings(root);if(!settings.logo&&fs.existsSync(logo))saveSettings(root,{logo})}
+function ensureRoot(root){for(const dir of ['Proyectos','Compilaciones','Exportaciones/Shorts','Exportaciones/Videos-Largos','Recursos','Recursos/Plantillas','Recursos/Medios','Respaldos','Configuracion','Temporales'])fs.mkdirSync(path.join(root,dir),{recursive:true});const logo=path.join(root,'Recursos','logo-11-records.png'),source=path.join(__dirname,'..','assets','logo-11-records.png');if(!fs.existsSync(logo)&&fs.existsSync(source))fs.copyFileSync(source,logo);const settings=getSettings(root);if(!settings.logo&&fs.existsSync(logo))saveSettings(root,{logo})}
 function readJSON(file){return JSON.parse(fs.readFileSync(file,'utf8'))}
 function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(obj,null,2),'utf8');fs.renameSync(tmp,file)}
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
@@ -26,8 +26,13 @@ function saveProject(root,x){const original=getProject(root,x.id);
   if(!scene.backgrounds||typeof scene.backgrounds!=='object'||Array.isArray(scene.backgrounds))throw Error('Fondos de escena inválidos');
   for(const format of ['short','wide']){
    if(!Object.prototype.hasOwnProperty.call(scene.backgrounds,format))continue;
-   const id=scene.backgrounds[format];
-   if(id!==null)require('./templates.cjs').getWithFormat(root,id,format);
+   const selection=scene.backgrounds[format];
+   if(selection===null)continue;
+   if(typeof selection==='string')require('./templates.cjs').getWithFormat(root,selection,format);
+   else if(selection&&selection.scope==='project'&&typeof selection.assetId==='string'){
+    const asset=next.assets.find(a=>a.id===selection.assetId);
+    if(!asset||asset.type!=='image')throw Error('Imagen de fondo del proyecto no encontrada');
+   }else throw Error('Referencia de fondo inválida');
   }
  }
  if(next.backgrounds!==undefined){
@@ -74,6 +79,30 @@ function resolveAsset(root,projectId,assetId){
  if(!fs.statSync(file).isFile())throw Error('Recurso no es archivo');
  return file;
 }
+function renameAsset(root,projectId,assetId,name){
+ const p=getProject(root,projectId),a=p.assets.find(x=>x.id===assetId),value=String(name||'').trim().slice(0,120);
+ if(!a||!value)throw Error('Recurso o nombre inválido');
+ a.name=value;p.updatedAt=new Date().toISOString();atomic(projectFile(root,projectId),p);return a;
+}
+function removeAsset(root,projectId,assetId){
+ const p=getProject(root,projectId),a=p.assets.find(x=>x.id===assetId);
+ if(!a)throw Error('Recurso inexistente');
+ for(const scene of Object.values(p.scenes||{})){
+  if(scene.video===assetId||(scene.media||[]).some(m=>m.assetId===assetId)||
+    Object.values(scene.backgrounds||{}).some(b=>b?.scope==='project'&&b.assetId===assetId))
+    throw Error('Este archivo está en uso. Primero retíralo de las escenas.');
+ }
+ const file=resolveAsset(root,projectId,assetId);
+ p.assets=p.assets.filter(x=>x.id!==assetId);p.updatedAt=new Date().toISOString();
+ atomic(projectFile(root,projectId),p);
+ fs.rmSync(file,{force:true});
+ if(a.type==='video'){
+  const previews=path.join(root,'Proyectos',projectId,'Previews');
+  if(fs.existsSync(previews))for(const name of fs.readdirSync(previews))
+   if(name.startsWith(assetId+'-'))fs.rmSync(path.join(previews,name),{force:true});
+ }
+ return true;
+}
 function listProjects(root){return fs.readdirSync(path.join(root,'Proyectos'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{const p=getProject(root,e.name);return [{id:p.id,title:p.title,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,style:p.style,usedBy:p.usedBy||[],exports:p.exports||[]}]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function deleteProject(root,id){const p=getProject(root,id);if((p.usedBy||[]).length)throw Error('Este proyecto está utilizado en una compilación y no puede borrarse');fs.rmSync(path.dirname(projectFile(root,id)),{recursive:true,force:true});return true}
 function importLogo(root,source){const ext=path.extname(source).toLowerCase();if(!['.png','.jpg','.jpeg','.webp'].includes(ext))throw Error('Logo inválido');
@@ -88,4 +117,4 @@ function getWeek(root,id){return readJSON(weekFile(root,id))}
 function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing'])if(x[k]!==undefined)w[k]=x[k];if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
 function listWeeks(root){return fs.readdirSync(path.join(root,'Compilaciones'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{return [getWeek(root,e.name)]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function resolveManagedPath(root,filename){const file=path.resolve(filename),base=path.resolve(root);if(!file.startsWith(base+path.sep))throw Error('Solo se pueden abrir rutas dentro de la biblioteca');return file}
-module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};
+module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};

@@ -8,6 +8,7 @@ const store = require('./backend/store.cjs');
 const media = require('./backend/media.cjs');
 const images = require('./backend/image-import.cjs');
 const templates = require('./backend/templates.cjs');
+const globalMedia = require('./backend/global-media.cjs');
 const logos = require('./backend/logo.cjs');
 let win = null;
 let activeJob = null;
@@ -55,6 +56,12 @@ app.whenReady().then(()=>{
         if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+total;
         return new Response(stream,{status,headers});
       }
+      if(u.hostname==='global-media'){
+        const ids=u.pathname.split('/').filter(Boolean);
+        if(ids.length!==1)throw Error('Ruta de recurso general inválida');
+        const file=globalMedia.resolve(ROOT,decodeURIComponent(ids[0]));
+        const {net}=require('electron');return net.fetch(require('node:url').pathToFileURL(file).toString());
+      }
       if(u.hostname==='template'){
         const ids=u.pathname.split('/').filter(Boolean);
         if(ids.length!==1)throw Error('Ruta de plantilla inválida');
@@ -79,9 +86,10 @@ app.whenReady().then(()=>{
   register('assets:import',async x=>{
     const imageTypes=images.IMAGE_EXTENSIONS.map(e=>e.slice(1));
     const videos=['mp4','mov','mkv','webm','avi'];
-    const voice=x.kind==='voice';
+    const voice=x.kind==='voice',imagesOnly=x.kind==='image';
     const filters=voice
       ?[{name:'Videos de narración',extensions:videos}]
+      :imagesOnly?[{name:'Solo imágenes',extensions:imageTypes}]
       :[{name:'Imágenes y videos',extensions:[...new Set([...imageTypes,...videos])]},
         {name:'Solo imágenes',extensions:imageTypes},
         {name:'Todos los archivos',extensions:['*']}];
@@ -95,6 +103,7 @@ app.whenReady().then(()=>{
       try{
         const ext=path.extname(source).toLowerCase();
         if(voice&&!videos.includes(ext.slice(1)))throw Error('Para la narración selecciona un video');
+        if(imagesOnly&&!images.IMAGE_SET.has(ext))throw Error('Selecciona una imagen para el fondo');
         if(!voice&&!images.IMAGE_SET.has(ext)&&!videos.includes(ext.slice(1)))
           throw Error('Selecciona un archivo de imagen o video');
         const item=images.IMAGE_SET.has(ext)
@@ -104,6 +113,32 @@ app.whenReady().then(()=>{
       }catch(err){errors.push({name:path.basename(source),message:safeError(err)})}
     }
     return {files,errors};
+  });
+  register('assets:rename',x=>store.renameAsset(ROOT,x.projectId,x.assetId,x.name));
+  register('assets:delete',x=>store.removeAsset(ROOT,x.projectId,x.assetId));
+  register('global:list',()=>globalMedia.list(ROOT));
+  register('global:import',async x=>{
+    const exts=[...new Set([...images.IMAGE_EXTENSIONS.map(e=>e.slice(1)),'mp4','mov','mkv','webm','avi'])];
+    const result=await dialog.showOpenDialog(win,{title:'Importar a la biblioteca general',
+      properties:['openFile','multiSelections'],filters:[{name:'Imágenes y videos',extensions:exts},{name:'Todos',extensions:['*']}]});
+    const files=[],errors=[];
+    if(result.canceled)return {files,errors};
+    for(const source of result.filePaths){try{files.push(await globalMedia.importFile(ROOT,source))}
+      catch(e){errors.push({name:path.basename(source),message:safeError(e)})}}
+    return {files,errors};
+  });
+  register('global:paste',()=>{
+    const image=clipboard.readImage();
+    if(image.isEmpty())throw Error('No hay una imagen copiada');
+    return globalMedia.paste(ROOT,image.toPNG());
+  });
+  register('global:rename',x=>globalMedia.rename(ROOT,x.id,x.name));
+  register('global:delete',x=>globalMedia.remove(ROOT,x.id));
+  register('global:from-project',x=>globalMedia.importFile(ROOT,store.resolveAsset(ROOT,x.projectId,x.assetId),
+    store.getProject(ROOT,x.projectId).assets.find(a=>a.id===x.assetId)?.name));
+  register('global:to-project',x=>{
+    const item=globalMedia.get(ROOT,x.id);
+    return store.importAsset(ROOT,x.projectId,globalMedia.resolve(ROOT,x.id),item.name);
   });
   register('assets:paste-image',x=>{
     const picture=clipboard.readImage();
