@@ -63,6 +63,10 @@ function liveStageHTML(chapter){
   backdrop+support+'<div class="headline">'+esc(s.title||p.title)+'</div>'+
   '<div class="presenter-frame frame-'+frame+'" data-presenter-frame style="'+speakerStyle+'">'+
    '<video id="final-review-video" class="speaker live-speaker" data-asset="'+esc(chapter.assetId)+'" playsinline preload="metadata"></video>'+
+   '<span class="corner-ball corner-top-left" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-top-right" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-bottom-left" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-bottom-right" aria-hidden="true"></span>'+
   '</div>'+
   (closing?'<div class="follow">SÍGUENOS</div>':'')+
   (state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="">':'')+

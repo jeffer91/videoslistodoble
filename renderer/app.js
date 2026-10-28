@@ -247,6 +247,10 @@ function sceneView(){
  const preview=video?'<div class="presenter-frame frame-'+frame+'" data-presenter-frame style="'+presenterStyle+'">'+
   '<video class="speaker" id="speaker-preview" data-asset="'+esc(video.id)+'" '+(previewSrc?'src="'+previewSrc+'"':'')+' playsinline preload="metadata"></video>'+
   '<video class="speaker speaker-frozen" id="speaker-frozen" '+(previewSrc?'src="'+previewSrc+'"':'')+' muted playsinline preload="metadata" hidden></video>'+
+  '<span class="corner-ball corner-top-left" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-top-right" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-bottom-left" aria-hidden="true"></span>'+
+  '<span class="corner-ball corner-bottom-right" aria-hidden="true"></span>'+
   '</div>':'';
  let bg='';
  if(currentBackground)bg='<img class="template-back" src="'+templateUrl(currentBackground)+'" alt="Fondo del video">';

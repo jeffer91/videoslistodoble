@@ -8,7 +8,7 @@
     "start": "electron .",
     "dev": "electron .",
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check backend/review.cjs && node --check backend/templates.cjs && node --check backend/global-media.cjs && node --check backend/logo.cjs && node --check renderer/app.js && node --check renderer/live-review.js && node --check renderer/wave-zoom.js && node --check renderer/presenter-frame.js",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check backend/corner-balls.cjs && node --check backend/review.cjs && node --check backend/templates.cjs && node --check backend/global-media.cjs && node --check backend/logo.cjs && node --check renderer/app.js && node --check renderer/live-review.js && node --check renderer/wave-zoom.js && node --check renderer/presenter-frame.js",
     "dist:win": "electron-builder --win nsis --publish never",
     "dist:dir": "electron-builder --dir"
   },

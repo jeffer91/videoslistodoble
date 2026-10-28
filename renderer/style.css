@@ -280,3 +280,21 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .stage .presenter-frame.frame-none{padding:0;border-radius:7px;background:none;box-shadow:none}
 .stage .presenter-frame.frame-none::before,.stage .presenter-frame.frame-none::after{display:none}
 .stage .presenter-frame.frame-none > video.speaker{border-radius:7px!important}
+
+/* Balones pequeños en las cuatro esquinas; sin etiquetas ni letras en el marco. */
+.stage .presenter-frame::before,
+.stage .presenter-frame::after,
+.stage .presenter-frame.frame-neon::before,
+.stage .presenter-frame.frame-neon::after,
+.stage .presenter-frame.frame-minimal::before,
+.stage .presenter-frame.frame-minimal::after {content:none!important;display:none!important}
+.stage .presenter-frame .corner-ball{
+ position:absolute;z-index:12;width:13px;height:13px;pointer-events:none;
+ background:url("../assets/soccer-corner.svg") center / contain no-repeat;
+ filter:drop-shadow(0 1px 2px #000d) drop-shadow(0 0 2px #ffe19a99);
+}
+.stage .presenter-frame .corner-top-left{left:-6px;top:-6px}
+.stage .presenter-frame .corner-top-right{right:-6px;top:-6px}
+.stage .presenter-frame .corner-bottom-left{left:-6px;bottom:-6px}
+.stage .presenter-frame .corner-bottom-right{right:-6px;bottom:-6px}
+.stage .presenter-frame.frame-none .corner-ball{display:none}

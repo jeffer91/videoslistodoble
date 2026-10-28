@@ -3,6 +3,7 @@ const path=require('node:path'),fs=require('node:fs'),os=require('node:os'),{spa
 const store=require('./store.cjs');
 const templates=require('./templates.cjs');
 const logoTools=require('./logo.cjs');
+const cornerBalls=require('./corner-balls.cjs');
 const bins={};
 function toolPath(which){
  if(bins[which])return bins[which];
@@ -28,7 +29,7 @@ async function command(exe,args,signal,onLine,cwd){
 }
 async function probe(file){
  const r=await command(toolPath('ffprobe'),['-v','error','-show_entries',
-  'format=duration:stream=codec_type,duration','-of','json',file]);
+  'format=duration:stream=codec_type,duration,width,height','-of','json',file]);
  const data=JSON.parse(r.stdout),streams=data.streams||[];
  const numeric=x=>Number.isFinite(Number(x))&&Number(x)>0?Number(x):0;
  let duration=Math.max(numeric(data.format?.duration),...streams.map(s=>numeric(s.duration)),0);
@@ -44,7 +45,8 @@ async function probe(file){
    duration=Math.max(duration,Number(pts[1])+(packetDuration?Number(packetDuration[1]):0));
   }
  }
- return {duration,hasAudio:streams.some(x=>x.codec_type==='audio')};
+ const video=streams.find(x=>x.codec_type==='video');
+ return {duration,hasAudio:streams.some(x=>x.codec_type==='audio'),width:Number(video?.width)||0,height:Number(video?.height)||0};
 }
 async function detectSilences(file,threshold){
  const sec=Math.max(.5,Math.min(5,Number(threshold)||.5));
@@ -168,7 +170,7 @@ async function getPreviewTimeline(root,projectId,key){
 }
 function ffFilterPath(p){return p.replace(/\\/g,'/').replace(/:/g,'\\:').replace(/'/g,"\\'").replace(/,/g,'\\,')}
 function ffFont(){return process.platform==='win32'?"fontfile='"+ffFilterPath(path.join(process.env.WINDIR||'C:/Windows','Fonts','arialbd.ttf'))+"'":'font=Sans'}
-function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme,freezeVideo=false,templateIndex=null,sceneKey='body'){
+function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,speed,theme,freezeVideo=false,templateIndex=null,sceneKey='body',cornerIndex=null){
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const closing=sceneKey==='closing';
  const contentW=closing?(wide?1220:950):(wide?1380:930),contentH=closing?(wide?1000:1500):(wide?825:1160);
@@ -205,22 +207,22 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
   const themes={sport:['0xd5ad4b','0xffdf88','0x103d2b'],gold:['0xbf842b','0xffe6a0','0x37230b'],
    neon:['0x1cbfec','0xd234e9','0x082d48'],minimal:['0xc5d8d0','0xebf7ee','0x223c31']};
   const colors=themes[kind],edge=Math.max(2,Math.round(6*renderRatio));
+  const outer=appearance?.cornerGeometry?.outer||Math.max(3,Math.round(11*renderRatio));
   let frameFilter='';
   if(colors){
-   const outer=Math.max(3,Math.round(11*renderRatio)),badgeH=Math.max(5,Math.round(20*renderRatio));
-   const badgeW=Math.max(22,Math.round(106*renderRatio));
    frameFilter=',pad=iw+'+(2*outer)+':ih+'+(2*outer)+':'+outer+':'+outer+':color='+colors[2]+
     ',drawbox=x=0:y=0:w=iw:h=ih:color='+colors[0]+':t='+edge+
     ',drawbox=x='+edge+':y='+edge+':w=iw-'+(2*edge)+':h=ih-'+(2*edge)+':color='+colors[1]+':t='+Math.max(1,Math.round(2*renderRatio))+
     ',drawbox=x='+outer+':y=ih-'+Math.max(2,Math.round(7*renderRatio))+
     ':w=iw-'+(2*outer)+':h='+Math.max(2,Math.round(4*renderRatio))+':color='+colors[1]+':t=fill';
-   if(kind!=='minimal'){
-    frameFilter+=',drawbox=x='+outer+':y=0:w='+badgeW+':h='+badgeH+':color='+colors[2]+':t=fill'+
-      ',drawtext=text=11 RECORDS:fontcolor='+colors[1]+':fontsize='+Math.max(8,Math.round(16*renderRatio))+
-      ':'+ffFont()+':x='+Math.max(2,Math.round(7*renderRatio))+':y=0';
-   }
   }
-  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1'+frameFilter+'[speaker]');
+  const geo=appearance?.cornerGeometry;
+  const size=geo?geo.videoWidth+':'+geo.videoHeight:pw+':'+ph+':force_original_aspect_ratio=decrease';
+  f.push(voiceInput+'scale='+size+',setsar=1'+frameFilter+'[speakerPlain]');
+  if(Number.isInteger(cornerIndex)){
+   f.push('['+cornerIndex+':v]format=rgba[cornerArt]');
+   f.push('[speakerPlain][cornerArt]overlay=0:0:shortest=0[speaker]');
+  }else f.push('[speakerPlain]null[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
  }else f.push('[base]null[visual]');
  const strip=theme==='numbers'?'0xb92d42':theme==='legends'?'0xd8b56a':'0x2fcb6b';
@@ -246,6 +248,9 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  const titleFile=path.join(ctx,'title-'+path.basename(target)+'.txt');
  fs.writeFileSync(titleFile,sanitizeTitle(title),'utf8');
  const voiceInfo=await probe(voice);
+ const frameKind=appearance?.frame||'sport';
+ const geometry=withPresenter&&frameKind!=='none'?cornerBalls.calculate(
+  wide,sceneKey==='closing',appearance,testing,voiceInfo.width,voiceInfo.height):null;
  const args=['-hide_banner','-loglevel','error','-y','-ss',String(start),'-i',voice];
  if(withPresenter){
   if(mediaAsset.type==='image')args.push('-loop','1','-i',mediaAsset.file);
@@ -254,12 +259,16 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  if(hasLogo)args.push('-loop','1','-i',logo);
  const templateIndex=templateFile?1+(withPresenter?1:0)+(hasLogo?1:0):null;
  if(templateFile)args.push('-loop','1','-i',templateFile);
+ const cornerIndex=geometry?1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0):null;
+ if(geometry)args.push('-loop','1','-i',await cornerBalls.create(ctx,geometry));
  if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
- const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,{...appearance,narrationSpeed},speed,theme,edit.freezeVideo===true,templateIndex,sceneKey);
+ const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,
+  {...appearance,narrationSpeed,cornerGeometry:geometry},speed,theme,
+  edit.freezeVideo===true,templateIndex,sceneKey,cornerIndex);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
  if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,atempo='+Math.max(.5,Math.min(2,narrationSpeed)).toFixed(3)+(edit.muteAudio?',volume=0':''));
- else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0))+':a:0');
+ else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0)+(geometry?1:0))+':a:0');
  args.push('-t',String(length/Math.max(.5,Math.min(2,narrationSpeed))),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
  await command(toolPath('ffmpeg'),args,signal,null,ctx);
