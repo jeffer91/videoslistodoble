@@ -196,7 +196,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }
  f.push('[blur][center]overlay=(W-w)/2:'+(closing?py:'(H-h)/2')+'[base]');
  if(withPresenter){
-  const borders={gold:'0xd4b15f',neon:'0x55d3c2',minimal:'0x9eaba7'},frame=borders[appearance?.frame];
+  const borders={gold:'0xd4b15f',neon:'0x55d3c2',minimal:'0x9eaba7'},frame=borders[appearance?.frame||'gold'];
   f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1'+
    (frame?',pad=iw+12:ih+12:6:6:color='+frame:'')+'[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
