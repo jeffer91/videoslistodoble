@@ -227,3 +227,15 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .stage .speaker.frame-neon{border:3px solid #55d3c2;box-shadow:0 0 17px #55d3c288}
 .stage .speaker.frame-minimal{border:2px solid #aeb9b1;box-shadow:0 4px 9px #0009}
 .stage .speaker.frame-none{border:0;box-shadow:none}
+
+/* Zoom de recortes: escala la onda sin reconstruir el reproductor ni cambiar los tiempos */
+.wave-scroll{width:100%;overscroll-behavior-x:contain}
+.wave-content{min-width:100%;flex:none}
+.wave-zoom-tools{gap:5px;min-width:0}
+.wave-zoom-tools label{white-space:nowrap}
+.wave-zoom-tools input[type="range"]{width:120px;min-width:65px;max-width:24vw;padding:0;cursor:ew-resize}
+.wave-zoom-tools button{padding:5px 9px;min-width:29px;line-height:1.1}
+.wave-zoom-tools output{min-width:28px;display:inline-block;text-align:center;font-variant-numeric:tabular-nums;color:#a6daf2}
+.wave-zoom-tools [data-action="wave-zoom-fit"]{min-width:auto}
+.wave-scroll::-webkit-scrollbar{height:9px}
+.wave-scroll::-webkit-scrollbar-thumb{background:#46715b;border-radius:8px}

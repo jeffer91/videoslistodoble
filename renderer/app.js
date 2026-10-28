@@ -68,22 +68,58 @@ function updateCutMarker(which,value,preview=false){
  if(ib)ib.value=selectionNow.end.toFixed(2);
 }
 function editTypeName(mode){return mode==='audio'?'Silenciar audio':mode==='video'?'Congelar imagen':'Eliminar audio + video'}
+function makeWaveTicks(duration,width){
+ const pxPerSecond=width/Math.max(.01,duration);
+ const step=[.1,.2,.5,1,2,5,10,15,30,60].find(s=>s*pxPerSecond>=66)||60;
+ const labels=[];
+ for(let i=0;i<=Math.ceil(duration/step);i++){
+  const time=i*step;if(time>duration+.0001)break;
+  const label=step<1?fmt(time)+','+Math.round((time%1)*10):fmt(time);
+  labels.push('<span class="wave-tick" style="left:'+(100*time/duration).toFixed(5)+'%">'+label+'</span>');
+ }
+ return labels.join('');
+}
+function makeWaveBars(peaks,duration,width){
+ const values=peaks.length?peaks:[0];
+ const count=Math.max(1,Math.min(values.length,Math.ceil(width/2.6)));
+ const barWidth=width/count,rendered=[];
+ for(let i=0;i<count;i++){
+  const index=Math.min(values.length-1,Math.floor(i*values.length/count));
+  const peak=Math.min(1,Math.max(0,Number(values[index])||0));
+  const height=Math.max(2,peak*56);
+  rendered.push('<rect x="'+(i*barWidth).toFixed(2)+'" y="'+((66-height)/2).toFixed(2)+
+   '" width="'+Math.max(1,barWidth-.8).toFixed(2)+'" height="'+height.toFixed(2)+'" fill="#76bce8" rx=".6"/>');
+ }
+ return rendered.join('');
+}
+function setCutZoom(value,centerSelection=true){
+ const zoom=WaveZoom.clampZoom(value);
+ state.cutZoom=zoom;
+ const viewport=$('#edit-wave-scroll'),content=$('#edit-wave-content'),duration=editorDuration();
+ const slider=$('[data-cut-zoom]'),output=$('#cut-zoom-output');
+ if(slider)slider.value=String(zoom);
+ if(output)output.textContent=zoom+'×';
+ if(!viewport||!content||!duration)return;
+ const width=WaveZoom.widthFor(duration,viewport.clientWidth,zoom);
+ content.style.width=width+'px';
+ const id=state.project.id+':'+state.project.scenes[state.scene].video;
+ const peaks=state.waveforms[id]||[];
+ const svg=content.querySelector('.wave-bars svg');
+ if(svg){svg.setAttribute('viewBox','0 0 '+width+' 66');svg.innerHTML=makeWaveBars(peaks,duration,width)}
+ const ruler=content.querySelector('.wave-ruler');
+ if(ruler)ruler.innerHTML=makeWaveTicks(duration,width);
+ if(centerSelection){
+  const selected=rangeSelection(),focus=(selected.start+selected.end)/2;
+  viewport.scrollLeft=WaveZoom.scrollForTime(focus,duration,width,viewport.clientWidth);
+ }
+}
 function waveformEditorHTML(scene){
  const id=state.project.id+':'+scene.video,peaks=state.waveforms[id]||[],duration=editorDuration();
  if(!scene.video)return '<p class="muted mini">Importa o graba un video para editarlo.</p>';
  if(!duration)return '<div class="wave-loading"><strong>Preparando editor de recortes…</strong><p class="muted mini">'+esc(state.waveErrors[id]||'Leyendo duración de la grabación. Los marcadores aparecerán automáticamente.')+'</p>'+btn('retry-waveform','↻ Reintentar carga','secondary')+'</div>';
  const selection=rangeSelection(),zoom=Math.max(1,Math.min(8,Number(state.cutZoom)||1));
- const width=Math.min(23000,Math.round(Math.max(590,duration*4)*zoom));
+ const width=WaveZoom.widthFor(duration,590,zoom);
  const viewPeaks=peaks.length?peaks:Array.from({length:Math.min(1800,Math.ceil(duration*10))},()=>0);
- const count=Math.min(viewPeaks.length,Math.ceil(width/2.6)),barWidth=width/count;
- const rendered=[];
- const actualWaveDuration=Math.min(180,duration),sampleStep=actualWaveDuration/viewPeaks.length;
- for(let i=0;i<count;i++){
-  const index=Math.min(viewPeaks.length-1,Math.floor(i*viewPeaks.length/count));
-  const t=index*sampleStep,peak=Math.min(1,Number(viewPeaks[index])||0);
-  const height=Math.max(2,peak*56);
-  rendered.push('<rect x="'+(i*barWidth).toFixed(2)+'" y="'+((66-height)/2).toFixed(2)+'" width="'+Math.max(1,barWidth-.8).toFixed(2)+'" height="'+height.toFixed(2)+'" fill="#76bce8" rx=".6"/>');
- }
  const marked=[
   ...(scene.silences||[]).filter(c=>c.remove).map(c=>({...c,mode:'both'})),
   ...(scene.cuts||[])
@@ -93,14 +129,18 @@ function waveformEditorHTML(scene){
   const color=c.mode==='audio'?'rgba(218,161,63,.34)':c.mode==='video'?'rgba(130,94,215,.34)':'rgba(207,71,83,.35)';
   return '<div class="wave-edit-range" title="'+esc(editTypeName(c.mode))+'" style="left:'+(100*a/duration)+'%;width:'+(100*(b-a)/duration)+'%;background:'+color+'"></div>';
  }).join('');
- const ticks=[];const step=duration<=12?1:duration<=30?2:duration<=70?5:10;
- for(let t=0;t<=duration;t+=step)ticks.push('<span class="wave-tick" style="left:'+(100*t/duration)+'%">'+fmt(t)+'</span>');
  return '<div class="wave-editor">'+(state.waveErrors[id]?'<p class="wave-error">'+esc(state.waveErrors[id])+' '+btn('retry-waveform','Reintentar','secondary')+'</p>':'')+
-  '<div class="row between wave-controls"><strong>Ondas de voz</strong><label class="row mini">Zoom <input type="range" data-cut-zoom min="1" max="8" step="1" value="'+zoom+'"> '+zoom+'×</label></div>'+
-  '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px" data-wave-seek="1">'+
-   '<div class="wave-ruler">'+ticks.join('')+'</div>'+
+  '<div class="row between wave-controls"><strong>Ondas de voz</strong><div class="row mini wave-zoom-tools">'+
+  '<label for="cut-wave-zoom">Zoom</label>'+
+  btn('wave-zoom-out','−','secondary','title="Alejar onda" aria-label="Alejar onda"')+
+  '<input id="cut-wave-zoom" type="range" data-cut-zoom min="1" max="16" step="1" value="'+zoom+'" aria-label="Ampliación de la onda de voz">'+
+  btn('wave-zoom-in','+','secondary','title="Acercar onda" aria-label="Acercar onda"')+
+  '<output id="cut-zoom-output" for="cut-wave-zoom">'+zoom+'×</output>'+
+  btn('wave-zoom-fit','Ajustar','secondary','title="Mostrar la grabación completa"')+'</div></div>'+
+  '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px;min-width:100%" data-wave-seek="1">'+
+   '<div class="wave-ruler">'+makeWaveTicks(duration,width)+'</div>'+
    '<div class="wave-bars">'+
-    '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+rendered.join('')+'</svg>'+
+    '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(viewPeaks,duration,width)+'</svg>'+
    '</div>'+overlays+
    '<div id="edit-wave-selection" class="wave-current-selection" style="left:'+(100*selection.start/duration)+'%;width:'+(100*(selection.end-selection.start)/duration)+'%"></div>'+
    '<div id="edit-wave-playhead" class="wave-playhead" style="left:0%"></div>'+
@@ -473,7 +513,7 @@ function render(){
  const sidebar=$('#sidebar-project'),title=$('#sidebar-project-title');
  if(sidebar)sidebar.hidden=!state.project;
  if(title&&state.project)title.textContent=state.project.title;
- const wave=$('#edit-wave-scroll');if(wave)wave.scrollLeft=waveLeft;
+ const wave=$('#edit-wave-scroll');if(wave){setCutZoom(state.cutZoom,false);wave.scrollLeft=waveLeft}
  const current=$('#speaker-preview');
  if(current&&oldAsset===current.dataset.asset&&current.getAttribute('src')){
   current.addEventListener('loadedmetadata',()=>{
@@ -1057,6 +1097,9 @@ document.addEventListener('click',async e=>{
   if(action==='paste-image')return await pasteImage();
   if(action==='detect-silences')return await detect();
   if(action==='retry-waveform'){const id=state.project.id+':'+state.project.scenes[state.scene].video;delete state.videoDurations[id];delete state.waveforms[id];delete state.waveErrors[id];return await refreshWaveform()}
+  if(action==='wave-zoom-in')return setCutZoom(state.cutZoom+1);
+  if(action==='wave-zoom-out')return setCutZoom(state.cutZoom-1);
+  if(action==='wave-zoom-fit')return setCutZoom(1);
   if(action==='cut-mode'){state.cutMode=b.dataset.mode;return render()}
   if(action==='cut-add')return applyCut();
   if(action==='cut-undo')return undoRedoCut();
@@ -1133,7 +1176,7 @@ document.addEventListener('change',async e=>{
  const p=state.project;if(!p||state.page!=='project')return;
  const s=p.scenes[state.scene],el=e.target;
  if(el.dataset.cutMarker){updateCutMarker(el.dataset.cutMarker,el.value);return}
- if(el.dataset.cutZoom){state.cutZoom=Math.max(1,Math.min(8,Number(el.value)||1));render();return}
+ if(el.dataset.cutZoom!==undefined){setCutZoom(el.value);return}
  if(el.dataset.field){s[el.dataset.field]=['start','end','scale','playbackSpeed'].includes(el.dataset.field)?Number(el.value):el.value;s.approved=false;queueSave();if(el.dataset.field==='start'||el.dataset.field==='end'||el.dataset.field==='playbackSpeed'){render();prepareScenePreview()}}
  else if(el.dataset.formatField){
    if(!s.formats)s.formats={};
@@ -1170,7 +1213,7 @@ document.addEventListener('pointerdown',e=>{
  if(!content||!duration)return;
  e.preventDefault();
  const rect=content.getBoundingClientRect();
- const move=ev=>updateCutMarker(which,(ev.clientX-rect.left)/rect.width*duration,true);
+ const move=ev=>updateCutMarker(which,WaveZoom.timeAtPointer(ev.clientX,rect.left,rect.width,duration),true);
  const stop=()=>{
   document.removeEventListener('pointermove',move);
   document.removeEventListener('pointerup',stop);
@@ -1188,7 +1231,7 @@ document.addEventListener('click',e=>{
  const video=$('#speaker-preview'),duration=editorDuration();
  if(!video||!duration)return;
  const rect=area.getBoundingClientRect();
- video.currentTime=Math.max(0,Math.min(duration,(e.clientX-rect.left)/rect.width*duration));
+ video.currentTime=WaveZoom.timeAtPointer(e.clientX,rect.left,rect.width,duration);
  updatePreviewEdits();
 });
 document.addEventListener('timeupdate',e=>{
@@ -1203,7 +1246,9 @@ document.addEventListener('error',e=>{
  if(e.target?.id==='final-review-video'){const text=$('#review-live-message');if(text)text.textContent='No se pudo reproducir la grabación: '+(e.target.error?.message||'Código '+e.target.error?.code)}
 },true);
 document.addEventListener('input',e=>{
- const el=e.target;if(el.dataset.field==='title'&&state.page==='project'){state.project.scenes[state.scene].title=el.value;state.project.scenes[state.scene].approved=false;queueSave()}
+ const el=e.target;
+ if(el.dataset.cutZoom!==undefined&&state.page==='project'){setCutZoom(el.value);return}
+ if(el.dataset.field==='title'&&state.page==='project'){state.project.scenes[state.scene].title=el.value;state.project.scenes[state.scene].approved=false;queueSave()}
 });
 window.studio.onProgress(detail=>{
  state.status=detail.message||('Procesando segmentos: '+(detail.done||0));
