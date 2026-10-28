@@ -14,12 +14,24 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
 function assertAssetRefs(p){const ids=new Set((p.assets||[]).map(a=>a.id));for(const scene of Object.values(p.scenes||{})){if(scene.video&&!ids.has(scene.video))throw Error('Video no encontrado en la biblioteca');for(const m of scene.media||[])if(!ids.has(m.assetId))throw Error('Recurso no encontrado en el proyecto')}}
 function saveProject(root,x){const original=getProject(root,x.id);
- const editable=['title','style','scenes','status','backgrounds'];const next={...original};
+ const editable=['title','style','scenes','status','backgrounds','transitions'];const next={...original};
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
+ if(next.transitions){
+  for(const k of ['hookBody','bodyClosing'])if(next.transitions[k]&&!['cut','fade','wipeleft','circleopen','radial'].includes(next.transitions[k]))throw Error('Transición inválida');
+  if(next.transitions.duration!==undefined&&!(Number(next.transitions.duration)>=.1&&Number(next.transitions.duration)<=.7))throw Error('Duración de transición inválida');
+ }
+ for(const scene of Object.values(next.scenes||{})){
+  const speed=Number(scene.playbackSpeed??1);
+  if(!Number.isFinite(speed)||speed<.5||speed>2)throw Error('Velocidad de narración inválida');
+  const hist=scene.cutHistory;
+  if(hist&&(!Array.isArray(hist.undo)||!Array.isArray(hist.redo)||hist.undo.length>30||hist.redo.length>30))throw Error('Historial de cortes inválido');
+  for(const frame of Object.values(scene.formats||{}))
+   if(frame?.frame&&!['none','gold','neon','minimal'].includes(frame.frame))throw Error('Marco de cámara inválido');
+ }
  assertAssetRefs(next);
  for(const scene of Object.values(next.scenes||{})){
   if(scene.backgrounds===undefined)continue;

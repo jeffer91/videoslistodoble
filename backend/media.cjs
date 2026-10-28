@@ -176,11 +176,13 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||65)/65));
  const px=closing?'(W-w)/2':wide?(pos==='right'?1440:pos==='center'?760:65):(pos==='right'?600:pos==='center'?350:58),py=closing?(wide?90:390):(wide?235:820);
  const pw=Math.round((wide?420:400)*factor),ph=Math.round((wide?660:580)*factor);
- const voiceInput=freezeVideo?'[frozen]':'[0:v]';
+ const voiceRate=Math.max(.5,Math.min(2,Number(appearance?.narrationSpeed)||1));
+ if(voiceRate!==1&&!freezeVideo)f.push('[0:v]setpts=(PTS-STARTPTS)/'+voiceRate.toFixed(3)+'[spedvoice]');
+ const voiceInput=freezeVideo?'[frozen]':voiceRate!==1?'[spedvoice]':'[0:v]';
  const pad=withPresenter?'[1:v]':voiceInput;
  const f=[];
  if(freezeVideo)f.push('[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3600[frozen]');
- if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed))).toFixed(3)+'[timed]');
+ if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed)*voiceRate)).toFixed(3)+'[timed]');
  const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
  if(Number.isInteger(templateIndex)){
   // La plantilla sustituye solo el fondo. La fotografía o clip de apoyo permanece delante.
@@ -194,7 +196,9 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }
  f.push('[blur][center]overlay=(W-w)/2:'+(closing?py:'(H-h)/2')+'[base]');
  if(withPresenter){
-  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1[speaker]');
+  const borders={gold:'0xd4b15f',neon:'0x55d3c2',minimal:'0x9eaba7'},frame=borders[appearance?.frame];
+  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1'+
+   (frame?',pad=iw+12:ih+12:6:6:color='+frame:'')+'[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
  }else f.push('[base]null[visual]');
  const strip=theme==='numbers'?'0xb92d42':theme==='legends'?'0xd8b56a':'0x2fcb6b';
@@ -213,7 +217,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
-async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={},templateFile=null,sceneKey='body'){
+async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={},templateFile=null,sceneKey='body',narrationSpeed=1){
  if(!(length>.06))return;
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
@@ -229,12 +233,12 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  const templateIndex=templateFile?1+(withPresenter?1:0)+(hasLogo?1:0):null;
  if(templateFile)args.push('-loop','1','-i',templateFile);
  if(!voiceInfo.hasAudio)args.push('-f','lavfi','-i','anullsrc=channel_layout=stereo:sample_rate=48000');
- const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,appearance,speed,theme,edit.freezeVideo===true,templateIndex,sceneKey);
+ const filter=fillAndContain(null,wide,withPresenter,path.basename(titleFile),hasLogo,{...appearance,narrationSpeed},speed,theme,edit.freezeVideo===true,templateIndex,sceneKey);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
- if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,dynaudnorm=f=150:g=15'+(edit.muteAudio?',volume=0':''));
+ if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,atempo='+Math.max(.5,Math.min(2,narrationSpeed)).toFixed(3)+(edit.muteAudio?',volume=0':''));
  else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0))+':a:0');
- args.push('-t',String(length),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
+ args.push('-t',String(length/Math.max(.5,Math.min(2,narrationSpeed))),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
  await command(toolPath('ffmpeg'),args,signal,null,ctx);
  if(progress)progress();
@@ -282,7 +286,7 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
  for(let i=0;i<entries.length;i++){
   if(signal.aborted)throw Error('Cancelado');
   const m=entries[i],output=path.join(tmp,'part-'+String(fs.readdirSync(tmp).length).padStart(5,'0')+'.mp4');
-  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,m,templateFile,key);
+  await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,m,templateFile,key,scene.playbackSpeed||1);
   segments.push(output);
  }
  return {segments,duration:length};
@@ -345,4 +349,30 @@ async function exportWeekly(root,id,signal,send){
   send({type:'complete',file:output});return {file:output,duration:sum};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,exportShort,exportWeekly,toolPath};
+
+async function normalizeFinal(input,output,signal){
+ await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',input,
+  '-map','0:v:0','-map','0:a:0','-c:v','copy','-af','loudnorm=I=-16:TP=-1.5:LRA=11',
+  '-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart',output],signal);
+ return output;
+}
+async function joinWithTransition(root,a,b,effect,duration,signal){
+ const tmp=temporary(root),dest=path.join(tmp,'joined.mp4');
+ try{
+  if(!effect||effect==='cut'){
+   await concat(tmp,[a,b],dest,signal);return {file:dest,temp:tmp,duration:0};
+  }
+  const da=(await probe(a)).duration,db=(await probe(b)).duration;
+  const overlap=Math.min(duration,da/4,db/4);
+  if(overlap<.08){await concat(tmp,[a,b],dest,signal);return {file:dest,temp:tmp,duration:0}}
+  const filter='[0:v]settb=AVTB,fps=30,format=yuv420p[v0];[1:v]settb=AVTB,fps=30,format=yuv420p[v1];'+
+  '[v0][v1]xfade=transition='+effect+':duration='+overlap.toFixed(3)+':offset='+(da-overlap).toFixed(3)+'[v];'+
+  '[0:a][1:a]acrossfade=d='+overlap.toFixed(3)+'[a]';
+  await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',a,'-i',b,'-filter_complex',filter,
+   '-map','[v]','-map','[a]','-c:v','libx264','-preset','veryfast','-crf','22','-pix_fmt','yuv420p',
+   '-c:a','aac','-ar','48000','-b:a','160k','-movflags','+faststart',dest],signal);
+  return {file:dest,temp:tmp,duration:overlap};
+ }catch(e){fs.rmSync(tmp,{recursive:true,force:true});throw e}
+}
+
+module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,normalizeFinal,joinWithTransition,exportShort,exportWeekly,toolPath};

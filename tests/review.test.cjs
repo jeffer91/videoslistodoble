@@ -31,70 +31,90 @@ function completeProject(root,video){
  store.saveProject(root,current);
  return p.id;
 }
-test('revisión incompleta indica qué escena corregir y no exporta',async()=>{
+
+test('revisión incompleta indica los problemas y no crea un MP4',async()=>{
  const root=tmp();
  try{
-  store.ensureRoot(root);
-  const p=store.createProject(root,{title:'Pendiente'});
+  store.ensureRoot(root);const p=store.createProject(root,{title:'Pendiente'});
   const result=await reviews.inspect(root,'short',p.id);
+  assert.equal(result.live,true);
+  assert.equal(result.ready,true);
   assert.equal(result.complete,false);
   assert.equal(result.chapters.length,3);
   assert.equal(result.missing.length,3);
-  await assert.rejects(()=>reviews.exportApproved(root,'short',p.id,result.hash),/Primero genera/);
+  assert.equal(fs.existsSync(path.join(root,'Temporales','Revisiones')),false);
+  await assert.rejects(()=>reviews.exportApproved(root,'short',p.id,result.hash),/Completa y aprueba/);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
-test('revisión completa usa MP4 real, es cacheable y no altera el proyecto',{timeout:180000},async()=>{
+test('la revisión es instantánea y la exportación crea MP4 con audio normalizado',{timeout:180000},async()=>{
  const root=tmp();
  try{
   store.ensureRoot(root);
   const id=completeProject(root,mockVideo(root));
-  const original=store.getProject(root,id);
-  const initial=await reviews.inspect(root,'short',id);
-  assert.equal(initial.ready,false);assert.equal(initial.complete,true);
-  const ready=await reviews.prepare(root,'short',id,new AbortController().signal,()=>{});
-  assert.equal(ready.ready,true);assert.equal(ready.chapters.length,3);
-  assert.ok(ready.duration>2);
-  const source=reviews.resolve(root,'short',id,ready.hash);
-  const stat=fs.statSync(source);
-  assert.ok(stat.size>1000);
-  assert.ok((await media.probe(source)).hasAudio);
+  const before=await reviews.inspect(root,'short',id);
+  assert.equal(before.ready,true);
+  assert.equal(before.live,true);
+  assert.equal(before.complete,true);
+  assert.equal(before.chapters.length,3);
+  assert.equal(before.chapters[0].ranges.length,1);
   assert.equal(store.getProject(root,id).status,'editing');
   assert.equal(store.getProject(root,id).exports.length,0);
-  const reused=await reviews.prepare(root,'short',id,new AbortController().signal,()=>{});
-  assert.equal(reused.hash,ready.hash);
-  assert.equal(fs.statSync(source).mtimeMs,stat.mtimeMs);
-  await assert.rejects(()=>reviews.exportApproved(root,'short',id,ready.hash),/Aprueba/);
+  assert.equal(fs.existsSync(path.join(root,'Temporales','Revisiones')),false);
+  await assert.rejects(()=>reviews.exportApproved(root,'short',id,before.hash),/Aprueba/);
   const p=store.getProject(root,id);
   for(const scene of Object.values(p.scenes))scene.approved=true;
   store.saveProject(root,p);
   const approved=await reviews.inspect(root,'short',id);
-  assert.equal(approved.hash,ready.hash,'Aprobar no debe obligar a renderizar otra vez');
+  assert.equal(approved.hash,before.hash,'Aprobar no cambia el montaje');
   assert.equal(approved.canExport,true);
-  const result=await reviews.exportApproved(root,'short',id,ready.hash);
-  assert.deepEqual(fs.readFileSync(source),fs.readFileSync(result.file),'El MP4 entregado debe ser exactamente el revisado');
+  const result=await reviews.exportApproved(root,'short',id,approved.hash,new AbortController().signal,()=>{});
+  assert.ok(fs.existsSync(result.file));
+  const info=await media.probe(result.file);
+  assert.equal(info.hasAudio,true);
+  assert.ok(info.duration>1.5);
   assert.equal(store.getProject(root,id).status,'exported');
   assert.equal(store.getProject(root,id).exports.length,1);
   const changed=store.getProject(root,id);
   changed.scenes.body.title='Título corregido';
+  changed.scenes.body.playbackSpeed=1.25;
   changed.scenes.body.approved=false;
   store.saveProject(root,changed);
   const after=await reviews.inspect(root,'short',id);
-  assert.notEqual(after.hash,ready.hash);
-  assert.equal(after.ready,false);
-  await assert.rejects(()=>reviews.exportApproved(root,'short',id,ready.hash),/Actualiza/);
-  assert.ok(fs.existsSync(result.file),'La versión ya exportada permanece');
-  assert.deepEqual(store.getProject(root,id).scenes.hook.video,original.scenes.hook.video);
+  assert.notEqual(after.hash,before.hash);
+  assert.ok(after.duration<approved.duration);
+  await assert.rejects(()=>reviews.exportApproved(root,'short',id,before.hash),/cambió/);
+  assert.ok(fs.existsSync(result.file),'La exportación anterior debe conservarse');
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
-test('pantalla de revisión permite regresar a escena y admite compilaciones',()=>{
- const app=fs.readFileSync(path.join(__dirname,'..','renderer','app.js'),'utf8');
- const html=fs.readFileSync(path.join(__dirname,'..','renderer','index.html'),'utf8');
+test('historial permanente de cortes y marco de cámara son válidos',()=>{
+ const root=tmp();
+ try{
+  store.ensureRoot(root);const p=store.createProject(root,{title:'Recortes'});
+  p.scenes.hook.cutHistory={undo:['[]'],redo:[]};
+  p.scenes.hook.formats.short.frame='gold';
+  p.scenes.hook.playbackSpeed=.75;
+  p.transitions={hookBody:'wipeleft',bodyClosing:'circleopen',duration:.3};
+  store.saveProject(root,p);
+  const result=store.getProject(root,p.id);
+  assert.equal(result.scenes.hook.cutHistory.undo[0],'[]');
+  assert.equal(result.scenes.hook.formats.short.frame,'gold');
+  assert.equal(result.scenes.hook.playbackSpeed,.75);
+  assert.equal(result.transitions.hookBody,'wipeleft');
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
+test('revisión dinámica usa una sola línea de tiempo y permite corrección',()=>{
+ const folder=path.join(__dirname,'..','renderer');
+ const app=fs.readFileSync(path.join(folder,'app.js'),'utf8');
+ const player=fs.readFileSync(path.join(folder,'live-review.js'),'utf8');
+ const html=fs.readFileSync(path.join(folder,'index.html'),'utf8');
  assert.match(app,/function reviewPage\(\)/);
- assert.match(app,/function openReview\(kind\)/);
  assert.match(app,/btn\('review-edit'/);
- assert.match(app,/review:export/);
- assert.match(app,/review-back/);
- assert.match(app,/open-week-review/);
- assert.match(app,/id="final-review-video"/);
- assert.match(html,/records:/);
+ assert.match(app,/livePrepare\(\)/);
+ assert.match(app,/cutHistory/);
+ assert.match(app,/playbackSpeed/);
+ assert.match(app,/data-format-field="frame"/);
+ assert.match(player,/function liveStageHTML/);
+ assert.match(player,/function liveSeek/);
+ assert.match(player,/id="final-review-video"/);
+ assert.match(html,/live-review\.js/);
 });

@@ -191,15 +191,12 @@ app.whenReady().then(()=>{
   register('weekly:get',x=>store.getWeek(ROOT,x.id));
   register('weekly:save',x=>store.saveWeek(ROOT,x));
   register('review:status',x=>reviews.inspect(ROOT,x.kind,x.id));
-  register('review:build',async x=>{
-    if(activeJob)throw Error('Ya existe una generación de video en curso');
-    const controller=new AbortController();activeJob=controller;
-    try{return await reviews.prepare(ROOT,x.kind,x.id,controller.signal,broadcast)}
-    finally{activeJob=null}
-  });
+
   register('review:export',async x=>{
     if(activeJob)throw Error('Hay otra operación multimedia en curso');
-    return reviews.exportApproved(ROOT,x.kind,x.id,x.hash);
+    const controller=new AbortController();activeJob=controller;
+    try{return await reviews.exportApproved(ROOT,x.kind,x.id,x.hash,controller.signal,broadcast)}
+    finally{activeJob=null}
   });
   register('render:short',async x=>{
     if(activeJob)throw Error('Ya hay una exportación en curso');
