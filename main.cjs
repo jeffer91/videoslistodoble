@@ -138,7 +138,7 @@ app.whenReady().then(()=>{
     store.getProject(ROOT,x.projectId).assets.find(a=>a.id===x.assetId)?.name));
   register('global:to-project',x=>{
     const item=globalMedia.get(ROOT,x.id);
-    return store.importAsset(ROOT,x.projectId,globalMedia.resolve(ROOT,x.id),item.name);
+    return store.importGlobalAsset(ROOT,x.projectId,item.id,globalMedia.resolve(ROOT,x.id),item.name);
   });
   register('assets:paste-image',x=>{
     const picture=clipboard.readImage();

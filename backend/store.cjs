@@ -79,6 +79,16 @@ function resolveAsset(root,projectId,assetId){
  if(!fs.statSync(file).isFile())throw Error('Recurso no es archivo');
  return file;
 }
+function importGlobalAsset(root,projectId,globalId,source,name){
+ if(typeof globalId!=='string'||!safeId(globalId))throw Error('Identificador global inválido');
+ const existing=getProject(root,projectId).assets.find(a=>a.sourceGlobalId===globalId);
+ if(existing)return {...existing,reused:true};
+ const saved=importAsset(root,projectId,source,name);
+ const p=getProject(root,projectId),asset=p.assets.find(a=>a.id===saved.id);
+ asset.sourceGlobalId=globalId;
+ atomic(projectFile(root,projectId),p);
+ return {...asset,reused:false};
+}
 function renameAsset(root,projectId,assetId,name){
  const p=getProject(root,projectId),a=p.assets.find(x=>x.id===assetId),value=String(name||'').trim().slice(0,120);
  if(!a||!value)throw Error('Recurso o nombre inválido');
@@ -117,4 +127,4 @@ function getWeek(root,id){return readJSON(weekFile(root,id))}
 function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing'])if(x[k]!==undefined)w[k]=x[k];if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
 function listWeeks(root){return fs.readdirSync(path.join(root,'Compilaciones'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{return [getWeek(root,e.name)]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function resolveManagedPath(root,filename){const file=path.resolve(filename),base=path.resolve(root);if(!file.startsWith(base+path.sep))throw Error('Solo se pueden abrir rutas dentro de la biblioteca');return file}
-module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};
+module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,importGlobalAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};

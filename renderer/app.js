@@ -821,7 +821,7 @@ document.addEventListener('click',async e=>{
   if(action==='project-filter'){state.projectFilter=b.dataset.type;return render()}
   if(action==='global-import'){const result=await api('global:import');state.globalAssets=await api('global:list');render();if(result.errors?.length)notice(result.errors[0].message,true);else if(result.files?.length)notice(result.files.length+' recurso(s) añadidos');return}
   if(action==='global-paste'){await api('global:paste');state.globalAssets=await api('global:list');render();return}
-  if(action==='global-copy-project'){if(!state.project)throw Error('Abre un proyecto primero');await api('global:to-project',{projectId:state.project.id,id:b.dataset.id});await refreshProjectAssets();notice('Recurso copiado a la biblioteca del proyecto');return}
+  if(action==='global-copy-project'){if(!state.project)throw Error('Abre un proyecto primero');const result=await api('global:to-project',{projectId:state.project.id,id:b.dataset.id});await refreshProjectAssets();notice(result.reused?'El recurso ya estaba en la biblioteca del proyecto':'Recurso copiado a la biblioteca del proyecto');return}
   if(action==='global-rename'||action==='global-delete'){const item=state.globalAssets.find(x=>x.id===b.dataset.id);if(!item)return;return action==='global-rename'?renameResourceModal('global',item.id,item.name):deleteResourceModal('global',item.id,item.name)}
   if(action==='project-assets-upload')return await uploadProjectOnly('media');
   if(action==='project-assets-paste')return await uploadProjectOnly('media',true);

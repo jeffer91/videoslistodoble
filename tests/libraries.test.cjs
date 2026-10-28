@@ -27,6 +27,19 @@ test('biblioteca general reutiliza una copia en proyectos sin compartir borrados
   assert.ok(fs.existsSync(store.resolveAsset(dir,q.id,b.id)));
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+test('copiar un mismo recurso global dos veces reutiliza el primer archivo',{timeout:40000},async()=>{
+ const dir=root();
+ try{
+  store.ensureRoot(dir);const source=await imageFile(dir);
+  const global=await shared.importFile(dir,source),project=store.createProject(dir,{title:'Sin duplicados'});
+  const first=store.importGlobalAsset(dir,project.id,global.id,shared.resolve(dir,global.id),global.name);
+  const second=store.importGlobalAsset(dir,project.id,global.id,shared.resolve(dir,global.id),global.name);
+  assert.equal(first.id,second.id);
+  assert.equal(first.reused,false);
+  assert.equal(second.reused,true);
+  assert.equal(store.getProject(dir,project.id).assets.length,1);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
 test('fotografía permanece en el proyecto al quitarla de Desarrollo',{timeout:40000},async()=>{
  const dir=root();
  try{
