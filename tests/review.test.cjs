@@ -91,7 +91,7 @@ test('pantalla de revisión permite regresar a escena y admite compilaciones',()
  const html=fs.readFileSync(path.join(__dirname,'..','renderer','index.html'),'utf8');
  assert.match(app,/function reviewPage\(\)/);
  assert.match(app,/function openReview\(kind\)/);
- assert.match(app,/data-action="review-edit"/);
+ assert.match(app,/btn\('review-edit'/);
  assert.match(app,/review:export/);
  assert.match(app,/review-back/);
  assert.match(app,/open-week-review/);
