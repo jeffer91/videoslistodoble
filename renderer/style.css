@@ -326,3 +326,49 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 @keyframes review-blur{0%{opacity:.85;filter:blur(25px)}100%{opacity:0;filter:blur(1px)}}
 @keyframes review-diagonal{0%{opacity:.9;clip-path:polygon(0 0,100% 0,100% 100%,0 100%)}
  100%{opacity:0;clip-path:polygon(100% 100%,100% 100%,100% 100%,100% 100%)}}
+
+/* Movimiento automático: las capas reciben transformaciones desde el plan compartido. */
+.live-stage #review-motion-background{
+ transform-origin:center center;will-change:transform;transition:none;
+}
+.live-stage #review-support-image{
+ transform-origin:center center;will-change:transform;transition:none;
+}
+.review-photo-transition{position:absolute;inset:0;z-index:2;opacity:0;pointer-events:none}
+.review-photo-transition.visual-smoothleft,
+.review-photo-transition.visual-diagtl{
+ background:linear-gradient(108deg,transparent 28%,#d5f7ff9c 46%,#ffe6abdd 52%,transparent 68%);
+ animation:photo-beam .38s ease-out both
+}
+.review-photo-transition.visual-zoomin{
+ background:radial-gradient(circle,#fff4d6cc 0%,#f2d18f77 16%,transparent 63%);
+ animation:photo-bloom .4s ease-out both
+}
+.review-photo-transition.visual-hblur,
+.review-photo-transition.visual-fade{
+ background:linear-gradient(112deg,transparent,#bffcffb9,transparent);
+ animation:photo-beam .35s ease-out both
+}
+@keyframes photo-beam{
+ 0%{opacity:0;transform:translateX(-95%)}
+ 36%{opacity:.8}
+ 100%{opacity:0;transform:translateX(95%)}
+}
+@keyframes photo-bloom{
+ 0%{opacity:0;transform:scale(.5)}
+ 40%{opacity:.55}
+ 100%{opacity:0;transform:scale(1.45)}
+}
+@media(prefers-reduced-motion:reduce){
+ .review-photo-transition{animation:none!important}
+}
+
+.auto-director-panel{display:grid;gap:12px;margin:16px 0;padding:13px;
+ border:1px solid #44764d;border-radius:11px;
+ background:linear-gradient(130deg,#153822,#14271d)}
+.auto-director-panel strong{font-size:13px}
+.auto-director-panel .row.wrap button{font-size:12px}
+.auto-director-icon{display:grid;place-items:center;width:32px;height:32px;
+ border:1px solid #bfce70;border-radius:9px;color:#f5d98c;font-size:19px;
+ background:#263521}
+.auto-director-panel p{margin:4px 0 0;max-width:300px}

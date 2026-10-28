@@ -1,7 +1,48 @@
 'use strict';
 // Reproductor de montaje: no crea ni concatena MP4. Usa los recursos originales,
 // copias compatibles individuales cuando Electron las necesita, y el reloj de las escenas.
-const live={playing:false,index:-1,globalTime:0,projects:{},timelines:{},token:0,changing:false,loading:false,ended:false};
+const live={playing:false,index:-1,globalTime:0,projects:{},timelines:{},token:0,changing:false,loading:false,ended:false,animationFrame:0,lastVisual:null};
+// Mismos valores numéricos del plan utilizado por el renderizador de FFmpeg.
+function liveAnimateMotion(){
+ const ch=liveChapters()[live.index],video=liveVideo();
+ if(!ch?.motion||!video)return;
+ const plan=ch.motion,sourceTime=video.currentTime;
+ const b=document.getElementById('review-motion-background');
+ if(b&&plan.background){
+  const m=VisualDirector.interpolate(plan.background,sourceTime/Math.max(.1,plan.duration));
+  b.style.transform='translate('+m.x.toFixed(3)+'%,'+m.y.toFixed(3)+'%) scale('+m.scale.toFixed(5)+')';
+ }
+ const item=VisualDirector.at(plan,sourceTime);
+ const target=item?.type==='image'?document.getElementById('review-support-image'):null;
+ if(target&&!target.hidden&&item.motion){
+  const p=(sourceTime-item.start)/Math.max(.05,item.end-item.start);
+  const transform=VisualDirector.interpolate(item.motion,p);
+  target.style.transform='translate('+transform.x.toFixed(3)+'%,'+transform.y.toFixed(3)+'%) scale('+transform.scale.toFixed(5)+')';
+ }
+}
+function liveTriggerPhotoEffect(item){
+ const node=document.getElementById('review-photo-transition');
+ if(!node||!item||item.effect==='cut')return;
+ // Reinicia únicamente la animación luminosa, nunca el reproductor.
+ node.className='review-photo-transition';
+ void node.offsetWidth;
+ node.style.animationDuration=(item.duration||.3)+'s';
+ node.className='review-photo-transition visual-'+item.effect;
+}
+function liveMotionLoop(){
+ live.animationFrame=0;
+ if(state.page!=='review'||!live.playing||live.changing)return;
+ liveAnimateMotion();
+ live.animationFrame=requestAnimationFrame(liveMotionLoop);
+}
+function liveBeginMotion(){
+ if(live.animationFrame)cancelAnimationFrame(live.animationFrame);
+ live.animationFrame=requestAnimationFrame(liveMotionLoop);
+}
+function liveEndMotion(){
+ if(live.animationFrame)cancelAnimationFrame(live.animationFrame);
+ live.animationFrame=0;
+}
 function liveMusic(){return document.getElementById('review-music')}
 function liveMusicSettings(){
  return state.reviewKind==='short'?{musicAssetId:null,musicLevel:18,...state.project?.master}:null;
@@ -84,12 +125,14 @@ function liveStageHTML(chapter){
  const closing=chapter.scene==='closing',frame=appearance.frame;
  const side=closing?'50%':appearance.position==='right'?(wide?'73%':'55%'):appearance.position==='center'?'50%':(wide?'3%':'8%');
  const speakerStyle='left:'+side+';--closing-scale:'+(Math.max(.7,Math.min(1.4,appearance.scale/95))).toFixed(2)+';transform:scale('+(appearance.scale/65).toFixed(2)+');transform-origin:bottom center';
- const backdrop=background?'<img class="template-back" src="'+esc(background)+'" alt="">':'<div class="fallback-back"></div>';
+ const backdrop=background?'<img id="review-motion-background" class="template-back" src="'+esc(background)+'" alt="">':
+  '<div id="review-motion-background" class="fallback-back"></div>';
  const first=(s.media||[]).map(m=>p.assets.find(a=>a.id===m.assetId)).find(a=>a?.type==='image');
  const support=closing?'':'<img id="review-support-image" class="photo" alt="" '+(first?'src="'+url(p,first.id)+'"':'')+' hidden>'+
   '<video id="review-support-video" class="photo" muted playsinline preload="metadata" hidden></video>';
  return '<div class="stage '+(wide?'wide ':'')+(closing?'closing ':'')+'live-stage style-'+esc(p.style||'historic')+'">'+
-  backdrop+support+'<div class="headline">'+esc(s.title||p.title)+'</div>'+
+  backdrop+support+'<div id="review-photo-transition" class="review-photo-transition"></div>'+
+  '<div class="headline">'+esc(s.title||p.title)+'</div>'+
   '<div class="presenter-frame frame-'+frame+'" data-presenter-frame style="'+speakerStyle+'">'+
    '<video id="final-review-video" class="speaker live-speaker" data-asset="'+esc(chapter.assetId)+'" playsinline preload="metadata"></video>'+
    '<span class="corner-ball corner-top-left" aria-hidden="true"></span>'+
@@ -106,6 +149,7 @@ async function liveLoadScene(index,offset=0,autoplay=false){
  const chapters=liveChapters(),ch=chapters[index];
  if(!ch||!ch.assetId)return;
  const token=++live.token;
+ liveEndMotion();live.lastVisual=null;
  live.changing=true;live.index=index;live.globalTime=ch.start+Math.max(0,Math.min(ch.duration,offset));
  const root=document.getElementById('review-live-stage');
  if(!root)return;
@@ -117,10 +161,11 @@ async function liveLoadScene(index,offset=0,autoplay=false){
  const key=ch.projectId+':'+ch.assetId;
  const overlay=document.getElementById('review-fx-overlay');
  if(overlay&&index>0){
-  const type=state.reviewKind==='short'?(index===1?state.project.transitions?.hookBody:state.project.transitions?.bodyClosing):'fade';
+  const type=state.reviewKind==='short'?
+   (index===1?state.reviewInfo?.transition?.hookBody:state.reviewInfo?.transition?.bodyClosing):'fade';
   if(type&&type!=='cut'){
    overlay.className='review-fx-overlay fx-'+type;
-   overlay.style.animationDuration=(Number(state.project?.transitions?.duration)||.5)+'s';
+   overlay.style.animationDuration=(Number(state.reviewInfo?.transition?.duration)||.42)+'s';
    overlay.addEventListener('animationend',()=>{overlay.className='review-fx-overlay'},{once:true});
   }
  }
@@ -138,8 +183,8 @@ async function liveLoadScene(index,offset=0,autoplay=false){
    try{video.currentTime=liveSourceTime(ch,offset)}catch(_){}
    live.changing=false;
    if(message)message.textContent='Vista previa en tiempo real · sin generar MP4';
-   liveUpdateSupport();
-   if(autoplay){try{await video.play();live.playing=true;liveStartMusic()}catch(e){if(message)message.textContent=e.message}}
+   liveUpdateSupport();liveAnimateMotion();
+   if(autoplay){try{await video.play();live.playing=true;liveStartMusic();liveBeginMotion()}catch(e){if(message)message.textContent=e.message}}
   },{once:true});
   video.load();
   const tkey=ch.projectId+':'+ch.scene;
@@ -164,7 +209,13 @@ function liveUpdateSupport(){
  if(segment.type==='image'){
   if(clip){clip.hidden=true;clip.pause()}
   if(photo){
-   if(photo.dataset.asset!==segment.assetId){photo.src=url(liveProject(ch),segment.assetId);photo.dataset.asset=segment.assetId}
+   if(photo.dataset.asset!==segment.assetId){
+    photo.src=url(liveProject(ch),segment.assetId);photo.dataset.asset=segment.assetId;
+    photo.style.transform='';
+    const item=VisualDirector.at(ch.motion,video.currentTime,segment.assetId);
+    if(live.lastVisual!==segment.assetId)liveTriggerPhotoEffect(item);
+    live.lastVisual=segment.assetId;
+   }
    photo.hidden=false;
   }
  }else if(segment.type==='video'&&clip){
@@ -199,12 +250,12 @@ function liveOnTimeUpdate(e){
  if(ch.duration>0&&live.globalTime>=ch.start+ch.duration-.045){liveNextScene();return}
  const scene=liveProject(ch)?.scenes[ch.scene];
  video.muted=(scene?.cuts||[]).some(c=>c.mode==='audio'&&video.currentTime>=c.start&&video.currentTime<c.end);
- liveTickLabel();liveUpdateSupport();liveSyncMusic();
+ liveTickLabel();liveUpdateSupport();liveAnimateMotion();liveSyncMusic();
 }
 function liveNextScene(){
  if(live.changing)return;
  const next=live.index+1;
- if(next>=liveChapters().length){live.playing=false;liveVideo()?.pause();live.globalTime=state.reviewInfo?.duration||live.globalTime;liveTickLabel();return}
+ if(next>=liveChapters().length){live.playing=false;liveEndMotion();liveVideo()?.pause();live.globalTime=state.reviewInfo?.duration||live.globalTime;liveTickLabel();return}
  const wasPlaying=live.playing;
  liveLoadScene(next,0,wasPlaying);
 }
@@ -218,17 +269,17 @@ async function liveSeek(seconds,autoplay){
  else{
   const video=liveVideo(),offset=Math.max(0,live.globalTime-ch.start);
   video.currentTime=liveSourceTime(ch,offset);
-  if(autoplay){await video.play();live.playing=true;liveStartMusic()}
-  liveTickLabel();liveUpdateSupport();liveSyncMusic(true);
+  if(autoplay){await video.play();live.playing=true;liveStartMusic();liveBeginMotion()}
+  liveTickLabel();liveUpdateSupport();liveAnimateMotion();liveSyncMusic(true);
  }
 }
 async function liveStart(){
  const ch=liveChapters()[live.index];
  if(!ch){await liveSeek(0,true);return}
  const v=liveVideo();if(!v){await liveSeek(live.globalTime,true);return}
- try{await v.play();live.playing=true;liveStartMusic()}catch(e){notice('Reproducción: '+e.message,true)}
+ try{await v.play();live.playing=true;liveStartMusic();liveBeginMotion()}catch(e){notice('Reproducción: '+e.message,true)}
 }
-function livePause(){live.playing=false;liveVideo()?.pause();document.getElementById('review-support-video')?.pause();liveMusic()?.pause()}
+function livePause(){live.playing=false;liveEndMotion();liveVideo()?.pause();document.getElementById('review-support-video')?.pause();liveMusic()?.pause()}
 function liveStop(){livePause();liveSeek(0,false);const music=liveMusic();if(music)music.currentTime=0}
 async function livePrepare(){
  ++live.token;livePause();live.index=-1;live.globalTime=0;live.projects={};live.timelines={};

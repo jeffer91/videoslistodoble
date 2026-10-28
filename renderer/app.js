@@ -428,10 +428,19 @@ function reviewPage(){
   '<input id="master-music-level" type="range" min="0" max="40" step="1" data-master="musicLevel" value="'+Number(master.musicLevel)+'">'+
   '<p class="muted mini">La voz tiene prioridad: la música baja automáticamente con la narración. El MP4 se normaliza a −16 LUFS.</p>'+
   '</div></div>':'';
+ const visualEffects=short?{enabled:true,revision:0,sceneTransitionsAuto:true,...project?.effects}:null;
+ const visualBar=short?'<section class="auto-director-panel"><div class="row between wrap">'+
+  '<div class="row"><span class="auto-director-icon">✦</span><div><strong>Movimiento automático</strong>'+
+  '<p class="muted mini">Fondos, fotografías, luces y cambios de escena coordinados.</p></div></div>'+
+  '<span class="pill">'+(visualEffects.enabled?'Activo':'Desactivado')+'</span></div>'+
+  '<div class="row wrap">'+
+  btn('effects-regenerate','↻ Nueva combinación','secondary')+
+  btn('effects-toggle',visualEffects.enabled?'Desactivar efectos':'Activar efectos','outline')+
+  '</div></section>':'';
  const styles=[['cut','Corte inmediato'],['fade','Fundido elegante'],['smoothleft','Barrido fluido'],['zoomin','Zoom cinematográfico'],['hblur','Desenfoque de acción'],
   ['diagtl','Diagonal deportiva'],['wipeleft','Barrido clásico'],['circleopen','Apertura circular'],['radial','Destello circular']];
  const options=current=>styles.map(([v,n])=>'<option value="'+v+'" '+(current===v?'selected':'')+'>'+n+'</option>').join('');
- const transitionSettings=short?'<details open class="review-extra review-transition-panel"><summary>Transiciones cinematográficas</summary>'+
+ const transitionSettings=short?'<details class="review-extra review-transition-panel"><summary>Transiciones cinematográficas</summary>'+
   '<p class="muted mini">Elige un estilo o personaliza los cambios entre escenas.</p>'+
   '<div class="review-presets">'+
   btn('transition-preset','⚡ Deportivo','secondary','data-preset="sport"')+
@@ -469,7 +478,7 @@ function reviewPage(){
  btn('review-open-output','Abrir archivo','secondary')+'</div>':'')+
  '<p class="muted mini">Vista previa sin MP4. La exportación aplica velocidad, transiciones, mezcla y sonido normalizado.</p></section>'+
  '<section class="panel"><h2>Escenas y correcciones</h2><p class="muted mini">Selecciona una escena para verla o regresar a modificarla.</p>'+
- '<div class="review-chapters">'+cards+'</div>'+masterControls+transitionSettings+
+ '<div class="review-chapters">'+cards+'</div>'+visualBar+masterControls+transitionSettings+
  ''+
  '</section></div>';
 }
@@ -1047,6 +1056,20 @@ document.addEventListener('click',async e=>{
   if(action==='live-pause')return livePause();
   if(action==='live-stop')return liveStop();
   if(action==='review-export')return await exportReview();
+  if(action==='effects-regenerate'||action==='effects-toggle'){
+   if(!state.project||state.reviewKind!=='short')throw Error('Abre un Short para editar los efectos');
+   const p=state.project;
+   p.effects={enabled:true,sceneTransitionsAuto:true,revision:0,...p.effects};
+   if(action==='effects-regenerate'){
+    p.effects.enabled=true;p.effects.sceneTransitionsAuto=true;
+    p.effects.revision=(p.effects.revision+1)%1000000;
+   }else p.effects.enabled=!p.effects.enabled;
+   await saveNow();
+   state.reviewInfo=await api('review:status',{kind:'short',id:p.id});
+   if(state.page==='review'){render();await livePrepare()}
+   notice(action==='effects-regenerate'?'Nueva combinación visual aplicada':'Movimiento automático actualizado');
+   return;
+  }
   if(action==='music-import'){
    if(!state.project||state.reviewKind!=='short')throw Error('Abre un Short');
    const item=await api('music:import',{projectId:state.project.id});
@@ -1069,6 +1092,8 @@ document.addEventListener('click',async e=>{
    const preset=presets[b.dataset.preset];
    if(!preset||!state.project)throw Error('Estilo inválido');
    state.project.transitions=preset;
+   state.project.effects={enabled:true,sceneTransitionsAuto:true,revision:0,...state.project.effects,
+    sceneTransitionsAuto:false};
    await saveNow();state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
    render();await livePrepare();notice('Transiciones actualizadas');return;
   }
@@ -1241,6 +1266,7 @@ document.addEventListener('change',async e=>{
   const k=e.target.dataset.transition,p=state.project;
   p.transitions={hookBody:'fade',bodyClosing:'fade',duration:.3,...p.transitions};
   p.transitions[k]=k==='duration'?Number(e.target.value):e.target.value;
+  p.effects={enabled:true,sceneTransitionsAuto:true,revision:0,...p.effects,sceneTransitionsAuto:false};
   order.forEach(key=>p.scenes[key].approved=false);
   await saveNow();
   state.reviewInfo=await api('review:status',{kind:'short',id:p.id});

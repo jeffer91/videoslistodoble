@@ -3,8 +3,9 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const store=require('./store.cjs'),media=require('./media.cjs'),logos=require('./logo.cjs'),templates=require('./templates.cjs');
 const KINDS=['short','week'],UUID=/^[a-f0-9-]{36}$/i,KEYS=['hook','body','closing'];
 const NAMES={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
-const VERSION='live-montage-2026-10-27-master-v2';
+const VERSION='live-montage-auto-motion-v1';
 const masterAudio=require('./master-audio.cjs');
+const visualDirector=require('../renderer/visual-director.js');
 function validate(kind,id){if(!KINDS.includes(kind)||!UUID.test(String(id)))throw Error('Revisión inválida')}
 function sequenceFor(root,kind,id){
  validate(kind,id);
@@ -48,32 +49,38 @@ async function inspect(root,kind,id){
    missing.push(entry.title+': falta narración');continue;
   }
   const voice=store.resolveAsset(root,p.id,scene.video),info=await media.probe(voice);
+  const visualSegments=await media.getPreviewTimeline(root,p.id,entry.scene);
+  const motion=visualDirector.sequence({projectId:p.id,sceneKey:entry.scene,
+   segments:visualSegments,duration:info.duration,settings:p.effects,format:kind==='short'?'short':'wide'});
   const rate=Math.max(.5,Math.min(2,Number(scene.playbackSpeed)||1))*master.speed;
   const ranges=media.retainedRanges(scene,info.duration).map(r=>({...r,duration:(r.end-r.start)/rate}));
   const duration=ranges.reduce((sum,r)=>sum+r.duration,0);
   if(duration<.5)missing.push(entry.title+': duración insuficiente');
   chapters.push({label:entry.title,scene:entry.scene,projectId:p.id,assetId:scene.video,
-   start:elapsed,duration,playbackSpeed:rate,ranges,transition:false});
+   start:elapsed,duration,playbackSpeed:rate,ranges,transition:false,motion});
   elapsed+=duration;
  }
  if(kind==='short'&&master.musicAssetId){
   const asset=first.assets.find(a=>a.id===master.musicAssetId);
   if(!asset||asset.type!=='audio')throw Error('La pista musical no está disponible');
  }
+ const autoEffects=kind==='short'&&first?.effects?.enabled!==false&&first?.effects?.sceneTransitionsAuto!==false?
+  visualDirector.transitions({projectId:id,revision:first?.effects?.revision||0,settings:first?.effects,
+   chapters:chapters.filter(c=>!c.transition)}):transitions;
  const format=kind==='short'?'short':'wide';
  for(const p of projects.values()){
   for(const a of p.assets||[])files.push(stamp(store.resolveAsset(root,p.id,a.id)));
   for(const s of Object.values(p.scenes)){const file=backgroundPath(root,p,s,format);if(file)files.push(stamp(file))}
  }
  if(settings.logo&&fs.existsSync(settings.logo))files.push(stamp(settings.logo));
- const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,master:p.master,
+ const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,effects:p.effects,master:p.master,
   scenes:Object.fromEntries(Object.entries(p.scenes).map(([k,s])=>[k,{...s,approved:undefined,cutHistory:undefined}]))}));
  const hash=crypto.createHash('sha256').update(JSON.stringify({v:VERSION,kind,id,chapters,models,files,
   week:kind==='week'?store.getWeek(root,id):null,autoMicrocuts:settings.autoMicrocuts,logo:settings.logo}))
   .digest('hex').slice(0,32);
  return {kind,id,hash,ready:true,live:true,complete:missing.length===0,approved:kind==='short'?approved:true,
   canExport:missing.length===0&&(kind!=='short'||approved)&&(kind!=='week'||elapsed>=480),
-  chapters,duration:elapsed,missing,transition:transitions,master};
+  chapters,duration:elapsed,missing,transition:autoEffects,master,autoEffects:first?.effects?.enabled!==false};
 }
 async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
  const snapshot=await inspect(root,kind,id);
