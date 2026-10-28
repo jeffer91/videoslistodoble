@@ -60,7 +60,7 @@ test('la revisión es instantánea y la exportación crea MP4 con audio normaliz
   assert.equal(store.getProject(root,id).status,'editing');
   assert.equal(store.getProject(root,id).exports.length,0);
   assert.equal(fs.existsSync(path.join(root,'Temporales','Revisiones')),false);
-  await assert.rejects(()=>reviews.exportApproved(root,'short',id,before.hash),/Aprueba/);
+  await assert.rejects(()=>reviews.exportApproved(root,'short',id,before.hash),/aprueba/i);
   const p=store.getProject(root,id);
   for(const scene of Object.values(p.scenes))scene.approved=true;
   store.saveProject(root,p);
