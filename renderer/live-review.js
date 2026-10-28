@@ -39,7 +39,7 @@ function liveFindChapter(time){
 }
 function liveFrameClass(p,scene,wide){
  const v=scene.formats?.[wide?'wide':'short']||{};
- return {frame:v.frame||'gold',position:v.position||'left',scale:Number(v.scale)||65};
+ return {frame:v.frame||'sport',position:v.position||'left',scale:Number(v.scale)||65};
 }
 function liveBackground(p,scene,format){
  const choice=Object.prototype.hasOwnProperty.call(scene.backgrounds||{},format)?scene.backgrounds[format]:p.backgrounds?.[format];
@@ -61,7 +61,9 @@ function liveStageHTML(chapter){
   '<video id="review-support-video" class="photo" muted playsinline preload="metadata" hidden></video>';
  return '<div class="stage '+(wide?'wide ':'')+(closing?'closing ':'')+'live-stage style-'+esc(p.style||'historic')+'">'+
   backdrop+support+'<div class="headline">'+esc(s.title||p.title)+'</div>'+
-  '<video id="final-review-video" class="speaker live-speaker frame-'+frame+'" data-asset="'+esc(chapter.assetId)+'" style="'+speakerStyle+'" playsinline preload="metadata"></video>'+
+  '<div class="presenter-frame frame-'+frame+'" data-presenter-frame style="'+speakerStyle+'">'+
+   '<video id="final-review-video" class="speaker live-speaker" data-asset="'+esc(chapter.assetId)+'" playsinline preload="metadata"></video>'+
+  '</div>'+
   (closing?'<div class="follow">SÍGUENOS</div>':'')+
   (state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="">':'')+
   '<div id="review-fx-overlay" class="review-fx-overlay"></div>'+

@@ -243,8 +243,11 @@ function sceneView(){
  const speakerPos=state.scene==='closing'?'50%':appearance.position==='right'?(wide?'73%':'55%'):appearance.position==='center'?(wide?'40%':'31%'):(wide?'3%':'8%');
  const presenterStyle='left:'+speakerPos+';transform:scale('+(Number(appearance.scale||65)/65).toFixed(2)+');transform-origin:bottom center;--closing-scale:'+(Math.max(.8,Math.min(1.35,(Number(appearance.scale)||95)/95))).toFixed(2);
  const previewSrc=video?(state.previewUrls[p.id+':'+video.id]||''):'';
- const preview=video?'<video class="speaker frame-'+esc(appearance.frame||'gold')+'" id="speaker-preview" data-asset="'+esc(video.id)+'" style="'+presenterStyle+'" '+(previewSrc?'src="'+previewSrc+'"':'')+' playsinline preload="metadata"></video>'+
-  '<video class="speaker speaker-frozen frame-'+esc(appearance.frame||'gold')+'" id="speaker-frozen" style="'+presenterStyle+'" '+(previewSrc?'src="'+previewSrc+'"':'')+' muted playsinline preload="metadata" hidden></video>':'';
+ const frame=esc(appearance.frame||'sport');
+ const preview=video?'<div class="presenter-frame frame-'+frame+'" data-presenter-frame style="'+presenterStyle+'">'+
+  '<video class="speaker" id="speaker-preview" data-asset="'+esc(video.id)+'" '+(previewSrc?'src="'+previewSrc+'"':'')+' playsinline preload="metadata"></video>'+
+  '<video class="speaker speaker-frozen" id="speaker-frozen" '+(previewSrc?'src="'+previewSrc+'"':'')+' muted playsinline preload="metadata" hidden></video>'+
+  '</div>':'';
  let bg='';
  if(currentBackground)bg='<img class="template-back" src="'+templateUrl(currentBackground)+'" alt="Fondo del video">';
  else if(first&&first.type==='image')bg='<img class="back" src="'+url(p,first.id)+'">';
@@ -265,7 +268,7 @@ function sceneView(){
  '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label>'+(state.scene==='closing'?'<input value="Centro · primer plano" disabled>':'<select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select>')+'</div></div>'+
  '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>'+
  '<div class="field"><label>Marco de cámara</label><select data-format-field="frame">'+
- [['none','Sin marco'],['gold','Dorado'],['neon','Neón'],['minimal','Minimalista']].map(([v,t])=>'<option value="'+v+'" '+((appearance.frame||'gold')===v?'selected':'')+'>'+t+'</option>').join('')+
+ [['sport','Transmisión 11 Récords'],['gold','Oro de campeón'],['neon','Neón deportivo'],['minimal','Minimalista'],['none','Sin marco']].map(([v,t])=>'<option value="'+v+'" '+((appearance.frame||'sport')===v?'selected':'')+'>'+t+'</option>').join('')+
  '</select></div>';
  const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+btn('choose-project-media','Desde biblioteca del proyecto','secondary')+'</div>')+mediaRows();
  const audio='<div class="field"><label>Velocidad de narración y cámara</label><select data-field="playbackSpeed">'+

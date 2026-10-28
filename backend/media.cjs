@@ -173,14 +173,19 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  const closing=sceneKey==='closing';
  const contentW=closing?(wide?1220:950):(wide?1380:930),contentH=closing?(wide?1000:1500):(wide?825:1160);
  const pos=appearance?.position||(wide?'right':'left');
- const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||65)/65));
- const px=closing?'(W-w)/2':wide?(pos==='right'?1440:pos==='center'?760:65):(pos==='right'?600:pos==='center'?350:58),py=closing?(wide?90:390):(wide?235:820);
- const pw=Math.round((wide?420:400)*factor),ph=Math.round((wide?660:580)*factor);
+ const factor=Math.max(.6,Math.min(1.5,(Number(appearance?.scale)||(closing?95:65))/(closing?95:65)));
+ const px=closing?'(W-w)/2':wide?(pos==='right'?'W*0.73':pos==='center'?'W*0.40':'W*0.03'):
+  (pos==='right'?'W*0.55':pos==='center'?'W*0.31':'W*0.08');
+ const bottom=closing?(wide?.08:.18):(wide?.08:.17);
+ const py='H-h-H*'+bottom;
+ const renderRatio=W/(wide?1920:1080);
+ const pw=Math.round((closing?(wide?540:820):(wide?420:400))*factor*renderRatio);
+ const ph=Math.round((closing?(wide?760:1150):(wide?730:750))*factor*renderRatio);
  const voiceRate=Math.max(.5,Math.min(2,Number(appearance?.narrationSpeed)||1));
+ const f=[];
  if(voiceRate!==1&&!freezeVideo)f.push('[0:v]setpts=(PTS-STARTPTS)/'+voiceRate.toFixed(3)+'[spedvoice]');
  const voiceInput=freezeVideo?'[frozen]':voiceRate!==1?'[spedvoice]':'[0:v]';
  const pad=withPresenter?'[1:v]':voiceInput;
- const f=[];
  if(freezeVideo)f.push('[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3600[frozen]');
  if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed)*voiceRate)).toFixed(3)+'[timed]');
  const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
@@ -196,9 +201,26 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }
  f.push('[blur][center]overlay=(W-w)/2:'+(closing?py:'(H-h)/2')+'[base]');
  if(withPresenter){
-  const borders={gold:'0xd4b15f',neon:'0x55d3c2',minimal:'0x9eaba7'},frame=borders[appearance?.frame||'gold'];
-  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1'+
-   (frame?',pad=iw+12:ih+12:6:6:color='+frame:'')+'[speaker]');
+  const kind=appearance?.frame||'sport';
+  const themes={sport:['0xd5ad4b','0xffdf88','0x103d2b'],gold:['0xbf842b','0xffe6a0','0x37230b'],
+   neon:['0x1cbfec','0xd234e9','0x082d48'],minimal:['0xc5d8d0','0xebf7ee','0x223c31']};
+  const colors=themes[kind],edge=Math.max(2,Math.round(6*renderRatio));
+  let frameFilter='';
+  if(colors){
+   const outer=Math.max(3,Math.round(11*renderRatio)),badgeH=Math.max(5,Math.round(20*renderRatio));
+   const badgeW=Math.max(22,Math.round(106*renderRatio));
+   frameFilter=',pad=iw+'+(2*outer)+':ih+'+(2*outer)+':'+outer+':'+outer+':color='+colors[2]+
+    ',drawbox=x=0:y=0:w=iw:h=ih:color='+colors[0]+':t='+edge+
+    ',drawbox=x='+edge+':y='+edge+':w=iw-'+(2*edge)+':h=ih-'+(2*edge)+':color='+colors[1]+':t='+Math.max(1,Math.round(2*renderRatio))+
+    ',drawbox=x='+outer+':y=ih-'+Math.max(2,Math.round(7*renderRatio))+
+    ':w=iw-'+(2*outer)+':h='+Math.max(2,Math.round(4*renderRatio))+':color='+colors[1]+':t=fill';
+   if(kind!=='minimal'){
+    frameFilter+=',drawbox=x='+outer+':y=0:w='+badgeW+':h='+badgeH+':color='+colors[2]+':t=fill'+
+      ',drawtext=text=11 RECORDS:fontcolor='+colors[1]+':fontsize='+Math.max(8,Math.round(16*renderRatio))+
+      ':'+ffFont()+':x='+Math.max(2,Math.round(7*renderRatio))+':y=0';
+   }
+  }
+  f.push(voiceInput+'scale='+pw+':'+ph+':force_original_aspect_ratio=decrease,setsar=1'+frameFilter+'[speaker]');
   f.push('[base][speaker]overlay='+px+':'+py+'[visual]');
  }else f.push('[base]null[visual]');
  const strip=theme==='numbers'?'0xb92d42':theme==='legends'?'0xd8b56a':'0x2fcb6b';
