@@ -298,3 +298,31 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .stage .presenter-frame .corner-bottom-left{left:-6px;bottom:-6px}
 .stage .presenter-frame .corner-bottom-right{right:-6px;bottom:-6px}
 .stage .presenter-frame.frame-none .corner-ball{display:none}
+
+/* Velocidad global, cama musical y transiciones en un panel compacto */
+.review-master{margin-top:15px;border-top:1px solid #35543d;padding-top:14px;display:grid;gap:9px}
+.review-master h3{font-size:14px;margin:0}
+.review-master select{display:block;width:100%;background:#10281b;border:1px solid #45684e;color:#ebf8ed;padding:9px;border-radius:8px}
+.review-control-label{font-size:12px;font-weight:650;color:#cae5d2}
+.review-master p{margin:2px 0 5px}
+.review-master-music{display:grid;gap:9px;padding:12px;background:#14291b;border:1px solid #315840;border-radius:10px}
+.review-master-music input[type=range]{width:100%;accent-color:#53d885}
+.review-master-music output{font-size:11px;color:#a8d5b8;font-weight:500}
+.review-presets{display:flex;flex-wrap:wrap;gap:6px;padding:7px 0}
+.review-presets button{font-size:11px;padding:8px 10px}
+.review-transition-panel{margin-top:12px;border-top:1px solid #34513f;padding-top:12px}
+.review-transition-panel summary{font-weight:700;cursor:pointer}
+.review-transition-panel .review-settings{margin-top:10px}
+.review-transition-panel select{border:1px solid #466753;color:#e9f4eb;background:#112318;border-radius:7px;padding:8px}
+.review-fx-overlay.fx-smoothleft{background:linear-gradient(90deg,#012d25,#22bdca,#e0c36a);animation:review-sweep .5s ease-out both}
+.review-fx-overlay.fx-zoomin{background:radial-gradient(circle,#f8e0a9d9,#1b6a8075 40%,#081624);
+ animation:review-zoom .5s cubic-bezier(.23,.7,.13,1) both}
+.review-fx-overlay.fx-hblur{background:linear-gradient(110deg,#131739a8,#d5deff8c,#0f41347d);
+ animation:review-blur .5s ease-out both}
+.review-fx-overlay.fx-diagtl{background:linear-gradient(135deg,#114b3f,#57d9ba,#ecd081);
+ animation:review-diagonal .5s ease-out both}
+@keyframes review-sweep{0%{opacity:.97;clip-path:inset(0 0 0 0)}100%{opacity:0;clip-path:inset(0 0 0 100%)}}
+@keyframes review-zoom{0%{opacity:.9;transform:scale(.4);filter:blur(9px)}100%{opacity:0;transform:scale(2.7);filter:blur(0)}}
+@keyframes review-blur{0%{opacity:.85;filter:blur(25px)}100%{opacity:0;filter:blur(1px)}}
+@keyframes review-diagonal{0%{opacity:.9;clip-path:polygon(0 0,100% 0,100% 100%,0 100%)}
+ 100%{opacity:0;clip-path:polygon(100% 100%,100% 100%,100% 100%,100% 100%)}}

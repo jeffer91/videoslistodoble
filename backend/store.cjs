@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const TYPES={'.mp4':'video','.mov':'video','.mkv':'video','.webm':'video','.avi':'video','.jpg':'image','.jpeg':'image','.png':'image','.webp':'image','.gif':'image','.wav':'audio','.mp3':'audio','.m4a':'audio','.aac':'audio'};
+const TYPES={'.mp4':'video','.mov':'video','.mkv':'video','.webm':'video','.avi':'video','.jpg':'image','.jpeg':'image','.png':'image','.webp':'image','.gif':'image','.wav':'audio','.mp3':'audio','.m4a':'audio','.aac':'audio','.flac':'audio','.ogg':'audio'};
 const safeId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{5,90}$/.test(s);
 const uid=()=>crypto.randomUUID();
 const makeScenes=()=>({
@@ -14,15 +14,26 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
 function assertAssetRefs(p){const ids=new Set((p.assets||[]).map(a=>a.id));for(const scene of Object.values(p.scenes||{})){if(scene.video&&!ids.has(scene.video))throw Error('Video no encontrado en la biblioteca');for(const m of scene.media||[])if(!ids.has(m.assetId))throw Error('Recurso no encontrado en el proyecto')}}
 function saveProject(root,x){const original=getProject(root,x.id);
- const editable=['title','style','scenes','status','backgrounds','transitions'];const next={...original};
+ const editable=['title','style','scenes','status','backgrounds','transitions','master'];const next={...original};
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
+ if(next.master!==undefined){
+  const m=next.master;
+  if(!m||typeof m!=='object'||Array.isArray(m))throw Error('Ajustes del montaje inválidos');
+  if(![.5,.75,1,1.25,1.5,2].includes(Number(m.speed??1)))throw Error('Velocidad global inválida');
+  if(!Number.isFinite(Number(m.musicLevel??18))||Number(m.musicLevel)<0||Number(m.musicLevel)>40)
+   throw Error('Volumen musical fuera de rango');
+  if(m.musicAssetId){
+   const track=(next.assets||[]).find(a=>a.id===m.musicAssetId);
+   if(!track||track.type!=='audio')throw Error('La pista musical debe ser un archivo de audio del proyecto');
+  }
+ }
  if(next.transitions){
-  for(const k of ['hookBody','bodyClosing'])if(next.transitions[k]&&!['cut','fade','wipeleft','circleopen','radial'].includes(next.transitions[k]))throw Error('Transición inválida');
-  if(next.transitions.duration!==undefined&&!(Number(next.transitions.duration)>=.1&&Number(next.transitions.duration)<=.7))throw Error('Duración de transición inválida');
+  for(const k of ['hookBody','bodyClosing'])if(next.transitions[k]&&!['cut','fade','wipeleft','circleopen','radial','smoothleft','zoomin','hblur','diagtl'].includes(next.transitions[k]))throw Error('Transición inválida');
+  if(next.transitions.duration!==undefined&&!(Number(next.transitions.duration)>=.1&&Number(next.transitions.duration)<=1))throw Error('Duración de transición inválida');
  }
  for(const scene of Object.values(next.scenes||{})){
   const speed=Number(scene.playbackSpeed??1);
@@ -109,6 +120,7 @@ function renameAsset(root,projectId,assetId,name){
 function removeAsset(root,projectId,assetId){
  const p=getProject(root,projectId),a=p.assets.find(x=>x.id===assetId);
  if(!a)throw Error('Recurso inexistente');
+ if(p.master?.musicAssetId===assetId)throw Error('La música está asignada al montaje. Retírala antes de eliminar el archivo.');
  for(const scene of Object.values(p.scenes||{})){
   if(scene.video===assetId||(scene.media||[]).some(m=>m.assetId===assetId)||
     Object.values(scene.backgrounds||{}).some(b=>b?.scope==='project'&&b.assetId===assetId))

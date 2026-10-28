@@ -2,6 +2,35 @@
 // Reproductor de montaje: no crea ni concatena MP4. Usa los recursos originales,
 // copias compatibles individuales cuando Electron las necesita, y el reloj de las escenas.
 const live={playing:false,index:-1,globalTime:0,projects:{},timelines:{},token:0,changing:false,loading:false,ended:false};
+function liveMusic(){return document.getElementById('review-music')}
+function liveMusicSettings(){
+ return state.reviewKind==='short'?{musicAssetId:null,musicLevel:18,...state.project?.master}:null;
+}
+function liveSyncMusic(force=false){
+ const audio=liveMusic(),settings=liveMusicSettings();
+ if(!audio||!settings?.musicAssetId)return;
+ const narration=liveVideo(),narrationMuted=Boolean(narration?.muted);
+ // La vista previa usa una cama musical reducida; FFmpeg usa compresión lateral.
+ audio.volume=Math.min(.4,Math.max(0,Number(settings.musicLevel)||0)/100)*(narrationMuted?.85:.55);
+ if(!audio.duration||!Number.isFinite(audio.duration))return;
+ const target=live.globalTime%audio.duration;
+ if(force||Math.abs(audio.currentTime-target)>1)try{audio.currentTime=target}catch(_){}
+}
+function liveStartMusic(){
+ const audio=liveMusic();
+ if(!audio||!liveMusicSettings()?.musicAssetId)return;
+ liveSyncMusic(true);
+ audio.play().catch(()=>{const m=document.getElementById('review-live-message');if(m)m.textContent='Reproducción musical no disponible; la narración sigue funcionando.'});
+}
+function liveSetupMusic(){
+ const audio=liveMusic(),settings=liveMusicSettings();
+ if(!audio)return;
+ if(!settings?.musicAssetId||!state.project){audio.pause();audio.removeAttribute('src');return}
+ audio.src=url(state.project,settings.musicAssetId);
+ audio.load();
+ audio.addEventListener('loadedmetadata',()=>liveSyncMusic(true),{once:true});
+ liveSyncMusic();
+}
 function liveChapters(){return (state.reviewInfo?.chapters||[]).filter(c=>!c.transition)}
 function liveProject(chapter){return live.projects[chapter.projectId]||null}
 function liveVideo(){return document.getElementById('final-review-video')}
@@ -89,8 +118,11 @@ async function liveLoadScene(index,offset=0,autoplay=false){
  const overlay=document.getElementById('review-fx-overlay');
  if(overlay&&index>0){
   const type=state.reviewKind==='short'?(index===1?state.project.transitions?.hookBody:state.project.transitions?.bodyClosing):'fade';
-  overlay.className='review-fx-overlay fx-'+(type||'fade');
-  overlay.addEventListener('animationend',()=>{overlay.className='review-fx-overlay'},{once:true});
+  if(type&&type!=='cut'){
+   overlay.className='review-fx-overlay fx-'+type;
+   overlay.style.animationDuration=(Number(state.project?.transitions?.duration)||.5)+'s';
+   overlay.addEventListener('animationend',()=>{overlay.className='review-fx-overlay'},{once:true});
+  }
  }
  const message=document.getElementById('review-live-message');
  if(message)message.textContent='Preparando '+ch.label+'…';
@@ -107,7 +139,7 @@ async function liveLoadScene(index,offset=0,autoplay=false){
    live.changing=false;
    if(message)message.textContent='Vista previa en tiempo real · sin generar MP4';
    liveUpdateSupport();
-   if(autoplay){try{await video.play();live.playing=true}catch(e){if(message)message.textContent=e.message}}
+   if(autoplay){try{await video.play();live.playing=true;liveStartMusic()}catch(e){if(message)message.textContent=e.message}}
   },{once:true});
   video.load();
   const tkey=ch.projectId+':'+ch.scene;
@@ -167,7 +199,7 @@ function liveOnTimeUpdate(e){
  if(ch.duration>0&&live.globalTime>=ch.start+ch.duration-.045){liveNextScene();return}
  const scene=liveProject(ch)?.scenes[ch.scene];
  video.muted=(scene?.cuts||[]).some(c=>c.mode==='audio'&&video.currentTime>=c.start&&video.currentTime<c.end);
- liveTickLabel();liveUpdateSupport();
+ liveTickLabel();liveUpdateSupport();liveSyncMusic();
 }
 function liveNextScene(){
  if(live.changing)return;
@@ -186,18 +218,18 @@ async function liveSeek(seconds,autoplay){
  else{
   const video=liveVideo(),offset=Math.max(0,live.globalTime-ch.start);
   video.currentTime=liveSourceTime(ch,offset);
-  if(autoplay){await video.play();live.playing=true}
-  liveTickLabel();liveUpdateSupport();
+  if(autoplay){await video.play();live.playing=true;liveStartMusic()}
+  liveTickLabel();liveUpdateSupport();liveSyncMusic(true);
  }
 }
 async function liveStart(){
  const ch=liveChapters()[live.index];
  if(!ch){await liveSeek(0,true);return}
  const v=liveVideo();if(!v){await liveSeek(live.globalTime,true);return}
- try{await v.play();live.playing=true}catch(e){notice('Reproducción: '+e.message,true)}
+ try{await v.play();live.playing=true;liveStartMusic()}catch(e){notice('Reproducción: '+e.message,true)}
 }
-function livePause(){live.playing=false;liveVideo()?.pause();document.getElementById('review-support-video')?.pause()}
-function liveStop(){livePause();liveSeek(0,false)}
+function livePause(){live.playing=false;liveVideo()?.pause();document.getElementById('review-support-video')?.pause();liveMusic()?.pause()}
+function liveStop(){livePause();liveSeek(0,false);const music=liveMusic();if(music)music.currentTime=0}
 async function livePrepare(){
  ++live.token;livePause();live.index=-1;live.globalTime=0;live.projects={};live.timelines={};
  const chapters=liveChapters();
@@ -206,7 +238,7 @@ async function livePrepare(){
   live.projects[ch.projectId]=state.project?.id===ch.projectId?state.project:
    await api('projects:get',{id:ch.projectId});
  }
- if(state.page==='review'&&chapters.some(c=>c.assetId))await liveSeek(0,false);
+ if(state.page==='review'){liveSetupMusic();if(chapters.some(c=>c.assetId))await liveSeek(0,false)}
 }
 document.addEventListener('timeupdate',liveOnTimeUpdate,true);
 document.addEventListener('ended',e=>{if(e.target?.id==='final-review-video')liveNextScene()},true);

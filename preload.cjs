@@ -5,7 +5,7 @@ const allowed = new Set([
   'assets:import','assets:paste-image','assets:rename','assets:delete','assets:record','assets:import-logo','settings:get','settings:set',
   'global:list','global:import','global:paste','global:rename','global:delete','global:from-project','global:to-project',
   'templates:list','templates:import','templates:paste','templates:set-default','templates:rename','templates:delete',
-  'media:analyze','media:metadata','media:waveform','media:preview','media:timeline','review:status','review:export','render:short','render:weekly','render:cancel',
+  'music:import','media:analyze','media:metadata','media:waveform','media:preview','media:timeline','review:status','review:export','render:short','render:weekly','render:cancel',
   'weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
 ]);
 contextBridge.exposeInMainWorld('studio', {

@@ -3,7 +3,8 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const store=require('./store.cjs'),media=require('./media.cjs'),logos=require('./logo.cjs'),templates=require('./templates.cjs');
 const KINDS=['short','week'],UUID=/^[a-f0-9-]{36}$/i,KEYS=['hook','body','closing'];
 const NAMES={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
-const VERSION='live-montage-2026-10-27';
+const VERSION='live-montage-2026-10-27-master-v2';
+const masterAudio=require('./master-audio.cjs');
 function validate(kind,id){if(!KINDS.includes(kind)||!UUID.test(String(id)))throw Error('Revisión inválida')}
 function sequenceFor(root,kind,id){
  validate(kind,id);
@@ -33,6 +34,8 @@ async function inspect(root,kind,id){
  const chapters=[],missing=[],files=[];let elapsed=0,approved=true;
  const first=kind==='short'?store.getProject(root,id):null;
  const transitions=first?.transitions||{hookBody:'fade',bodyClosing:'fade',duration:.3};
+ const master=kind==='short'?{speed:1,musicLevel:18,...first.master}:{speed:1,musicLevel:0,musicAssetId:null};
+ masterAudio.settings(master);
  for(const entry of sequence){
   if(entry.transition){chapters.push({transition:true,label:'Transición',start:elapsed,duration:1});elapsed+=1;continue}
   let p=projects.get(entry.projectId);
@@ -45,7 +48,7 @@ async function inspect(root,kind,id){
    missing.push(entry.title+': falta narración');continue;
   }
   const voice=store.resolveAsset(root,p.id,scene.video),info=await media.probe(voice);
-  const rate=Math.max(.5,Math.min(2,Number(scene.playbackSpeed)||1));
+  const rate=Math.max(.5,Math.min(2,Number(scene.playbackSpeed)||1))*master.speed;
   const ranges=media.retainedRanges(scene,info.duration).map(r=>({...r,duration:(r.end-r.start)/rate}));
   const duration=ranges.reduce((sum,r)=>sum+r.duration,0);
   if(duration<.5)missing.push(entry.title+': duración insuficiente');
@@ -53,20 +56,24 @@ async function inspect(root,kind,id){
    start:elapsed,duration,playbackSpeed:rate,ranges,transition:false});
   elapsed+=duration;
  }
+ if(kind==='short'&&master.musicAssetId){
+  const asset=first.assets.find(a=>a.id===master.musicAssetId);
+  if(!asset||asset.type!=='audio')throw Error('La pista musical no está disponible');
+ }
  const format=kind==='short'?'short':'wide';
  for(const p of projects.values()){
   for(const a of p.assets||[])files.push(stamp(store.resolveAsset(root,p.id,a.id)));
   for(const s of Object.values(p.scenes)){const file=backgroundPath(root,p,s,format);if(file)files.push(stamp(file))}
  }
  if(settings.logo&&fs.existsSync(settings.logo))files.push(stamp(settings.logo));
- const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,
+ const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,master:p.master,
   scenes:Object.fromEntries(Object.entries(p.scenes).map(([k,s])=>[k,{...s,approved:undefined,cutHistory:undefined}]))}));
  const hash=crypto.createHash('sha256').update(JSON.stringify({v:VERSION,kind,id,chapters,models,files,
   week:kind==='week'?store.getWeek(root,id):null,autoMicrocuts:settings.autoMicrocuts,logo:settings.logo}))
   .digest('hex').slice(0,32);
  return {kind,id,hash,ready:true,live:true,complete:missing.length===0,approved:kind==='short'?approved:true,
   canExport:missing.length===0&&(kind!=='short'||approved)&&(kind!=='week'||elapsed>=480),
-  chapters,duration:elapsed,missing,transition:transitions};
+  chapters,duration:elapsed,missing,transition:transitions,master};
 }
 async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
  const snapshot=await inspect(root,kind,id);
@@ -100,9 +107,11 @@ async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
   }else{
    combined=path.join(tmp,'ensamblado.mp4');await media.concat(tmp,sceneFiles,combined,signal);
   }
-  send({type:'status',message:'Normalizando audio a −16 LUFS'});
+  send({type:'status',message:'Aplicando velocidad global, mezcla musical y normalización'});
   const normalized=path.join(tmp,'final-normalizado.mp4');
-  await media.normalizeFinal(combined,normalized,signal);
+  const source=kind==='short'?store.getProject(root,id):null;
+  const musicFile=source?.master?.musicAssetId?store.resolveAsset(root,id,source.master.musicAssetId):null;
+  await masterAudio.render(combined,normalized,source?.master||{},musicFile,signal);
   if(signal?.aborted)throw Error('Cancelado');
   const current=await inspect(root,kind,id);
   if(current.hash!==snapshot.hash)throw Error('El proyecto cambió durante la exportación');

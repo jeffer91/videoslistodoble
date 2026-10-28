@@ -411,14 +411,39 @@ function reviewPage(){
   btn('review-seek','▶ Ver','secondary','data-start="'+c.start+'"')+
   btn('review-edit','✎ Corregir','secondary','data-id="'+esc(c.projectId)+'" data-scene="'+esc(c.scene)+'"')+
   '</div></article>').join('');
- const styles=[['cut','Corte directo'],['fade','Fundido'],['wipeleft','Barrido deportivo'],['circleopen','Apertura circular'],['radial','Destello radial']];
+ const master={speed:1,musicAssetId:null,musicLevel:18,...project?.master};
+ const songs=(project?.assets||[]).filter(a=>a.type==='audio');
+ const selectMusic='<select data-master="musicAssetId" aria-label="Pista musical">'+
+  '<option value="">Sin música</option>'+songs.map(a=>'<option value="'+esc(a.id)+'" '+(master.musicAssetId===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('')+'</select>';
+ const speedItems=[.5,.75,1,1.25,1.5,2];
+ const masterControls=short?'<div class="review-master"><h3>Ajustes del video completo</h3>'+
+  '<label class="review-control-label" for="master-speed">Velocidad global · Gancho + Desarrollo + Cierre</label>'+
+  '<select id="master-speed" data-master="speed">'+speedItems.map(v=>
+   '<option value="'+v+'" '+(Number(master.speed)===v?'selected':'')+'>'+v.toFixed(2)+'×'+(v===1?' · Normal':'')+'</option>').join('')+'</select>'+
+  '<p class="muted mini">Modifica la duración de todo el Short, incluida la narración. No altera tus originales.</p>'+
+  '<div class="review-master-music"><h3>Música de fondo</h3><label class="review-control-label">Pista musical</label>'+
+  selectMusic+'<div class="row wrap">'+btn('music-import','＋ Añadir música','secondary')+
+  (master.musicAssetId?btn('music-remove','Quitar música','secondary'):'')+'</div>'+
+  '<label class="review-control-label" for="master-music-level">Volumen de música <output id="music-level-label">'+Number(master.musicLevel)+'%</output></label>'+
+  '<input id="master-music-level" type="range" min="0" max="40" step="1" data-master="musicLevel" value="'+Number(master.musicLevel)+'">'+
+  '<p class="muted mini">La voz tiene prioridad: la música baja automáticamente con la narración. El MP4 se normaliza a −16 LUFS.</p>'+
+  '</div></div>':'';
+ const styles=[['cut','Corte inmediato'],['fade','Fundido elegante'],['smoothleft','Barrido fluido'],['zoomin','Zoom cinematográfico'],['hblur','Desenfoque de acción'],
+  ['diagtl','Diagonal deportiva'],['wipeleft','Barrido clásico'],['circleopen','Apertura circular'],['radial','Destello circular']];
  const options=current=>styles.map(([v,n])=>'<option value="'+v+'" '+(current===v?'selected':'')+'>'+n+'</option>').join('');
- const transitionSettings=short?'<details class="review-extra"><summary>Transiciones entre escenas</summary>'+
+ const transitionSettings=short?'<details open class="review-extra review-transition-panel"><summary>Transiciones cinematográficas</summary>'+
+  '<p class="muted mini">Elige un estilo o personaliza los cambios entre escenas.</p>'+
+  '<div class="review-presets">'+
+  btn('transition-preset','⚡ Deportivo','secondary','data-preset="sport"')+
+  btn('transition-preset','✦ Cine','secondary','data-preset="cinema"')+
+  btn('transition-preset','◌ Suave','secondary','data-preset="soft"')+'</div>'+
   '<div class="review-settings"><label>Gancho → Desarrollo<select data-transition="hookBody">'+
   options(project?.transitions?.hookBody||'fade')+'</select></label>'+
   '<label>Desarrollo → Cierre<select data-transition="bodyClosing">'+options(project?.transitions?.bodyClosing||'fade')+'</select></label>'+
-  '<label>Duración<select data-transition="duration">'+[.2,.3,.4,.5].map(v=>'<option value="'+v+'" '+(Number(project?.transitions?.duration||.3)===v?'selected':'')+'>'+v.toFixed(1)+' segundos</option>').join('')+
-  '</select></label></div></details>':'';
+  '<label>Duración<select data-transition="duration">'+[.2,.35,.5,.7,.9].map(v=>
+   '<option value="'+v+'" '+(Math.abs(Number(project?.transitions?.duration||.3)-v)<.04?'selected':'')+'>'+v.toFixed(2)+' s</option>').join('')+'</select></label></div>'+
+  '<p class="muted mini">En la vista previa se muestra una aproximación animada; FFmpeg aplica la transición completa al exportar.</p>'+
+  '</details>':'';
  const warnings=(m?.missing?.length?'<div class="warning">Completa: '+m.missing.map(esc).join(' · ')+'</div>':'')+
   (short&&m&&!m.approved?'<div class="warning">Puedes revisar ahora; la exportación exige aprobar las tres escenas.</div>':'')+
   (!short&&m&&m.duration<480?'<div class="warning">El video largo debe tener al menos 8 minutos antes de exportar.</div>':'')+
@@ -430,6 +455,7 @@ function reviewPage(){
  '<span class="pill">Vista previa en tiempo real</span></div>'+
  '<div id="review-live-stage" class="review-live-frame '+(short?'portrait':'landscape')+'"><div class="review-empty">Preparando recursos…</div></div>'+
  '<p class="review-live-message" id="review-live-message">Sin render previo · los originales se conservan.</p>'+
+ '<audio id="review-music" loop preload="metadata" aria-label="Música de fondo del video"></audio>'+
  '<div class="review-live-controls">'+btn('live-play','▶ Reproducir')+btn('live-pause','Ⅱ Pausa','secondary')+
  btn('live-stop','■ Detener','secondary')+btn('review-back-five','−5 s','secondary')+
  btn('review-forward-five','+5 s','secondary')+btn('review-fullscreen','Ampliar','secondary')+'</div>'+
@@ -441,10 +467,10 @@ function reviewPage(){
  !m?.canExport||busy?'disabled':'')+'</div>'+
  (state.reviewOutput?'<div class="review-exported"><strong>MP4 exportado</strong><small>'+esc(state.reviewOutput.file)+'</small>'+
  btn('review-open-output','Abrir archivo','secondary')+'</div>':'')+
- '<p class="muted mini">La revisión no genera un MP4 completo. El MP4 final se produce únicamente al exportar, con sonido normalizado.</p></section>'+
+ '<p class="muted mini">Vista previa sin MP4. La exportación aplica velocidad, transiciones, mezcla y sonido normalizado.</p></section>'+
  '<section class="panel"><h2>Escenas y correcciones</h2><p class="muted mini">Selecciona una escena para verla o regresar a modificarla.</p>'+
- '<div class="review-chapters">'+cards+'</div>'+transitionSettings+
- '<details class="review-extra"><summary>Audio del video completo</summary><p class="muted mini">Normalización de sonoridad a −16 LUFS y límite de pico a −1,5 dBTP durante la exportación.</p></details>'+
+ '<div class="review-chapters">'+cards+'</div>'+masterControls+transitionSettings+
+ ''+
  '</section></div>';
 }
 async function openReview(kind){
@@ -1021,6 +1047,31 @@ document.addEventListener('click',async e=>{
   if(action==='live-pause')return livePause();
   if(action==='live-stop')return liveStop();
   if(action==='review-export')return await exportReview();
+  if(action==='music-import'){
+   if(!state.project||state.reviewKind!=='short')throw Error('Abre un Short');
+   const item=await api('music:import',{projectId:state.project.id});
+   if(!item)return;
+   state.project=await api('projects:get',{id:state.project.id});
+   state.project.master={speed:1,musicLevel:18,...state.project.master,musicAssetId:item.id};
+   await saveNow();
+   state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
+   render();await livePrepare();notice('Música añadida al proyecto');return;
+  }
+  if(action==='music-remove'){
+   state.project.master={speed:1,musicLevel:18,...state.project.master,musicAssetId:null};
+   await saveNow();state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
+   render();await livePrepare();return;
+  }
+  if(action==='transition-preset'){
+   const presets={sport:{hookBody:'smoothleft',bodyClosing:'zoomin',duration:.5},
+    cinema:{hookBody:'hblur',bodyClosing:'diagtl',duration:.7},
+    soft:{hookBody:'fade',bodyClosing:'smoothleft',duration:.5}};
+   const preset=presets[b.dataset.preset];
+   if(!preset||!state.project)throw Error('Estilo inválido');
+   state.project.transitions=preset;
+   await saveNow();state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
+   render();await livePrepare();notice('Transiciones actualizadas');return;
+  }
   if(action==='review-open-output'){
    if(!state.reviewOutput?.file)throw Error('No existe un MP4 exportado');
    return await api('system:open-path',{path:state.reviewOutput.file});
@@ -1166,7 +1217,26 @@ document.addEventListener('click',async e=>{
   if(action==='export-week')return await openReview('week');
  }catch(err){notice(err.message,true);console.error(err)}
 });
+document.addEventListener('input',e=>{
+ if(e.target?.dataset?.master==='musicLevel'&&state.page==='review'){
+  const label=$('#music-level-label');if(label)label.textContent=e.target.value+'%';
+  const track=document.getElementById('review-music');
+  if(track){track.volume=Math.min(.4,Number(e.target.value)/100)*.55}
+ }
+});
 document.addEventListener('change',async e=>{
+ if(e.target?.dataset?.master!==undefined&&state.page==='review'&&state.reviewKind==='short'){
+  try{
+   const field=e.target.dataset.master,p=state.project;
+   p.master={speed:1,musicAssetId:null,musicLevel:18,...p.master};
+   p.master[field]=field==='musicAssetId'?(e.target.value||null):Number(e.target.value);
+   await saveNow();
+   state.reviewInfo=await api('review:status',{kind:'short',id:p.id});
+   render();await livePrepare();
+   notice(field==='speed'?'Velocidad global actualizada':field==='musicLevel'?'Volumen musical actualizado':'Pista musical seleccionada');
+  }catch(err){notice(err.message,true)}
+  return;
+ }
  if(e.target?.dataset?.transition!==undefined&&state.reviewKind==='short'&&state.project){
   const k=e.target.dataset.transition,p=state.project;
   p.transitions={hookBody:'fade',bodyClosing:'fade',duration:.3,...p.transitions};

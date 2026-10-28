@@ -116,6 +116,16 @@ app.whenReady().then(()=>{
     }
     return {files,errors};
   });
+  register('music:import',async x=>{
+    const selection=await dialog.showOpenDialog(win,{title:'Seleccionar música de fondo',
+      properties:['openFile'],
+      filters:[{name:'Audio musical',extensions:['mp3','wav','m4a','aac','ogg','flac']}]});
+    if(selection.canceled||!selection.filePaths.length)return null;
+    const source=selection.filePaths[0],ext=path.extname(source).toLowerCase();
+    if(!['.mp3','.wav','.m4a','.aac','.ogg','.flac'].includes(ext))
+      throw Error('Selecciona un archivo musical válido');
+    return store.importAsset(ROOT,x.projectId,source);
+  });
   register('assets:rename',x=>store.renameAsset(ROOT,x.projectId,x.assetId,x.name));
   register('assets:delete',x=>store.removeAsset(ROOT,x.projectId,x.assetId));
   register('global:list',()=>globalMedia.list(ROOT));

@@ -406,4 +406,4 @@ async function joinWithTransition(root,a,b,effect,duration,signal){
  }catch(e){fs.rmSync(tmp,{recursive:true,force:true});throw e}
 }
 
-module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,normalizeFinal,joinWithTransition,exportShort,exportWeekly,toolPath};
+module.exports={command,probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,normalizeFinal,joinWithTransition,exportShort,exportWeekly,toolPath};
