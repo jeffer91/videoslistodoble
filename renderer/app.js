@@ -595,7 +595,7 @@ async function refreshWaveform(){
  })();
  await Promise.allSettled([durationTask,audioTask]);
 }
-async function openProject(id,scene='hook'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation='short';state.page='project';state.status='';resetCutEditor();render();refreshWaveform();prepareScenePreview()}
+async function openProject(id,scene='hook',orientation='short'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation=orientation;state.page='project';state.status='';resetCutEditor();render();refreshWaveform();prepareScenePreview()}
 function resetCutEditor(){state.cutSelection={start:0,end:1};state.cutZoom=1;state.cutUndo=[];state.cutRedo=[];state.playSelectionOnly=false;state.editorPanel='audio'}
 async function openWeek(id){state.week=await api('weekly:get',{id});state.page='week';state.status='';state.weekLength=0;render();state.weekLength=await weeklyDuration();if(state.page==='week')render()}
 let saving=null;
@@ -950,7 +950,7 @@ document.addEventListener('click',async e=>{
   if(action==='review-back')return state.reviewKind==='short'?openProject(state.project.id,state.scene):openWeek(state.week.id);
   if(action==='review-edit'){
    if(state.reviewKind==='week')state.editingWeekId=state.week.id;
-   return openProject(b.dataset.id,b.dataset.scene);
+   return openProject(b.dataset.id,b.dataset.scene,state.reviewKind==='week'?'wide':'short');
   }
   if(action==='review-build')return await buildReview();
   if(action==='review-export')return await exportReview();
@@ -1077,7 +1077,7 @@ document.addEventListener('click',async e=>{
    state.editingWeekId=state.week.id;
    const entry=action==='edit-week-intro'?state.week.intro:state.week.closing;
    if(!entry)throw Error('No se encontró el proyecto auxiliar de la compilación');
-   return await openProject(entry.projectId,entry.scene);
+   return await openProject(entry.projectId,entry.scene,'wide');
   }
   if(action==='return-week'){await saveNow();const id=state.editingWeekId;state.editingWeekId=null;return await openWeek(id)}
   if(action==='move-record'||action==='remove-record'||action==='add-record'){
