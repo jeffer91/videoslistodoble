@@ -165,3 +165,34 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 .library-card .row button{padding:7px 8px;font-size:10px}
 .library-heading{font-size:13px;margin:16px 0 10px;color:#d1e6d6}
 @media(max-width:1150px){.library-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr))}}
+
+/* Pantalla final de revisión y exportación */
+.review-layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(250px,.78fr);gap:17px;align-items:start}
+.review-layout>.panel{min-width:0;padding:18px}
+.review-video{background:#08120c;border:1px solid #3c5c42;border-radius:11px;padding:8px;display:flex;align-items:center;justify-content:center;min-height:250px}
+.review-video video{display:block;object-fit:contain;max-width:100%;max-height:65vh;background:#000;border-radius:6px}
+.review-video.portrait video{width:auto;height:min(65vh,620px);aspect-ratio:9/16}
+.review-video.wide video{width:100%;aspect-ratio:16/9;height:auto}
+.review-empty{min-height:300px;display:grid;align-content:center;justify-items:center;text-align:center;gap:10px;padding:20px;color:#c5e1cc}
+.review-empty span{font-size:36px;color:#5bdf86}
+.review-empty small{max-width:245px}
+.review-controls{padding:12px 0;gap:8px;flex-wrap:wrap;font-size:12px}
+.review-controls button{padding:6px 9px}
+.review-timeline{display:flex;gap:2px;height:39px;margin:6px 0 15px;overflow:hidden;border-radius:7px;background:#1d3425}
+.review-part{min-width:10px;padding:6px 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border-radius:0;background:#267049}
+.review-part.review-color-1{background:#396d94}.review-part.review-color-2{background:#885c9d}
+.review-actions{padding:10px 0}
+.review-chapters{display:grid;gap:10px}
+.review-scene{padding:12px;background:#172c1e;border:1px solid #35563f;border-radius:9px;display:grid;gap:7px}
+.review-scene strong{font-size:13px}
+.review-scene small{font-size:11px}
+.review-scene button{font-size:11px;padding:7px 10px}
+.review-scene.review-active{border-color:#66d88b}
+.review-ok{color:#76da91}
+.review-working{padding:13px;background:#183d26;border:1px solid #428b54;border-radius:9px;display:flex;align-items:center;gap:13px;margin-top:11px}
+.review-working small{display:block;margin-top:4px}
+.review-spinner{width:24px;height:24px;border:3px solid #3a6249;border-top-color:#6fe49a;border-radius:50%;animation:reviewspin 1s linear infinite}
+@keyframes reviewspin{to{transform:rotate(360deg)}}
+.review-exported{display:grid;gap:7px;margin-top:10px;padding:12px;background:#19452c;border:1px solid #4ba568;border-radius:9px}
+.review-exported small{overflow-wrap:anywhere}
+@media(max-width:1080px){.review-layout{grid-template-columns:1fr}.review-video video{max-height:55vh}.review-chapters{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}}

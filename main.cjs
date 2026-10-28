@@ -6,6 +6,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const store = require('./backend/store.cjs');
 const media = require('./backend/media.cjs');
+const reviews = require('./backend/review.cjs');
 const images = require('./backend/image-import.cjs');
 const templates = require('./backend/templates.cjs');
 const globalMedia = require('./backend/global-media.cjs');
@@ -32,10 +33,11 @@ app.whenReady().then(()=>{
   protocol.handle('records',async request=>{
     try{
       const u=new URL(request.url);
-      if(u.hostname==='preview'){
+      if(u.hostname==='preview'||u.hostname==='review'){
         const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-        if(pieces.length!==2)throw Error('URL inválida para vista previa');
-        const file=media.resolvePreview(ROOT,pieces[0],pieces[1]);
+        const isReview=u.hostname==='review';
+        if(pieces.length!==(isReview?3:2))throw Error('URL inválida para vista previa');
+        const file=isReview?reviews.resolve(ROOT,pieces[0],pieces[1],pieces[2]):media.resolvePreview(ROOT,pieces[0],pieces[1]);
         const stat=fs.statSync(file),total=stat.size;
         const range=request.headers.get('range');
         const match=range&&/^bytes=(\d*)-(\d*)$/.exec(range);
@@ -188,6 +190,17 @@ app.whenReady().then(()=>{
   register('weekly:create',x=>store.createWeek(ROOT,x));
   register('weekly:get',x=>store.getWeek(ROOT,x.id));
   register('weekly:save',x=>store.saveWeek(ROOT,x));
+  register('review:status',x=>reviews.inspect(ROOT,x.kind,x.id));
+  register('review:build',async x=>{
+    if(activeJob)throw Error('Ya existe una generación de video en curso');
+    const controller=new AbortController();activeJob=controller;
+    try{return await reviews.prepare(ROOT,x.kind,x.id,controller.signal,broadcast)}
+    finally{activeJob=null}
+  });
+  register('review:export',async x=>{
+    if(activeJob)throw Error('Hay otra operación multimedia en curso');
+    return reviews.exportApproved(ROOT,x.kind,x.id,x.hash);
+  });
   register('render:short',async x=>{
     if(activeJob)throw Error('Ya hay una exportación en curso');
     const ctrl=new AbortController();activeJob=ctrl;

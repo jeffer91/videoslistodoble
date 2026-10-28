@@ -345,4 +345,4 @@ async function exportWeekly(root,id,signal,send){
   send({type:'complete',file:output});return {file:output,duration:sum};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,exportShort,exportWeekly,toolPath};
+module.exports={probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,exportShort,exportWeekly,toolPath};
