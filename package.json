@@ -1,6 +1,6 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Editor local para Shorts y recopilaciones semanales de 11 Récords",
   "main": "main.cjs",
@@ -8,9 +8,10 @@
     "start": "electron .",
     "dev": "electron .",
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check backend/corner-balls.cjs && node --check backend/review.cjs && node --check backend/master-audio.cjs && node --check backend/templates.cjs && node --check backend/global-media.cjs && node --check backend/logo.cjs && node --check renderer/app.js && node --check renderer/visual-director.js && node --check renderer/live-review.js && node --check renderer/wave-zoom.js && node --check renderer/presenter-frame.js",
+    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check backend/corner-balls.cjs && node --check backend/review.cjs && node --check backend/master-audio.cjs && node --check backend/templates.cjs && node --check backend/global-media.cjs && node --check backend/logo.cjs && node --check renderer/app.js && node --check renderer/visual-director.js && node --check renderer/live-review.js && node --check renderer/wave-zoom.js && node --check renderer/presenter-frame.js && node --check backend/catalog.cjs && node --check renderer/catalog.js && node --check renderer/factory.js && node --check scripts/ensure-deps.cjs",
     "dist:win": "electron-builder --win nsis --publish never",
-    "dist:dir": "electron-builder --dir"
+    "dist:dir": "electron-builder --dir",
+    "prestart": "node scripts/ensure-deps.cjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
