@@ -13,8 +13,8 @@ async function loadLibrary(){const [projects,weeks,templates,globalAssets]=await
 function titlebar(title,description,buttons=''){return '<div class="topbar"><div><h1>'+esc(title)+'</h1><p>'+esc(description||'')+'</p></div><div class="row wrap">'+buttons+'</div></div>'}
 function btn(action,label,cls='',attrs=''){return '<button data-action="'+action+'" class="'+cls+'" '+attrs+'>'+label+'</button>'}
 function projectTile(p){return '<article class="card" data-action="open-project" data-id="'+esc(p.id)+'"><div class="row between"><span class="pill">'+(p.status==='exported'?'Short exportado':p.status==='auxiliary'?'Complementario':'En edición')+'</span><span class="muted mini">'+new Date(p.updatedAt).toLocaleDateString('es-EC')+'</span></div><h3>'+esc(p.title)+'</h3><div class="row between"><small>'+(p.exports||[]).length+' exportaciones · '+(p.usedBy||[]).length+' compilaciones</small><strong>Editar →</strong></div></article>'}
-function home(){const list=state.projects.filter(p=>p.status!=='auxiliary');return titlebar('Mis proyectos','Tus récords, imágenes y grabaciones se conservan localmente.',btn('new','＋ Nuevo récord')+btn('new-week','Crear video semanal','secondary'))+(list.length?'<div class="grid">'+list.map(projectTile).join('')+'</div>':'<div class="empty"><h2>Empieza creando tu primer récord</h2><p>Sube tres videos, fotografías o clips de apoyo, edita y exporta tu Short.</p>'+btn('new','Crear primer proyecto')+'</div>')}
-function weeksPage(){return titlebar('Compilaciones semanales','La app incorpora automáticamente los Shorts exportados que aún no se han utilizado.',btn('new-week','＋ Crear recopilación'))+(state.weeks.length?'<div class="grid">'+state.weeks.map(w=>'<article class="card" data-action="open-week" data-id="'+esc(w.id)+'"><div class="row between"><span class="pill">'+(w.exportedAt?'Exportada':'En edición')+'</span><small>'+new Date(w.createdAt).toLocaleDateString('es-EC')+'</small></div><h3>'+esc(w.title)+'</h3><small>'+w.projectIds.length+' récords</small><strong>Revisar →</strong></article>').join('')+'</div>':'<div class="empty">Todavía no hay recopilaciones. Exporta Shorts y crea el primer video largo.</div>')}
+function home(){if(window.Factory)return Factory.home();const list=state.projects.filter(p=>p.status!=='auxiliary');return titlebar('Mis proyectos','Tus récords, imágenes y grabaciones se conservan localmente.',btn('new','＋ Nuevo récord')+btn('new-week','Crear video semanal','secondary'))+(list.length?'<div class="grid">'+list.map(projectTile).join('')+'</div>':'<div class="empty"><h2>Empieza creando tu primer récord</h2><p>Sube tres videos, fotografías o clips de apoyo, edita y exporta tu Short.</p>'+btn('new','Crear primer proyecto')+'</div>')}
+function weeksPage(){if(window.Factory)return Factory.weeksPage();return titlebar('Compilaciones semanales','La app incorpora automáticamente los Shorts exportados que aún no se han utilizado.',btn('new-week','＋ Crear recopilación'))+(state.weeks.length?'<div class="grid">'+state.weeks.map(w=>'<article class="card" data-action="open-week" data-id="'+esc(w.id)+'"><div class="row between"><span class="pill">'+(w.exportedAt?'Exportada':'En edición')+'</span><small>'+new Date(w.createdAt).toLocaleDateString('es-EC')+'</small></div><h3>'+esc(w.title)+'</h3><small>'+w.projectIds.length+' récords</small><strong>Revisar →</strong></article>').join('')+'</div>':'<div class="empty">Todavía no hay recopilaciones. Exporta Shorts y crea el primer video largo.</div>')}
 function assetLabel(asset){return asset.type==='video'?'▣':asset.type==='image'?'▧':'♫'}
 function assetPicker(p,onlyVideo){const as=p.assets.filter(a=>onlyVideo?a.type==='video':a.type==='video'||a.type==='image');return as.map(a=>'<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>').join('')}
 function mediaRows(){
@@ -534,15 +534,15 @@ async function weeklyDuration(){
 function weeklyPage(){
  const w=state.week,ids=w.projectIds,all=state.projects.filter(p=>p.status==='exported');
  const mins=state.weekLength||0;
- return titlebar(w.title,'Compilación 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('open-week-review','▶ Revisar y exportar MP4'))+
- '<div class="stagegrid"><section><div class="panel"><h2>Secuencia semanal</h2><div class="list">'+
+ return titlebar(w.title,(w.kind==='category'?'Video por categoría · '+(w.filter?.value||''):'Compilación semanal')+' · 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('open-week-review','▶ Revisar y exportar MP4'))+
+ '<div class="stagegrid"><section><div class="panel"><h2>Secuencia del video</h2><div class="list">'+
  '<div class="asset"><span>Introducción exclusiva</span>'+btn('edit-week-intro',w.intro?'Editar / grabar':'Preparar introducción','secondary')+'</div>'+
  ids.map((id,i)=>{const p=state.projects.find(x=>x.id===id);return '<div class="asset"><span><strong>'+esc(p?.title||'Récord')+'</strong> <small>· Desarrollo · título original</small></span><div class="row">'+btn('move-record','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-record','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-record','×','danger','data-id="'+id+'"')+'</div></div>'}).join('')+
  '<div class="asset"><span>Cierre exclusivo</span>'+btn('edit-week-closing',w.closing?'Editar / grabar':'Preparar cierre','secondary')+'</div></div>'+
  '<div class="divider"></div><h3>Añadir récord exportado</h3><select id="add-record-select"><option value="">Elige un proyecto…</option>'+all.filter(p=>!ids.includes(p.id)).map(p=>'<option value="'+p.id+'">'+esc(p.title)+'</option>').join('')+'</select> '+btn('add-record','Agregar','secondary')+'</div></section>'+
  '<section><div class="panel"><h2>Duración estimada</h2><h1>'+fmt(mins)+'</h1><div class="progressbar"><div style="width:'+Math.min(100,mins/480*100)+'%"></div></div>'+(mins<480?'<div class="warning">Faltan aproximadamente '+fmt(480-mins)+' para llegar al objetivo de 8 minutos. Añade desarrollos o contenido antes de exportar.</div>':'<div class="success">La compilación alcanza el mínimo de 8 minutos.</div>')+
  '<p class="muted mini">Incluye cada desarrollo una sola vez, sin sus ganchos ni cierres. Una transición automática breve separa los récords. Las imágenes se recomponen desde originales para 16:9.</p>'+
- '<p class="muted mini">Después de exportar, los récords utilizados dejan de aparecer en las próximas compilaciones automáticas. Puedes editar sus fuentes y regenerar esta compilación.</p></div></section></div>'+
+ '<p class="muted mini">Después de exportar una compilación semanal, sus récords dejan de proponerse para la siguiente semanal, pero siguen disponibles para videos por categoría. Puedes editar sus fuentes y regenerar esta compilación.</p></div></section></div>'+
  (state.status?'<div class="panel">'+esc(state.status)+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
 }
 function render(){
@@ -550,7 +550,7 @@ function render(){
  const waveLeft=$('#edit-wave-scroll')?.scrollLeft||0;
  const oldVideo=$('#speaker-preview'),oldAsset=oldVideo?.dataset.asset;
  const wasPlaying=Boolean(oldVideo&&!oldVideo.paused&&!oldVideo.ended),oldTime=Number(oldVideo?.currentTime)||0;
- el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':home();
+ el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='record-card'&&window.Factory?Factory.recordCardPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':home();
  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.action===(page==='project'?'home':page==='week'?'weeks':page)));
  const sidebar=$('#sidebar-project'),title=$('#sidebar-project-title');
  if(sidebar)sidebar.hidden=!state.project;
@@ -759,7 +759,9 @@ function closeRecorder(){
  const root=$('#modal-root');root.hidden=true;root.innerHTML='';
 }
 function captureDimensions(){
- return state.recordFormat==='portrait'?[720,1280]:state.recordFormat==='wide'?[1280,720]:[720,720];
+ // Si la cámara entrega 1080 líneas se graba a 1080; con cámaras de 720 no se inventa resolución.
+ const full=(state.recordStream?.getVideoTracks()[0]?.getSettings().height||0)>=1080;
+ return state.recordFormat==='portrait'?[720,1280]:state.recordFormat==='wide'?(full?[1920,1080]:[1280,720]):(full?[1080,1080]:[720,720]);
 }
 function selectRecordFormat(format){
  if(!['square','portrait','wide'].includes(format)||state.recorder?.state==='recording')return;
@@ -775,11 +777,12 @@ async function openCamera(){
  const mic=$('#mic-choice')?.value||state.settings.defaultMic||undefined;
  releaseCamera();
  const stream=await navigator.mediaDevices.getUserMedia({
-  video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30},...(camera?{deviceId:{ideal:camera}}:{})},
+  video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30},...(camera?{deviceId:{ideal:camera}}:{})},
   audio:mic?{deviceId:{ideal:mic}}:true
  });
  if(!$('#camera-preview')){stream.getTracks().forEach(t=>t.stop());return}
  state.recordStream=stream;video.srcObject=stream;await video.play();
+ selectRecordFormat(state.recordFormat);
  const devices=await navigator.mediaDevices.enumerateDevices().catch(()=>[]);
  for(const [id,kind,track] of [['camera-choice','videoinput',stream.getVideoTracks()[0]],['mic-choice','audioinput',stream.getAudioTracks()[0]]]){
   const select=$('#'+id);if(!select)continue;
@@ -803,6 +806,7 @@ async function manageRecording(){
  '<div class="row wrap recorder-actions" id="record-live-actions">'+btn('record-start','● Iniciar grabación')+btn('record-stop','■ Detener','danger','disabled')+'</div>'+
  '<div class="row wrap recorder-actions" id="record-review-actions" hidden>'+btn('record-retry','↻ Repetir','secondary')+btn('record-save','✓ Guardar grabación')+'</div>'+
  '</div></div>';
+ if(window.Factory)Factory.mountPrompter();
  try{await openCamera()}catch(e){closeRecorder();throw Error('No se pudo activar cámara y micrófono: '+e.message)}
 }
 async function startRecording(){
@@ -829,7 +833,7 @@ async function startRecording(){
  if(!mime){releaseCamera();throw Error('No se encontró un codificador de video compatible')}
  try{
   state.recordParts=[];
-  state.recorder=new MediaRecorder(state.recordCapture,{mimeType:mime,videoBitsPerSecond:4000000,audioBitsPerSecond:128000});
+  state.recorder=new MediaRecorder(state.recordCapture,{mimeType:mime,videoBitsPerSecond:width*height>=1080*1080?6000000:4000000,audioBitsPerSecond:128000});
   state.recorder.ondataavailable=e=>{if(e.data.size)state.recordParts.push(e.data)};
   state.recorder.start(1000);
   state.recordTimer=setInterval(draw,1000/30);
@@ -1036,7 +1040,7 @@ document.addEventListener('click',async e=>{
    const title=$('#new-project-title')?.value.trim();
    if(!title)throw Error('Escribe un título antes de crear el proyecto');
    $('#modal-root').hidden=true;
-   const p=await api('projects:create',{title});await loadLibrary();return await openProject(p.id);
+   const p=await api('projects:create',{title});await loadLibrary();return window.Factory?await Factory.openRecordCard(p.id):await openProject(p.id);
   }
   if(action==='open-project'){state.editingWeekId=null;return await openProject(b.dataset.id)}
   if(action==='open-week')return await openWeek(b.dataset.id);

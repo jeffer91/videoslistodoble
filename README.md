@@ -2,6 +2,28 @@
 
 Editor local de fútbol para Windows construido con Electron y FFmpeg. Repositorio de la nueva aplicación de escritorio. **La versión web Videoshort v20 permanece íntegra en `legacy/` como referencia.**
 
+## Ejecutar en tu computadora
+
+```powershell
+git clone https://github.com/jeffer91/videoslistodoble.git D:\videoslistodoble
+cd D:\videoslistodoble
+npm start
+```
+
+`npm start` instala las dependencias la primera vez y abre la app. Requiere Node.js 22 o superior y, en Windows, el disco D.
+
+## Fábrica de contenido (versión 0.2)
+
+La app organiza cada récord por etapas: idea, guion, grabado, editado, aprobado y publicado.
+
+- **Mis récords:** búsqueda por título o etiqueta y filtros por etapa y por etiqueta.
+- **Ficha del récord:** título, guion por escena (gancho, desarrollo, cierre), notas y etiquetas de jugador, club, selección, estadio, competición y tipo de récord. Se guarda sola al salir de cada campo. «Pegar guion completo» reparte un texto con encabezados GANCHO, DESARROLLO y CIERRE.
+- **Grabación cuadrada con prompter:** el guion de la escena aparece sobre la cámara y se desplaza al iniciar la grabación, con velocidad y tamaño ajustables. Con cámaras de 1080 líneas se graba a 1080 × 1080; con cámaras de 720, a 720 × 720.
+- **Videos por categoría:** además de la compilación semanal, se puede reunir todo lo exportado de un jugador, club, estadio u otra etiqueta. Un récord puede salir en la semanal y en varias compilaciones por categoría; su ficha indica en cuáles aparece.
+- **Aviso de categorías listas:** la pantalla principal avisa cuando una etiqueta reúne 8 o más Shorts exportados.
+
+Los proyectos creados con versiones anteriores siguen abriendo: sin etiquetas, y con la etapa deducida de su contenido.
+
 ## Instalar en Windows
 
 1. En **Actions → Desktop Windows - pruebas y compilación**, abre el trabajo más reciente que haya terminado correctamente.
@@ -73,6 +95,8 @@ D:\11-Records-Studio\
 - La versión de escritorio no incluye aún edición de subtítulos ni herramientas de creación de miniaturas.
 
 ## Construcción y pruebas
+
+En equipos cuyo FFmpeg incluido carece de algún filtro (por ejemplo `drawtext` en la compilación para Linux), las pruebas de renderizado pueden ejecutarse con otro binario: `RECORDS_FFMPEG=/ruta/ffmpeg RECORDS_FFPROBE=/ruta/ffprobe npm test`.
 
 GitHub Actions ejecuta `npm run check`, `npm test` y `npm run dist:win`. Si estas pruebas no pasan, **no debe tratarse el instalador como una versión lista para producción**.
 

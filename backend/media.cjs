@@ -8,6 +8,9 @@ const visualDirector=require('../renderer/visual-director.js');
 const bins={};
 function toolPath(which){
  if(bins[which])return bins[which];
+ // Permite indicar otro FFmpeg/FFprobe (pruebas en equipos cuyo binario incluido carece de algún filtro).
+ const forced=process.env[which==='ffmpeg'?'RECORDS_FFMPEG':'RECORDS_FFPROBE'];
+ if(forced&&fs.existsSync(forced))return bins[which]=forced;
  let p=which==='ffmpeg'?(require('ffmpeg-static')):(require('ffprobe-static').path);
  if(!p)throw Error('No se encontró '+which);
  p=p.replace('app.asar'+path.sep,'app.asar.unpacked'+path.sep);

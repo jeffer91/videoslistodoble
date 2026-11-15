@@ -1,5 +1,6 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const catalog=require('./catalog.cjs');
 const TYPES={'.mp4':'video','.mov':'video','.mkv':'video','.webm':'video','.avi':'video','.jpg':'image','.jpeg':'image','.png':'image','.webp':'image','.gif':'image','.wav':'audio','.mp3':'audio','.m4a':'audio','.aac':'audio','.flac':'audio','.ogg':'audio'};
 const safeId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{5,90}$/.test(s);
 const uid=()=>crypto.randomUUID();
@@ -14,11 +15,18 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[]};atomic(projectFile(root,id),p);return p}
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
+  tags:catalog.normalizeTags(x.tags),script:catalog.normalizeScript(x.script),notes:catalog.normalizeNotes(x.notes)};
+ p.stage=catalog.STAGES.includes(x.stage)?x.stage:(catalog.hasScript(p)?'guion':'idea');
+ atomic(projectFile(root,id),p);return p}
 function assertAssetRefs(p){const ids=new Set((p.assets||[]).map(a=>a.id));for(const scene of Object.values(p.scenes||{})){if(scene.video&&!ids.has(scene.video))throw Error('Video no encontrado en la biblioteca');for(const m of scene.media||[])if(!ids.has(m.assetId))throw Error('Recurso no encontrado en el proyecto')}}
 function saveProject(root,x){const original=getProject(root,x.id);
- const editable=['title','style','scenes','status','backgrounds','transitions','master','effects'];const next={...original};
+ const editable=['title','style','scenes','status','backgrounds','transitions','master','effects','tags','script','stage','notes'];const next={...original};
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
+ if(typeof next.title!=='string'||!next.title.trim())throw Error('El récord necesita un título');
+ next.title=next.title.trim().slice(0,120);
+ next.tags=catalog.normalizeTags(next.tags);next.script=catalog.normalizeScript(next.script);next.notes=catalog.normalizeNotes(next.notes);
+ if(next.stage!==undefined)next.stage=catalog.normalizeStage(next.stage);
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
  if(next.effects!==undefined){
   const e=next.effects;
@@ -143,15 +151,39 @@ function removeAsset(root,projectId,assetId){
  }
  return true;
 }
-function listProjects(root){return fs.readdirSync(path.join(root,'Proyectos'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{const p=getProject(root,e.name);return [{id:p.id,title:p.title,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,style:p.style,usedBy:p.usedBy||[],exports:p.exports||[]}]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
+function listProjects(root){return fs.readdirSync(path.join(root,'Proyectos'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{const p=getProject(root,e.name);return [{id:p.id,title:p.title,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,style:p.style,usedBy:p.usedBy||[],exports:p.exports||[],tags:catalog.tagsOf(p),stage:catalog.deriveStage(p),hasScript:catalog.hasScript(p)}]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function deleteProject(root,id){const p=getProject(root,id);if((p.usedBy||[]).length)throw Error('Este proyecto está utilizado en una compilación y no puede borrarse');fs.rmSync(path.dirname(projectFile(root,id)),{recursive:true,force:true});return true}
 function importLogo(root,source){const ext=path.extname(source).toLowerCase();if(!['.png','.jpg','.jpeg','.webp'].includes(ext))throw Error('Logo inválido');
  const dst=path.join(root,'Recursos','logo'+ext);fs.copyFileSync(source,dst);const settings=getSettings(root);settings.logo=dst;saveSettings(root,settings);return dst}
 function getSettings(root){const file=path.join(root,'Configuracion','ajustes.json');return fs.existsSync(file)?readJSON(file):{logo:null,silenceThreshold:0.5,autoMicrocuts:true,defaultCamera:'',defaultMic:'',templateDefaults:{short:null,wide:null}}}
 function saveSettings(root,x){const prev=getSettings(root);const settings={...prev,...Object.fromEntries(Object.entries(x).filter(([k])=>['logo','silenceThreshold','autoMicrocuts','defaultCamera','defaultMic','templateDefaults'].includes(k)))};atomic(path.join(root,'Configuracion','ajustes.json'),settings);return settings}
-function createWeek(root,x){const id=uid();const eligible=listProjects(root).filter(p=>p.exports.length&&!(p.usedBy||[]).length).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));const now=new Date().toISOString();
- const helper=createProject(root,{title:'Intro y cierre - '+String(x.title||'Récords de la semana').slice(0,90)});helper.status='auxiliary';atomic(projectFile(root,helper.id),helper);
- const w={schema:1,id,title:String(x.title||'Récords de la semana').slice(0,120),createdAt:now,updatedAt:now,projectIds:eligible.filter(p=>p.status!=='auxiliary').map(p=>p.id),intro:{projectId:helper.id,scene:'hook'},closing:{projectId:helper.id,scene:'closing'},supportProjectId:helper.id,assets:[],minSeconds:480,exportedAt:null,outputs:[]};
+function createWeek(root,x){
+ x=x||{};const id=uid(),now=new Date().toISOString();
+ const kind=x.kind==='category'?'category':'weekly';
+ const exported=listProjects(root).filter(p=>p.exports.length&&p.status!=='auxiliary').sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+ let eligible,filter=null,title;
+ if(kind==='category'){
+  // Compilación temática: todos los Shorts exportados con una etiqueta, aunque ya salieran en otro video.
+  const field=x.filter?.field,value=String(x.filter?.value??'').trim();
+  if(!catalog.TAG_FIELDS.includes(field)||!catalog.fold(value))throw Error('Elige una categoría para la compilación');
+  eligible=exported.filter(p=>catalog.hasTag(p,field,value));
+  if(!eligible.length)throw Error('Todavía no hay Shorts exportados con esa etiqueta');
+  // Si la etiqueta se escribió de varias formas ("Lionel Messi", "lionel messi"), se muestra la más usada.
+  const spellings=new Map();
+  for(const p of eligible)for(const t of p.tags[field])if(catalog.fold(t)===catalog.fold(value))spellings.set(t,(spellings.get(t)||0)+1);
+  const capitals=t=>(t.match(/\p{Lu}/gu)||[]).length;
+  const shown=[...spellings.entries()].sort((a,b)=>b[1]-a[1]||capitals(b[0])-capitals(a[0])||a[0].localeCompare(b[0],'es'))[0]?.[0]||value;
+  filter={field,value:shown};
+  title=String(x.title||('Todos los récords de '+shown)).slice(0,120);
+ }else{
+  // Compilación semanal: los Shorts que todavía no salieron en otra semanal.
+  // Haber salido en una compilación temática no los excluye.
+  const thematic=new Set(listWeeks(root).filter(w=>w.kind==='category').map(w=>w.id));
+  eligible=exported.filter(p=>!(p.usedBy||[]).some(used=>!thematic.has(used)));
+  title=String(x.title||'Récords de la semana').slice(0,120);
+ }
+ const helper=createProject(root,{title:'Intro y cierre - '+title.slice(0,90)});helper.status='auxiliary';atomic(projectFile(root,helper.id),helper);
+ const w={schema:1,id,kind,filter,title,createdAt:now,updatedAt:now,projectIds:eligible.map(p=>p.id),intro:{projectId:helper.id,scene:'hook'},closing:{projectId:helper.id,scene:'closing'},supportProjectId:helper.id,assets:[],minSeconds:480,exportedAt:null,outputs:[]};
  atomic(weekFile(root,id),w);return w}
 function getWeek(root,id){return readJSON(weekFile(root,id))}
 function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing'])if(x[k]!==undefined)w[k]=x[k];if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
