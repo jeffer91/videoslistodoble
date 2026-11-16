@@ -17,7 +17,7 @@
   const decoder = new TextDecoder();
   const tokenPattern = /^[a-f0-9]{64}$/;
   const peerPattern = /^r11-[a-f0-9]{32}$/;
-  const sessionPattern = /^[a-f0-9-]{36}$/;
+  const sessionPattern = /^dc_[a-f0-9]{32}$/;
 
   const hex = bytes => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   const random = size => hex(crypto.getRandomValues(new Uint8Array(size)));
@@ -60,10 +60,18 @@
           name: 'AES-GCM', iv, additionalData: additionalData(type, id, current.peer, current.session)
         }, key, encoder.encode(JSON.stringify(data)));
         if (current !== attempt || !ready) return;
-        socket.send(JSON.stringify({
-          type, dst: current.peer,
-          payload: { type: 'data', connectionId: current.session, iv: b64(iv), sealed: b64(new Uint8Array(encrypted)) }
-        }));
+        const payload = {
+          type: 'data',
+          connectionId: current.session,
+          metadata: { iv: b64(iv), sealed: b64(new Uint8Array(encrypted)) }
+        };
+        // PeerJS Cloud acepta el formato de PeerServer. El SDP y el candidato útiles van cifrados.
+        if (type === 'CANDIDATE') payload.candidate = { candidate: '' };
+        else Object.assign(payload, {
+          sdp: { type: type.toLowerCase(), sdp: 'v=0\r\n' },
+          serialization: 'json', reliable: true, label: 'records-mobile'
+        });
+        socket.send(JSON.stringify({ type, src: id, dst: current.peer, payload }));
       }).catch(() => {});
     }
 
@@ -126,13 +134,14 @@
       const message = JSON.parse(data);
       const { type, src, payload } = message;
       const session = payload?.connectionId;
-      if (!SIGNALS.has(type) || !peerPattern.test(src) || !sessionPattern.test(session)) return;
+      const proof = payload?.metadata;
+      if (!SIGNALS.has(type) || !peerPattern.test(src) || !sessionPattern.test(session) || !proof) return;
       if (receiver && type === 'OFFER') {
         if (accepted.has(session) || attempt?.channel?.readyState === 'open') return;
       } else if (!attempt || attempt.peer !== src || attempt.session !== session) return;
       const plaintext = await crypto.subtle.decrypt({
-        name: 'AES-GCM', iv: unb64(payload.iv), additionalData: additionalData(type, src, id, session)
-      }, key, unb64(payload.sealed));
+        name: 'AES-GCM', iv: unb64(proof.iv), additionalData: additionalData(type, src, id, session)
+      }, key, unb64(proof.sealed));
       if (stopped || !ready) return;
       const parsed = JSON.parse(decoder.decode(plaintext));
       if (type === 'OFFER' && receiver && parsed.type === 'offer') {
@@ -162,7 +171,7 @@
 
     async function dial() {
       if (stopped || !ready || receiver || attempt) return;
-      const current = attemptConnection(desktop, crypto.randomUUID());
+      const current = attemptConnection(desktop, 'dc_' + random(16));
       let offered = false;
       const candidates = [];
       current.pc.onicecandidate = event => {
@@ -200,11 +209,13 @@
           ready = true;
           clearTimeout(socketTimer);
           onStatus(receiver ? 'Esperando al celular…' : 'Buscando 11 Récords Studio abierto en Windows…');
-          heartbeat = setInterval(() => {
+          const ping = () => {
             if (socket === connection && socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify({ type: 'HEARTBEAT' }));
             }
-          }, 5000);
+          };
+          ping();
+          heartbeat = setInterval(ping, 5000);
           dial().catch(() => {});
           return;
         }

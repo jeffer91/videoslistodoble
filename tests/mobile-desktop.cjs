@@ -34,12 +34,17 @@ function brokerFixture() {
       route.onMessage(data => {
         const message = JSON.parse(data);
         if (message.type === 'HEARTBEAT' || fixture.offline) return;
-        if (message.type === 'OFFER') {
-          fixture.offers++;
-          assert.equal(typeof message.payload.sealed, 'string');
-          assert.equal(message.payload.sdp, undefined);
+        assert.equal(message.src, id);
+        assert.match(message.payload.connectionId, /^dc_[a-f0-9]{32}$/);
+        assert.equal(typeof message.payload.metadata.sealed, 'string');
+        if (message.type === 'CANDIDATE') assert.equal(message.payload.candidate.candidate, '');
+        else {
+          assert.equal(message.payload.sdp.sdp, 'v=0\r\n');
+          assert.equal(message.payload.serialization, 'json');
+          assert.equal(message.payload.reliable, true);
+          if (message.type === 'OFFER') fixture.offers++;
         }
-        peers.get(message.dst)?.send(JSON.stringify({ ...message, src: id }));
+        peers.get(message.dst)?.send(JSON.stringify(message));
       });
       route.send(JSON.stringify({ type: 'OPEN' }));
     })
