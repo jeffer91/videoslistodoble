@@ -1,7 +1,7 @@
 'use strict';
 (function () {
   let cameraStream, capture, audio, meterFrame, drawing, recorder, take, writes, sequence;
-  let writeError, startedAt, accumulated, session = 0, starting = false;
+  let writeError, startedAt, accumulated, session = 0, starting = false, committed = 0;
 
   function flow(action, data) {
     return api('studio:flow', { action, data });
@@ -91,7 +91,7 @@
       '<meter id="microphone-meter" min="0" max="60" low="25" high="55" optimum="48"></meter><small id="microphone-reading">Sin señal</small></div>' +
       '<div class="record-stage format-square" id="record-stage"><video id="camera-preview" autoplay muted playsinline></video>' +
       '<video id="record-review" controls playsinline hidden></video></div>' +
-      '<div class="row between recorder-meta"><span id="record-resolution">1080 × 1080 · 30 FPS</span><strong id="record-clock">0:00</strong></div>' +
+      '<div class="row between recorder-meta"><span id="record-resolution">1080 × 1080 · 30 FPS</span><span id="take-write-status" aria-live="polite"></span><strong id="record-clock">0:00</strong></div>' +
       '<div class="row wrap recorder-actions" id="record-live-actions">' + btn('record-start', 'Iniciar grabación') +
       btn('record-pause', 'Pausar', 'secondary', 'disabled') + btn('record-stop', 'Detener', 'danger', 'disabled') + '</div>' +
       '<div class="row wrap recorder-actions" id="record-review-actions" hidden>' + btn('record-retry', 'Repetir', 'secondary') +
@@ -141,19 +141,21 @@
     }
     take = draft;
     sequence = 0;
+    committed = 0;
     writes = Promise.resolve();
     writeError = null;
     accumulated = 0;
     startedAt = Date.now();
+    const canvasTrack = canvas.captureStream(0).getVideoTracks()[0];
     const draw = () => {
       if (camera.readyState < 2) return;
       const side = Math.min(camera.videoWidth, camera.videoHeight);
       painter.drawImage(camera, (camera.videoWidth - side) / 2, (camera.videoHeight - side) / 2, side, side, 0, 0, 1080, 1080);
+      canvasTrack.requestFrame();
       const clock = $('#record-clock');
       if (clock) clock.textContent = fmt((accumulated + (startedAt ? Date.now() - startedAt : 0)) / 1000);
     };
-    draw();
-    capture = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...cameraStream.getAudioTracks()]);
+    capture = new MediaStream([canvasTrack, ...cameraStream.getAudioTracks()]);
     const mimeType = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus'].find(type => MediaRecorder.isTypeSupported(type));
     try {
       if (!mimeType) throw Error('No se encontró un codificador compatible');
@@ -162,13 +164,17 @@
         if (!data.size || writeError) return;
         const next = sequence++;
         writes = writes.then(async () => {
-          if (!writeError) await flow('take.append', { id: draft.id, sequence: next, data: await encode(data) });
+          if (writeError) return;
+          committed = await flow('take.append', { id: draft.id, sequence: next, data: await encode(data) });
+          const status = $('#take-write-status');
+          if (status) status.textContent = 'Guardando en disco';
         }).catch(error => {
           writeError = error;
           notice('Se conservó la parte escrita de la toma. ' + error.message, true);
         });
       });
       recorder.start(1000);
+      draw();
     } catch (error) {
       recorder = null;
       take = null;
@@ -206,6 +212,7 @@
     const active = recorder;
     if (active?.state && active.state !== 'inactive') {
       const completed = new Promise(resolve => active.addEventListener('stop', resolve, { once: true }));
+      if (active.state === 'recording') active.requestData();
       active.stop();
       await completed;
     }
@@ -219,9 +226,17 @@
     $('#camera-preview').hidden = true;
     const video = $('#record-review');
     video.hidden = false;
+    const drafts = await flow('take.list', { id: take.projectId });
+    const saved = drafts.some(item => item.id === take.id);
+    const keepButton = $('[data-action="record-save"]');
+    if (keepButton) keepButton.disabled = !saved;
+    if (!saved) {
+      video.hidden = true;
+      throw Error('No llegó suficiente video del dispositivo. Pulsa Repetir y graba de nuevo.');
+    }
     video.src = 'records://take/' + encodeURIComponent(take.id);
     video.load();
-    if (!writeError) notice('Toma guardada temporalmente. Revísala y confirma.');
+    if (!writeError && committed > 0) notice('Toma guardada temporalmente. Revísala y confirma.');
   }
 
   async function close() {
@@ -245,6 +260,7 @@
     $('#record-review').hidden = true;
     $('#record-review').removeAttribute('src');
     $('#record-clock').textContent = '0:00';
+    $('#take-write-status').textContent = '';
     $('#camera-choice').disabled = $('#mic-choice').disabled = false;
     $('[data-action="record-start"]').disabled = false;
     $('[data-action="record-pause"]').textContent = 'Pausar';

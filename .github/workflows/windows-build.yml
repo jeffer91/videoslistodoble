@@ -23,6 +23,8 @@ jobs:
         run: npm run check
       - name: Ejecutar pruebas automatizadas
         run: npm test
+      - name: Probar el flujo de grabación en Windows
+        run: npm run test:desktop
       - name: Crear instalador Windows
         run: npm run dist:win
         env:

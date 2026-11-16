@@ -41,9 +41,12 @@ async function run() {
     await page.locator('#microphone-meter').waitFor();
     await page.waitForFunction(() => document.querySelector('#camera-preview')?.videoWidth > 0);
     await page.getByRole('button', { name: 'Iniciar grabación' }).click();
+    await page.getByText('Guardando en disco', { exact: true }).waitFor({ timeout: 25000 });
     await page.getByRole('button', { name: 'Pausar', exact: true }).click();
     await page.getByRole('button', { name: 'Reanudar', exact: true }).click();
-    await page.waitForFunction(() => /^0:0[1-9]$/.test(document.querySelector('#record-clock')?.textContent));
+    await page.waitForFunction(() => document.querySelector('#record-clock')?.textContent !== '0:00');
+    const drafts = await page.evaluate(() => window.studio.call('studio:flow', { action: 'take.list' }));
+    assert.ok(drafts.data?.some(draft => draft.bytes >= 100), 'La captura produjo fragmentos válidos');
     await page.getByRole('button', { name: 'Detener', exact: true }).click();
     await page.getByRole('button', { name: 'Guardar toma' }).waitFor();
     await page.getByRole('button', { name: 'Cerrar', exact: true }).click();
@@ -80,6 +83,14 @@ async function run() {
         camera: document.querySelector('#camera-preview')?.videoWidth
       })).catch(() => null);
       if (state) console.error('Pantalla al fallar:', JSON.stringify(state));
+      const pending = path.join(root, 'Temporales', 'Tomas');
+      if (fs.existsSync(pending)) for (const dir of fs.readdirSync(pending)) {
+        const info = path.join(pending, dir, 'toma.json');
+        if (fs.existsSync(info)) {
+          const { bytes, chunks } = store.readJSON(info);
+          console.error('Toma en disco:', bytes, 'bytes y', chunks, 'fragmentos');
+        }
+      }
     }
     throw error;
   } finally {
