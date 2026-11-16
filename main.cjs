@@ -13,6 +13,7 @@ const globalMedia = require('./backend/global-media.cjs');
 const logos = require('./backend/logo.cjs');
 const workflow = require('./backend/desktop-workflow.cjs');
 const delivery = require('./backend/delivery.cjs');
+const mobileRecording = require('./backend/mobile-recording.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.env.RECORDS_TEST_ROOT || (process.platform === 'win32' ? 'D:\\11-Records-Studio' : path.join(os.homedir(),'11-Records-Studio'));
@@ -233,6 +234,7 @@ app.whenReady().then(()=>{
     const result=await reviews.exportApproved(ROOT,x.kind,x.id,x.hash,signal,broadcast,{preview:true});
     return {url:'records://rendered/'+x.kind+'/'+encodeURIComponent(x.id)+'/'+result.hash};
   }));
+  mobileRecording.install({app,root:ROOT,register,safeStorage,clipboard});
   workflow.installWorkflow({app,shell,dialog,safeStorage,root:ROOT,window:()=>win,register,runMedia,send:broadcast});
 
   register('review:export',async x=>{

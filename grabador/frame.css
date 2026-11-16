@@ -1,0 +1,53 @@
+.mobile-stage {
+  position: relative;
+  width: min(100%, 440px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  margin: .75rem auto;
+  border: 1px solid #537062;
+  border-radius: 14px;
+  background: #08110e;
+}
+.mobile-stage video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.mobile-guide { position: absolute; inset: 0; pointer-events: none; color: #e3ffef; }
+.mobile-guide .head {
+  position: absolute;
+  width: 33%;
+  height: 43%;
+  top: 16%;
+  left: 33.5%;
+  border: 2px dashed currentColor;
+  border-radius: 48% 48% 45% 45%;
+  background: #cafee61c;
+}
+.mobile-guide .shoulders {
+  position: absolute;
+  width: 79%;
+  height: 31%;
+  top: 60%;
+  left: 10.5%;
+  border: 2px dashed currentColor;
+  border-bottom: 0;
+  border-radius: 50% 50% 10% 10%;
+  background: #cafee61c;
+}
+.mobile-guide .eyes { position: absolute; left: 9%; right: 9%; top: 35%; border-top: 1px dashed currentColor; }
+.mobile-guide .eyes span {
+  position: absolute;
+  top: -.8em;
+  left: 0;
+  padding: .1em .45em;
+  border-radius: 5px;
+  background: #17251f;
+  color: white;
+  font-size: .75rem;
+}
+.mobile-guide .frame-label {
+  position: absolute;
+  right: 0;
+  left: 0;
+  bottom: 4%;
+  text-align: center;
+  font-size: .8rem;
+  text-shadow: 0 1px 3px #000, 0 1px 3px #000;
+}

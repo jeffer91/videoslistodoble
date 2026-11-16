@@ -23,6 +23,8 @@ jobs:
         run: npm run check
       - name: Ejecutar pruebas automatizadas
         run: npm test
+      - name: Preparar Chromium para la grabadora móvil
+        run: npx playwright install chromium
       - name: Crear instalador Windows
         run: npm run dist:win
         env:

@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' records: data: blob:; img-src 'self' records: data: blob:; media-src 'self' records: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' records:;">
-<title>11 Récords Studio Desktop</title><link rel="stylesheet" href="./style.css">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' records: data: blob:; img-src 'self' records: data: blob:; media-src 'self' records: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' records: wss://0.peerjs.com;">
+<title>11 Récords Studio Desktop</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="../grabador/frame.css">
 </head><body>
 <div id="app" class="shell">
 <aside id="sidebar">
@@ -30,6 +30,8 @@
 <script defer src="./catalog.js"></script>
 <script defer src="./factory.js"></script>
 <script defer src="./recording.js"></script>
+<script defer src="../grabador/remote.js"></script>
+<script defer src="./mobile-recording.js"></script>
 <script defer src="./studio-workflow.js"></script>
 <script defer src="./app.js"></script>
 <script defer src="./visual-director.js"></script>

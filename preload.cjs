@@ -6,7 +6,7 @@ const allowed = new Set([
   'global:list','global:import','global:paste','global:rename','global:delete','global:from-project','global:to-project',
   'templates:list','templates:import','templates:paste','templates:set-default','templates:rename','templates:delete',
   'music:import','media:analyze','media:metadata','media:waveform','media:preview','media:timeline','review:status','review:rendered','review:export','render:short','render:weekly','render:cancel',
-  'studio:flow','weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
+  'studio:flow','mobile:link','mobile:copy','mobile:record','weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
 ]);
 contextBridge.exposeInMainWorld('studio', {
   call: (name,args) => {

@@ -431,3 +431,17 @@ button{border-radius:8px;padding:8px 11px;font-size:12px}
 #microphone-meter{width:120px}
 .take-recovery video{max-width:130px;max-height:110px}
 @media(max-width:960px){.workflow-columns{grid-template-columns:1fr}}
+
+.mobile-recording-modal {
+  width: min(720px, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  color: var(--text, #edf8f0);
+  overflow: auto;
+}
+.mobile-recording-modal::backdrop { background: #000b; }
+.mobile-recording-modal h2 { margin: 0; }
+.mobile-recording-modal .mobile-stage { width: min(100%, 36vh, 400px); }
+.mobile-recording-modal .mobile-controls, .mobile-recording-modal .mobile-mic-reading { margin-block: .8rem; }
+.mobile-recording-modal meter { min-width: 115px; flex: 1; }
+.mobile-recording-modal progress { width: 100%; }
+.mobile-recording-modal p:empty { display: none; }

@@ -21,6 +21,16 @@ El instalador se genera sin firma de editor comercial. Configuración muestra la
 6. Aprueba las escenas, revisa el montaje y exporta. Puedes **Renderizar vista previa** para ver el montaje de FFmpeg con efectos y audio antes de exportar. La exportación verifica duración, resolución, audio, márgenes de los rótulos generados y reproducción.
 7. Abre el MP4 exportado. Genera tres miniaturas y guarda título, descripción y etiquetas por red. Tras la revisión del MP4 puedes aprobar ese archivo y autorizar el envío a cada cuenta.
 
+## Grabar con el celular
+
+1. En Windows, abre el récord y elige **Gancho**, **Desarrollo** o **Cierre**. Dentro de **Grabación y composición**, pulsa **Grabar con celular** y **Copiar enlace**.
+2. Abre tu enlace personal en Safari o Chrome en el celular. Reutiliza ese enlace con la misma instalación de Windows abierta. La [página de la grabadora](https://jeffer91.github.io/videoslistodoble/grabador/) explica cómo conectar si la abres sin el enlace personal.
+3. Pulsa **Activar cámara y micrófono** en el celular y concédele acceso al navegador. Conecta tu lavalier al celular antes de activar la captura. Usa el medidor y **Probar micrófono (4 s)** en Windows para escuchar qué entrada se está usando. Si el navegador muestra varias entradas, puedes elegirla desde Windows.
+4. Usa la silueta y la línea de los ojos en cualquiera de las dos pantallas. Desde Windows puedes grabar, pausar, reanudar, silenciar el micrófono y detener.
+5. Al detener, el celular envía la toma automáticamente. Windows conserva el original y asigna una copia cuadrada **1080 × 1080 con audio** a la escena seleccionada al empezar. Si se interrumpe el envío, conserva abierta la grabadora o vuelve a abrir tu enlace en el mismo navegador. La toma sigue disponible para reintentar (**Transferir**) o guardar una copia en el celular.
+
+El enlace personal da acceso a esa instalación. Guárdalo para tu propio uso. Se necesita internet para enlazar los dispositivos y una ruta WebRTC directa o por retransmisión para transferir. Si una red bloquea WebRTC, prueba con ambos dispositivos en la misma Wi-Fi. GitHub Pages sirve la interfaz y los videos se guardan en la biblioteca local, dentro de **D:\11-Records-Studio**. Mantén abierta la página del celular durante la toma.
+
 ## Videos largos
 
 La compilación semanal propone los récords con Short exportado que aún no se usaron en otra semanal. Una compilación temática reúne los de una etiqueta y puede reutilizar récords. La app avisa cuando los desarrollos elegibles alcanzan ocho minutos.
@@ -112,7 +122,8 @@ La raíz de Windows contiene **Proyectos**, **Compilaciones**, **Recursos**, **E
 npm ci
 npm run check
 npm test
+npx playwright install chromium
 npm run test:desktop
 ~~~
 
-GitHub Actions instala y prueba la aplicación de Windows con dispositivos audiovisuales simulados. En un equipo real, comprueba la cámara, el micrófono y la calidad del MP4 con sus propios medios. Las pruebas de publicación simulan las respuestas de las plataformas sin producir publicaciones reales.
+GitHub Actions instala y prueba la aplicación de Windows con dispositivos audiovisuales simulados. También prueba el enlace con el navegador móvil, los controles y la transferencia WebRTC con reconexión. En un equipo real, comprueba la cámara, el micrófono y la calidad del MP4 con sus propios medios. Las pruebas de publicación simulan las respuestas de las plataformas sin producir publicaciones reales.

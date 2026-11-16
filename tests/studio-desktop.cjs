@@ -6,11 +6,12 @@ const path = require('node:path');
 const { _electron: electron } = require('playwright');
 const store = require('../backend/store.cjs');
 const media = require('../backend/media.cjs');
+const { runMobile } = require('./mobile-desktop.cjs');
 
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-desktop-'));
   const executablePath = process.env.RECORDS_DESKTOP_EXECUTABLE;
-  const switches = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-gpu'];
+  const switches = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-gpu', '--disable-features=WebRtcHideLocalIpsWithMdns'];
   if (process.platform === 'linux' && !process.env.DISPLAY) switches.push('--headless', '--ozone-platform=headless', '--no-sandbox');
   let app, page;
   try {
@@ -57,6 +58,7 @@ async function run() {
     const info = await media.probe(store.resolveAsset(root, p.id, p.scenes.hook.video));
     assert.deepEqual([info.width, info.height, info.hasAudio], [1080, 1080, true]);
     assert.ok(info.duration >= .5);
+    await runMobile(page, root, p.id);
     await page.getByRole('button', { name: 'Ficha y guion' }).click();
     await page.getByRole('heading', { name: 'Ficha del récord' }).waitFor();
     assert.match(await page.locator('#card-script-hook').inputValue(), /historia/);

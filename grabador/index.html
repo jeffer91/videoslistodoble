@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src wss://0.peerjs.com; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Grabadora móvil · 11 Récords Studio</title>
+<link rel="stylesheet" href="./mobile.css">
+<link rel="stylesheet" href="./frame.css">
+<script defer src="./remote.js"></script>
+<script defer src="./take-storage.js"></script>
+<script defer src="./mobile.js"></script>
+</head>
+<body>
+<main>
+  <header><span class="brand">11</span><div><strong>11 Récords Studio</strong><h1>Grabadora móvil</h1></div></header>
+  <p id="connection" class="status" role="status">Abre el enlace que copiaste en 11 Récords Studio para conectar tu celular.</p>
+  <section id="capture" hidden>
+    <div class="mobile-stage">
+      <video id="camera" autoplay muted playsinline></video>
+      <div class="mobile-guide" aria-hidden="true">
+        <span class="head"></span><span class="shoulders"></span>
+        <span class="eyes"><span>Altura de los ojos</span></span>
+        <span class="frame-label">Colócate dentro de la silueta</span>
+      </div>
+    </div>
+    <button id="activate" type="button">Activar cámara y micrófono</button>
+    <div class="choices" id="inputs" hidden>
+      <label>Cámara<select id="camera-choice"></select></label>
+      <label>Micrófono<select id="mic-choice"></select></label>
+    </div>
+    <div class="reading">
+      <label for="level">Nivel de voz</label>
+      <meter id="level" min="0" max="60" low="20" high="55" optimum="45" value="0"></meter>
+      <span id="level-text">Sin señal</span>
+    </div>
+    <p id="status" role="status">Usa los controles de la app de Windows para grabar.</p>
+    <progress id="progress" value="0" max="100" aria-label="Transferencia a Windows" hidden></progress>
+    <div class="actions">
+      <button id="stop" type="button" class="secondary" hidden>Detener grabación</button>
+      <button id="transfer" type="button" class="secondary" hidden>Transferir a Windows</button>
+      <button id="download" type="button" class="secondary" hidden>Descargar copia</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>

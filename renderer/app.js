@@ -270,7 +270,7 @@ function sceneView(){
  const approved=order.every(k=>p.scenes[k].approved);
  const open=k=>state.editorPanel===k?' open':'';
  const details=(key,summary,content)=>'<details name="scene-tool" data-tool="'+key+'" class="panel panel-fold scene-tool"'+open(key)+'><summary>'+summary+'</summary>'+content+'</details>';
- const recording= '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+btn('record-recovery','Recuperar toma','secondary')+'</div></div>'+
+ const recording= '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+btn('mobile-recorder','Grabar con celular','outline')+btn('record-recovery','Recuperar toma','secondary')+'</div></div>'+
  '<div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
  '<div class="two"><div class="field"><label>Cifra (opcional)</label><input maxlength="18" data-field="number" value="'+esc(s.number||'')+'"></div><div class="field"><label>Protagonista (opcional)</label><input maxlength="50" data-field="name" value="'+esc(s.name||'')+'"></div></div>'+
  '<div class="field"><label>Fondo de '+names[state.scene]+' ('+(wide?'16:9':'9:16')+')</label><div class="row template-project-choice">'+(currentBackground?'<img src="'+templateUrl(currentBackground)+'" alt="">':'<div class="template-empty">Sin fondo</div>')+'<div class="template-choice-info"><strong>'+esc(currentBackground?.name||'Fondo desenfocado')+'</strong><small>'+(currentBackground?'Biblioteca de fondos':'Fondo automático')+'</small></div>'+btn('choose-template','Cambiar fondo','secondary')+'</div></div>'+
@@ -1091,6 +1091,7 @@ document.addEventListener('click',async e=>{
   if(action==='stop-preview'){const v=$('#speaker-preview'),clip=$('#support-video');state.playSelectionOnly=false;if(v){v.pause();v.currentTime=Number(state.project.scenes[state.scene].start)||0;updatePreviewEdits()}if(clip)clip.pause();return}
   if(action==='export-short')return await openReview('short')
   if(action==='cancel-render'){await api('render:cancel');return notice('Cancelando proceso…')}
+  if(action==='mobile-recorder')return await MobileRecording.open();
   if(action==='start-recorder')return await Recording.open();
   if(action==='record-start')return await Recording.start();
   if(action==='record-pause')return Recording.pause();
