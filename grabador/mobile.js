@@ -34,6 +34,7 @@
     el('transfer').hidden = !pending || Boolean(sending);
     el('transfer').disabled = channel?.readyState !== 'open';
     el('download').hidden = !pending;
+    el('discard').hidden = !pending || Boolean(sending);
     el('progress').hidden = !sending;
     el('activate').hidden = Boolean(activeTrack('video') && activeTrack('audio'));
     el('activate').disabled = opening || active || stopping;
@@ -312,6 +313,17 @@
     publish();
   }
 
+  async function discard() {
+    const draft = pending;
+    if (!draft || sending || !window.confirm('¿Descartar del celular esta toma pendiente?')) return;
+    await database.remove(draft.id);
+    if (pending !== draft) return;
+    pending = null;
+    send(channel, { type: 'discard', id: draft.id });
+    status('Toma descartada. Puedes volver a grabar desde Windows.');
+    publish();
+  }
+
   async function download() {
     if (!pending) return;
     const draft = pending;
@@ -351,6 +363,7 @@
     el('stop').onclick = () => stop().catch(fail);
     el('transfer').onclick = requestUpload;
     el('download').onclick = () => download().catch(fail);
+    el('discard').onclick = () => discard().catch(fail);
     camera.onloadedmetadata = publish;
     document.addEventListener('visibilitychange', acquireWakeLock);
     window.addEventListener('pagehide', () => { if (recorder?.state !== 'inactive') recorder?.stop(); });

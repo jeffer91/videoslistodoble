@@ -172,6 +172,13 @@
         if (transfer) await transferError(Error(message.message), activeChannel);
         else showError(message.message);
         break;
+      case 'discard':
+        if ((!transfer || transfer.id === message.id) && phone.id === message.id) {
+          transfer = null;
+          await flow('discard', { id: message.id });
+          recordingMessage = 'Toma pendiente descartada desde el celular.';
+        }
+        break;
       case 'upload': {
         if (!Number.isSafeInteger(message.size) || message.size < 100 || message.size > MAX_FILE) {
           throw Error('Tamaño inválido de la grabación');

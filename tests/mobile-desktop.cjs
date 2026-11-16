@@ -123,11 +123,13 @@ async function runMobile(desktop, root, projectId) {
 
     await desktop.locator('#mobile-start').click();
     await phone.getByText('Grabando. Mantén esta página abierta.', { exact: true }).waitFor();
+    await savedParts(phone);
     await desktop.locator('#mobile-pause').click();
     await phone.getByText('Grabación en pausa.', { exact: true }).waitFor();
     await desktop.getByRole('button', { name: 'Reanudar', exact: true }).click();
     await phone.getByText('Grabando. Mantén esta página abierta.', { exact: true }).waitFor();
-    await savedParts(phone);
+    // Deja que la captura produzca audio y video también después de reanudar.
+    await phone.waitForTimeout(1300);
     await desktop.locator('#mobile-stop').click();
     await phone.getByText('Toma guardada en Windows.', { exact: true }).waitFor({ timeout: 35000 });
     await checkSaved(root, projectId, 'body');
@@ -159,6 +161,15 @@ async function runMobile(desktop, root, projectId) {
       const mobile = await phone.locator('#connection,#status').allTextContents().catch(() => []);
       const pc = await desktop.locator('#mobile-connection,#mobile-status,#mobile-test-status').allTextContents().catch(() => []);
       console.error('Estado de prueba móvil:', { mobile, pc, offers: broker.offers });
+      const pending = path.join(root, 'Temporales', 'Celular');
+      for (const id of fs.existsSync(pending) ? fs.readdirSync(pending) : []) {
+        const draft = store.readJSON(path.join(pending, id, 'toma.json'));
+        const original = path.join(pending, id, 'original.' + draft.format);
+        if (fs.existsSync(original)) {
+          const format = await media.probe(original).catch(probeError => probeError.message);
+          console.error('Captura móvil en disco:', { bytes: draft.offset, expected: draft.size, format });
+        }
+      }
     }
     throw error;
   } finally {

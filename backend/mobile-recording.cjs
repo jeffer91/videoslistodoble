@@ -170,6 +170,11 @@ function install({ app, root, register, safeStorage, clipboard }) {
     begin: data => begin(root, data),
     cancel: data => cancel(root, data.id),
     open: data => open(root, data),
+    discard: ({ id }) => {
+      if (finishing.has(id)) return;
+      const draft = draftOf(root, id);
+      if (!draft.saved) fs.rmSync(folder(root, id), { recursive: true, force: true });
+    },
     append: data => append(root, data),
     finish: ({ id }) => {
       if (!finishing.has(id)) finishing.set(id, finish(root, id).finally(() => finishing.delete(id)));
