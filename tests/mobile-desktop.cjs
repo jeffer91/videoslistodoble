@@ -59,6 +59,13 @@ async function checkSaved(root, projectId, scene) {
   assert.equal(project.assets.filter(asset => asset.id === id).length, 1);
 }
 
+async function waitForFrames(page, extra) {
+  const camera = page.locator('#camera');
+  const initial = await camera.evaluate(video => video.getVideoPlaybackQuality().totalVideoFrames);
+  await page.waitForFunction(target => document.querySelector('#camera').getVideoPlaybackQuality().totalVideoFrames >= target,
+    initial + extra, { timeout: 16000 });
+}
+
 async function savedParts(page) {
   await page.waitForFunction(() => new Promise(resolve => {
     const request = indexedDB.open('11-records-mobile', 1);
@@ -123,13 +130,13 @@ async function runMobile(desktop, root, projectId) {
 
     await desktop.locator('#mobile-start').click();
     await phone.getByText('Grabando. Mantén esta página abierta.', { exact: true }).waitFor();
+    await waitForFrames(phone, 42);
     await savedParts(phone);
     await desktop.locator('#mobile-pause').click();
     await phone.getByText('Grabación en pausa.', { exact: true }).waitFor();
     await desktop.getByRole('button', { name: 'Reanudar', exact: true }).click();
     await phone.getByText('Grabando. Mantén esta página abierta.', { exact: true }).waitFor();
-    // Deja que la captura produzca audio y video también después de reanudar.
-    await phone.waitForTimeout(1300);
+    await waitForFrames(phone, 42);
     await desktop.locator('#mobile-stop').click();
     await phone.getByText('Toma guardada en Windows.', { exact: true }).waitFor({ timeout: 35000 });
     await checkSaved(root, projectId, 'body');
@@ -139,10 +146,12 @@ async function runMobile(desktop, root, projectId) {
     assert.equal(await desktop.locator('#mobile-link').inputValue(), personal.toString());
     await desktop.locator('#mobile-start').click();
     await phone.getByText('Grabando. Mantén esta página abierta.', { exact: true }).waitFor();
+    await waitForFrames(phone, 75);
     await savedParts(phone);
     broker.offline = true;
     await phone.evaluate(() => window.fixtureChannel.close());
     await phone.getByText(/Windows desconectado/).waitFor();
+    await waitForFrames(phone, 42);
     await phone.getByRole('button', { name: 'Detener grabación' }).click();
     await phone.getByRole('button', { name: 'Descargar copia' }).waitFor();
     assert.equal(store.getProject(root, projectId).scenes.closing.video, null);

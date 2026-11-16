@@ -105,7 +105,7 @@ async function finish(root, id) {
   const project = store.getProject(root, draft.projectId);
   if (!project.assets.some(asset => asset.id === id)) {
     const original = await media.probe(source);
-    if (!original.width || !original.height || !original.hasAudio || original.duration < .1) {
+    if (!original.width || !original.height || !original.hasAudio) {
       throw Error('La toma no contiene suficiente video y audio. Sigue disponible en el celular.');
     }
     const converted = path.join(folder(root, id), 'cuadrado.mp4');
@@ -116,6 +116,7 @@ async function finish(root, id) {
       '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', converted
     ]);
+    // WebM de MediaRecorder puede llegar sin duración en su encabezado.
     const square = await media.probe(converted);
     if (square.width !== 1080 || square.height !== 1080 || !square.hasAudio || square.duration < .1) {
       throw Error('No se pudo verificar el encuadre cuadrado con audio');
