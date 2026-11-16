@@ -107,7 +107,13 @@
   function encode(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onload = () => {
+        const url = String(reader.result);
+        const separator = ';base64,';
+        const start = url.lastIndexOf(separator);
+        if (start < 0) return reject(Error('El codificador devolvió un fragmento inválido'));
+        resolve(url.slice(start + separator.length));
+      };
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(blob);
     });
