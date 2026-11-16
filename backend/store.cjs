@@ -15,17 +15,28 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
-  tags:catalog.normalizeTags(x.tags),script:catalog.normalizeScript(x.script),notes:catalog.normalizeNotes(x.notes)};
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:getSettings(root).defaultStyle||'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
+  tags:catalog.normalizeTags(x.tags),script:catalog.normalizeScript(x.script),notes:catalog.normalizeNotes(x.notes),
+  plannedDate:catalog.normalizeDate(x.plannedDate),withClaude:x.withClaude===true,ideaId:x.ideaId||null};
  p.stage=catalog.STAGES.includes(x.stage)?x.stage:(catalog.hasScript(p)?'guion':'idea');
  atomic(projectFile(root,id),p);return p}
 function assertAssetRefs(p){const ids=new Set((p.assets||[]).map(a=>a.id));for(const scene of Object.values(p.scenes||{})){if(scene.video&&!ids.has(scene.video))throw Error('Video no encontrado en la biblioteca');for(const m of scene.media||[])if(!ids.has(m.assetId))throw Error('Recurso no encontrado en el proyecto')}}
 function saveProject(root,x){const original=getProject(root,x.id);
- const editable=['title','style','scenes','status','backgrounds','transitions','master','effects','tags','script','stage','notes'];const next={...original};
+ const editable=['title','style','scenes','status','backgrounds','transitions','master','effects','tags','script','stage','notes','plannedDate','withClaude','editingPlan','transcripts'];const next={...original};
  for(const key of editable)if(x[key]!==undefined)next[key]=x[key];
  if(typeof next.title!=='string'||!next.title.trim())throw Error('El récord necesita un título');
  next.title=next.title.trim().slice(0,120);
  next.tags=catalog.normalizeTags(next.tags);next.script=catalog.normalizeScript(next.script);next.notes=catalog.normalizeNotes(next.notes);
+ next.plannedDate=catalog.normalizeDate(next.plannedDate);next.withClaude=next.withClaude===true;
+ if(x.editingPlan!==undefined)next.editingPlan=require('./editing.cjs').normalizePlan(next.editingPlan,next);
+ if(x.transcripts!==undefined){
+  const editing=require('./editing.cjs');
+  if(!next.transcripts||typeof next.transcripts!=='object'||Array.isArray(next.transcripts))throw Error('Transcripción inválida');
+  next.transcripts=Object.fromEntries(Object.entries(next.transcripts).map(([key,value])=>{
+   if(!['hook','body','closing'].includes(key)||!next.assets.some(a=>a.id===value?.assetId&&a.type==='video'))throw Error('Transcripción sin toma');
+   return [key,{assetId:value.assetId,words:editing.normalizeWords(value.words)}];
+  }));
+ }
  if(next.stage!==undefined)next.stage=catalog.normalizeStage(next.stage);
  if(!['historic','numbers','legends'].includes(next.style))throw Error('Plantilla inválida');
  if(next.effects!==undefined){
@@ -134,6 +145,9 @@ function renameAsset(root,projectId,assetId,name){
 function removeAsset(root,projectId,assetId){
  const p=getProject(root,projectId),a=p.assets.find(x=>x.id===assetId);
  if(!a)throw Error('Recurso inexistente');
+ for(const entry of Object.values(p.editingPlan?.scenes||{})){
+  if([...(entry.memes||[]),...(entry.graphics||[])].some(item=>item.assetId===assetId))throw Error('El recurso se usa en el plan de edición');
+ }
  if(p.master?.musicAssetId===assetId)throw Error('La música está asignada al montaje. Retírala antes de eliminar el archivo.');
  for(const scene of Object.values(p.scenes||{})){
   if(scene.video===assetId||(scene.media||[]).some(m=>m.assetId===assetId)||
@@ -151,12 +165,12 @@ function removeAsset(root,projectId,assetId){
  }
  return true;
 }
-function listProjects(root){return fs.readdirSync(path.join(root,'Proyectos'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{const p=getProject(root,e.name);return [{id:p.id,title:p.title,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,style:p.style,usedBy:p.usedBy||[],exports:p.exports||[],tags:catalog.tagsOf(p),stage:catalog.deriveStage(p),hasScript:catalog.hasScript(p)}]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
+function listProjects(root){return fs.readdirSync(path.join(root,'Proyectos'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{const p=getProject(root,e.name);return [{id:p.id,title:p.title,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,style:p.style,usedBy:p.usedBy||[],exports:p.exports||[],tags:catalog.tagsOf(p),stage:catalog.deriveStage(p),hasScript:catalog.hasScript(p),plannedDate:p.plannedDate||'',ideaId:p.ideaId||null,withClaude:p.withClaude===true,hook:p.script?.hook||''}]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function deleteProject(root,id){const p=getProject(root,id);if((p.usedBy||[]).length)throw Error('Este proyecto está utilizado en una compilación y no puede borrarse');fs.rmSync(path.dirname(projectFile(root,id)),{recursive:true,force:true});return true}
 function importLogo(root,source){const ext=path.extname(source).toLowerCase();if(!['.png','.jpg','.jpeg','.webp'].includes(ext))throw Error('Logo inválido');
  const dst=path.join(root,'Recursos','logo'+ext);fs.copyFileSync(source,dst);const settings=getSettings(root);settings.logo=dst;saveSettings(root,settings);return dst}
 function getSettings(root){const file=path.join(root,'Configuracion','ajustes.json');return fs.existsSync(file)?readJSON(file):{logo:null,silenceThreshold:0.5,autoMicrocuts:true,defaultCamera:'',defaultMic:'',templateDefaults:{short:null,wide:null}}}
-function saveSettings(root,x){const prev=getSettings(root);const settings={...prev,...Object.fromEntries(Object.entries(x).filter(([k])=>['logo','silenceThreshold','autoMicrocuts','defaultCamera','defaultMic','templateDefaults'].includes(k)))};atomic(path.join(root,'Configuracion','ajustes.json'),settings);return settings}
+function saveSettings(root,x){const prev=getSettings(root);if(x.defaultStyle!==undefined&&!['historic','numbers','legends'].includes(x.defaultStyle))throw Error('Estilo inválido');const settings={...prev,...Object.fromEntries(Object.entries(x).filter(([k])=>['logo','silenceThreshold','autoMicrocuts','defaultCamera','defaultMic','templateDefaults','defaultStyle'].includes(k)))};atomic(path.join(root,'Configuracion','ajustes.json'),settings);return settings}
 function createWeek(root,x){
  x=x||{};const id=uid(),now=new Date().toISOString();
  const kind=x.kind==='category'?'category':'weekly';
@@ -186,7 +200,7 @@ function createWeek(root,x){
  const w={schema:1,id,kind,filter,title,createdAt:now,updatedAt:now,projectIds:eligible.map(p=>p.id),intro:{projectId:helper.id,scene:'hook'},closing:{projectId:helper.id,scene:'closing'},supportProjectId:helper.id,assets:[],minSeconds:480,exportedAt:null,outputs:[]};
  atomic(weekFile(root,id),w);return w}
 function getWeek(root,id){return readJSON(weekFile(root,id))}
-function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing'])if(x[k]!==undefined)w[k]=x[k];if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
+function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing','transition'])if(x[k]!==undefined)w[k]=x[k];if(w.transition!==undefined&&!['title','cut'].includes(w.transition))throw Error('Transición inválida');if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
 function listWeeks(root){return fs.readdirSync(path.join(root,'Compilaciones'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{return [getWeek(root,e.name)]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function resolveManagedPath(root,filename){const file=path.resolve(filename),base=path.resolve(root);if(!file.startsWith(base+path.sep))throw Error('Solo se pueden abrir rutas dentro de la biblioteca');return file}
-module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,importGlobalAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic};
+module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,importGlobalAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic,readJSON,safeId};

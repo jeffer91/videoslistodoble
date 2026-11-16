@@ -3,7 +3,8 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const store=require('./store.cjs'),media=require('./media.cjs'),logos=require('./logo.cjs'),templates=require('./templates.cjs');
 const KINDS=['short','week'],UUID=/^[a-f0-9-]{36}$/i,KEYS=['hook','body','closing'];
 const NAMES={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
-const VERSION='live-montage-auto-motion-v1';
+const VERSION='montage-v2';
+const editing=require('./editing.cjs'),delivery=require('./delivery.cjs'),production=require('./production.cjs');
 const masterAudio=require('./master-audio.cjs');
 const visualDirector=require('../renderer/visual-director.js');
 function validate(kind,id){if(!KINDS.includes(kind)||!UUID.test(String(id)))throw Error('Revisión inválida')}
@@ -17,7 +18,7 @@ function sequenceFor(root,kind,id){
   {...week.closing,title:'Cierre'}];
  const result=[];
  for(let i=0;i<entries.length;i++){
-  if(i>1&&i<entries.length-1)result.push({transition:true,title:entries[i].title});
+  if(i>1&&i<entries.length-1&&week.transition!=='cut')result.push({transition:true,title:entries[i].title});
   result.push(entries[i]);
  }
  return result;
@@ -41,7 +42,7 @@ async function inspect(root,kind,id){
   if(entry.transition){chapters.push({transition:true,label:'Transición',start:elapsed,duration:1});elapsed+=1;continue}
   let p=projects.get(entry.projectId);
   if(!p){p=store.getProject(root,entry.projectId);projects.set(entry.projectId,p)}
-  const scene=p.scenes[entry.scene];
+  const scene=editing.effectiveScene(p,entry.scene);
   if(!scene)throw Error('Escena inexistente');
   approved=approved&&scene.approved===true;
   if(!scene.video){
@@ -54,7 +55,7 @@ async function inspect(root,kind,id){
    segments:visualSegments,duration:info.duration,settings:p.effects,format:kind==='short'?'short':'wide'});
   const rate=Math.max(.5,Math.min(2,Number(scene.playbackSpeed)||1))*master.speed;
   const ranges=media.retainedRanges(scene,info.duration).map(r=>({...r,duration:(r.end-r.start)/rate}));
-  const duration=ranges.reduce((sum,r)=>sum+r.duration,0);
+  const duration=ranges.reduce((sum,r)=>sum+r.duration,0)+editing.plannedMemes(scene,ranges,rate).reduce((sum,meme)=>sum+meme.duration/rate*(Number(scene.playbackSpeed)||1),0);
   if(duration<.5)missing.push(entry.title+': duración insuficiente');
   chapters.push({label:entry.title,scene:entry.scene,projectId:p.id,assetId:scene.video,
    start:elapsed,duration,playbackSpeed:rate,ranges,transition:false,motion});
@@ -73,33 +74,51 @@ async function inspect(root,kind,id){
   for(const s of Object.values(p.scenes)){const file=backgroundPath(root,p,s,format);if(file)files.push(stamp(file))}
  }
  if(settings.logo&&fs.existsSync(settings.logo))files.push(stamp(settings.logo));
- const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,effects:p.effects,master:p.master,
+ const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,effects:p.effects,master:p.master,editingPlan:p.editingPlan,transcripts:p.transcripts,
   scenes:Object.fromEntries(Object.entries(p.scenes).map(([k,s])=>[k,{...s,approved:undefined,cutHistory:undefined}]))}));
  const hash=crypto.createHash('sha256').update(JSON.stringify({v:VERSION,kind,id,chapters,models,files,
-  week:kind==='week'?store.getWeek(root,id):null,autoMicrocuts:settings.autoMicrocuts,logo:settings.logo}))
+  week:kind==='week'?weekPlan(root,id):null,autoMicrocuts:settings.autoMicrocuts,logo:settings.logo}))
   .digest('hex').slice(0,32);
  return {kind,id,hash,ready:true,live:true,complete:missing.length===0,approved:kind==='short'?approved:true,
   canExport:missing.length===0&&(kind!=='short'||approved)&&(kind!=='week'||elapsed>=480),
   chapters,duration:elapsed,missing,transition:autoEffects,master,autoEffects:first?.effects?.enabled!==false};
 }
-async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
+function weekPlan(root,id){
+ const week=store.getWeek(root,id);
+ return {id:week.id,title:week.title,projectIds:week.projectIds,intro:week.intro,closing:week.closing,transition:week.transition};
+}
+function renderedPreview(root,kind,id,hash){
+ validate(kind,id);
+ if(!/^[a-f0-9]{32}$/.test(hash))throw Error('Vista previa inválida');
+ return path.join(root,'Temporales','Revision',kind+'-'+id+'-'+hash+'.mp4');
+}
+async function exportApproved(root,kind,id,expectedHash,signal=new AbortController().signal,send=()=>{},options={}){
+ const preview=options.preview===true;
  const snapshot=await inspect(root,kind,id);
  if(snapshot.hash!==expectedHash)throw Error('El proyecto cambió. Revisa el video actualizado.');
- if(!snapshot.canExport)throw Error('Completa y aprueba todas las escenas antes de exportar');
+ if(preview?!snapshot.complete:!snapshot.canExport)throw Error('Completa y aprueba las escenas antes de exportar');
+ const previewFile=renderedPreview(root,kind,id,snapshot.hash);
+ if(preview&&fs.existsSync(previewFile))return {hash:snapshot.hash,file:previewFile};
  const sequence=sequenceFor(root,kind,id),tmp=media.temporary(root),settings=store.getSettings(root),
   logo=await logos.normalize(root,settings.logo),temporaryPairs=[];
  try{
-  const sceneFiles=[];
-  for(const entry of sequence){
+  const sceneFiles=[],actualChapters=[];let elapsed=0;
+  for(const [index,entry] of sequence.entries()){
    if(signal?.aborted)throw Error('Cancelado');
-   if(entry.transition){sceneFiles.push(await media.renderTransition(tmp,entry.title,signal));continue}
+   if(entry.transition){
+    const transition=await media.renderTransition(tmp,entry.title,signal);
+    sceneFiles.push(transition);elapsed+=(await media.probe(transition)).duration;continue;
+   }
    const p=store.getProject(root,entry.projectId);
-   send({type:'status',message:'Componiendo '+entry.title});
+   send({type:'status',message:'Componiendo '+entry.title,percent:Math.round(80*index/sequence.length)});
    const parts=await media.compileScene(root,p,entry.scene,kind==='week',tmp,signal,
     ()=>send({type:'segment',stage:entry.title}),logo);
    const joined=path.join(tmp,'escena-'+sceneFiles.length+'.mp4');
    await media.concat(tmp,parts.segments,joined,signal);
    sceneFiles.push(joined);
+   const duration=(await media.probe(joined)).duration;
+   actualChapters.push({label:entry.title,start:elapsed,duration});
+   elapsed+=duration;
   }
   let combined;
   if(kind==='short'){
@@ -114,7 +133,7 @@ async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
   }else{
    combined=path.join(tmp,'ensamblado.mp4');await media.concat(tmp,sceneFiles,combined,signal);
   }
-  send({type:'status',message:'Aplicando velocidad global, mezcla musical y normalización'});
+  send({type:'status',message:'Aplicando velocidad global, mezcla musical y normalización',percent:84});
   const normalized=path.join(tmp,'final-normalizado.mp4');
   const source=kind==='short'?store.getProject(root,id):null;
   const musicFile=source?.master?.musicAssetId?store.resolveAsset(root,id,source.master.musicAssetId):null;
@@ -122,17 +141,27 @@ async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
   if(signal?.aborted)throw Error('Cancelado');
   const current=await inspect(root,kind,id);
   if(current.hash!==snapshot.hash)throw Error('El proyecto cambió durante la exportación');
+  if(preview){
+   fs.mkdirSync(path.dirname(previewFile),{recursive:true});
+   fs.renameSync(normalized,previewFile);
+   send({type:'complete',percent:100});
+   return {file:previewFile,hash:snapshot.hash};
+  }
+  send({type:'status',message:'Verificando imagen, sonido y reproducción',percent:93});
+  const quality=await delivery.qualityCheck(normalized,kind,signal);
+  if(signal.aborted)throw Error('Cancelado');
   const destDir=path.join(root,'Exportaciones',kind==='short'?'Shorts':'Videos-Largos');
   fs.mkdirSync(destDir,{recursive:true});
   const output=path.join(destDir,id+'-'+Date.now()+'.mp4');
-  fs.copyFileSync(normalized,output);
+  fs.renameSync(normalized,output);
   if(kind==='short'){
    const p=store.getProject(root,id);p.status='exported';p.exports=p.exports||[];
-   p.exports.push({at:new Date().toISOString(),mode:'short',file:output,reviewHash:snapshot.hash});
+   p.exports.push({at:new Date().toISOString(),mode:'short',file:output,reviewHash:snapshot.hash,duration:quality.duration});
    store.atomic(store.projectFile(root,id),p);
   }else{
    const week=store.getWeek(root,id);week.outputs=week.outputs||[];
    week.outputs.push(output);week.exportedAt=new Date().toISOString();
+   fs.writeFileSync(output.replace(/\.mp4$/,'.capitulos.txt'),production.chapterText(actualChapters),'utf8');
    store.atomic(store.weekFile(root,id),week);
    for(const pid of week.projectIds){
     const p=store.getProject(root,pid);p.usedBy=p.usedBy||[];
@@ -140,10 +169,13 @@ async function exportApproved(root,kind,id,expectedHash,signal,send=()=>{}){
     store.atomic(store.projectFile(root,pid),p);
    }
   }
-  return {file:output,hash:snapshot.hash,duration:(await media.probe(output)).duration};
+  const target={kind,id,file:path.basename(output)};
+  delivery.updateEntry(root,target,{quality});
+  send({type:'complete',percent:100,file:output});
+  return {file:output,target,hash:snapshot.hash,duration:quality.duration,quality};
  }finally{
   fs.rmSync(tmp,{recursive:true,force:true});
   for(const dir of temporaryPairs)fs.rmSync(dir,{recursive:true,force:true});
  }
 }
-module.exports={inspect,exportApproved,sequenceFor};
+module.exports={inspect,exportApproved,sequenceFor,renderedPreview};

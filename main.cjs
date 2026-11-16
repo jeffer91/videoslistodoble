@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,dialog,shell,protocol,clipboard} = require('electron');
+const {app,BrowserWindow,ipcMain,dialog,shell,protocol,clipboard,safeStorage} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -11,9 +11,20 @@ const images = require('./backend/image-import.cjs');
 const templates = require('./backend/templates.cjs');
 const globalMedia = require('./backend/global-media.cjs');
 const logos = require('./backend/logo.cjs');
+const workflow = require('./backend/desktop-workflow.cjs');
+const delivery = require('./backend/delivery.cjs');
 let win = null;
 let activeJob = null;
-const ROOT = process.platform === 'win32' ? 'D:\\11-Records-Studio' : (process.env.RECORDS_TEST_ROOT || path.join(os.homedir(),'11-Records-Studio'));
+const ROOT = process.env.RECORDS_TEST_ROOT || (process.platform === 'win32' ? 'D:\\11-Records-Studio' : path.join(os.homedir(),'11-Records-Studio'));
+if(!process.env.RECORDS_TEST_ROOT&&!app.requestSingleInstanceLock())app.quit();
+app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.focus()}});
+async function runMedia(operation){
+ if(activeJob)throw Error('Hay otra operación multimedia en curso');
+ const controller=new AbortController();
+ activeJob=controller;
+ try{return await operation(controller.signal)}
+ finally{activeJob=null}
+}
 app.commandLine.appendSwitch('autoplay-policy','no-user-gesture-required');
 protocol.registerSchemesAsPrivileged([{scheme:'records',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
 function safeError(e){return String(e && e.message || e).slice(0,500)}
@@ -33,11 +44,28 @@ app.whenReady().then(()=>{
   protocol.handle('records',async request=>{
     try{
       const u=new URL(request.url);
-      if(u.hostname==='preview'||u.hostname==='review'){
+      if(['preview','review','output','rendered','take','thumbnail'].includes(u.hostname)){
         const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-        const isReview=u.hostname==='review';
-        if(pieces.length!==(isReview?3:2))throw Error('URL inválida para vista previa');
-        const file=isReview?reviews.resolve(ROOT,pieces[0],pieces[1],pieces[2]):media.resolvePreview(ROOT,pieces[0],pieces[1]);
+        let file;
+        if(u.hostname==='take'){
+          const item=require('./backend/production.cjs').listTakes(ROOT).find(t=>t.id===pieces[0]);
+          if(pieces.length!==1||!item)throw Error('Toma desconocida');
+          file=path.join(ROOT,'Temporales','Tomas',item.id,'toma.webm');
+        }else if(u.hostname==='thumbnail'){
+          if(pieces.length!==4)throw Error('Miniatura desconocida');
+          file=delivery.thumbnailPath(ROOT,{kind:pieces[0],id:pieces[1],file:pieces[2]},Number(pieces[3]));
+          return require('electron').net.fetch(require('node:url').pathToFileURL(file).toString());
+        }else if(u.hostname==='output'){
+          if(pieces.length!==3)throw Error('Exportación desconocida');
+          file=delivery.resolveOutput(ROOT,{kind:pieces[0],id:pieces[1],file:pieces[2]});
+        }else if(u.hostname==='rendered'){
+          if(pieces.length!==3)throw Error('Vista previa desconocida');
+          file=reviews.renderedPreview(ROOT,pieces[0],pieces[1],pieces[2]);
+        }else if(u.hostname==='review'&&pieces.length===3&&typeof reviews.resolve==='function'){
+          file=reviews.resolve(ROOT,pieces[0],pieces[1],pieces[2]);
+        }else if(u.hostname==='preview'&&pieces.length===2){
+          file=media.resolvePreview(ROOT,pieces[0],pieces[1]);
+        }else{throw Error('URL inválida para vista previa')}
         const stat=fs.statSync(file),total=stat.size;
         const range=request.headers.get('range');
         const match=range&&/^bytes=(\d*)-(\d*)$/.exec(range);
@@ -54,7 +82,7 @@ app.whenReady().then(()=>{
           status=206;
         }
         const stream=require('node:stream').Readable.toWeb(fs.createReadStream(file,{start,end}));
-        const headers={'Content-Type':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(end-start+1),'Cache-Control':'no-store'};
+        const headers={'Content-Type':u.hostname==='take'?'video/webm':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(end-start+1),'Cache-Control':'no-store'};
         if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+total;
         return new Response(stream,{status,headers});
       }
@@ -130,9 +158,9 @@ app.whenReady().then(()=>{
   register('assets:delete',x=>store.removeAsset(ROOT,x.projectId,x.assetId));
   register('global:list',()=>globalMedia.list(ROOT));
   register('global:import',async x=>{
-    const exts=[...new Set([...images.IMAGE_EXTENSIONS.map(e=>e.slice(1)),'mp4','mov','mkv','webm','avi'])];
+    const exts=[...new Set([...images.IMAGE_EXTENSIONS.map(e=>e.slice(1)),'mp4','mov','mkv','webm','avi','mp3','wav','m4a','aac','ogg','flac'])];
     const result=await dialog.showOpenDialog(win,{title:'Importar a la biblioteca general',
-      properties:['openFile','multiSelections'],filters:[{name:'Imágenes y videos',extensions:exts},{name:'Todos',extensions:['*']}]});
+      properties:['openFile','multiSelections'],filters:[{name:'Imágenes, videos y audio',extensions:exts},{name:'Todos',extensions:['*']}]});
     const files=[],errors=[];
     if(result.canceled)return {files,errors};
     for(const source of result.filePaths){try{files.push(await globalMedia.importFile(ROOT,source))}
@@ -201,6 +229,11 @@ app.whenReady().then(()=>{
   register('weekly:get',x=>store.getWeek(ROOT,x.id));
   register('weekly:save',x=>store.saveWeek(ROOT,x));
   register('review:status',x=>reviews.inspect(ROOT,x.kind,x.id));
+  register('review:rendered',x=>runMedia(async signal=>{
+    const result=await reviews.exportApproved(ROOT,x.kind,x.id,x.hash,signal,broadcast,{preview:true});
+    return {url:'records://rendered/'+x.kind+'/'+encodeURIComponent(x.id)+'/'+result.hash};
+  }));
+  workflow.installWorkflow({app,shell,dialog,safeStorage,root:ROOT,window:()=>win,register,runMedia,send:broadcast});
 
   register('review:export',async x=>{
     if(activeJob)throw Error('Hay otra operación multimedia en curso');
@@ -223,11 +256,11 @@ app.whenReady().then(()=>{
   register('render:cancel',()=>{if(activeJob)activeJob.abort();return true});
   register('system:open-path',async x=>{
     const file=store.resolveManagedPath(ROOT,x.path);
-    await shell.openPath(file);return true;
+    const error=await shell.openPath(file);if(error)throw Error(error);return true;
   });
   // Conceder acceso a cámara/micrófono solo desde una interacción en el editor local.
   const ses=require('electron').session.defaultSession;
-  ses.setPermissionRequestHandler((webContents,permission,callback,details)=>{const local=webContents===win?.webContents||webContents.getURL().startsWith('file://');callback(local&&['media','audioCapture','videoCapture'].includes(permission))});
+  ses.setPermissionRequestHandler((webContents,permission,callback,details)=>{const local=webContents===win?.webContents&&details?.isMainFrame!==false&&(details?.requestingUrl||webContents.getURL()).endsWith('/renderer/index.html');callback(local&&['media','audioCapture','videoCapture'].includes(permission))});
   openWindow();
 });
 app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});

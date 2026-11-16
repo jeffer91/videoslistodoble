@@ -1,103 +1,118 @@
-# 11 Récords Studio Desktop
+# 11 Récords Studio
 
-Editor local de fútbol para Windows construido con Electron y FFmpeg. Repositorio de la nueva aplicación de escritorio. **La versión web Videoshort v20 permanece íntegra en `legacy/` como referencia.**
-
-## Ejecutar en tu computadora
-
-```powershell
-git clone https://github.com/jeffer91/videoslistodoble.git D:\videoslistodoble
-cd D:\videoslistodoble
-npm start
-```
-
-`npm start` instala las dependencias la primera vez y abre la app. Requiere Node.js 22 o superior y, en Windows, el disco D.
-
-## Fábrica de contenido (versión 0.2)
-
-La app organiza cada récord por etapas: idea, guion, grabado, editado, aprobado y publicado.
-
-- **Mis récords:** búsqueda por título o etiqueta y filtros por etapa y por etiqueta.
-- **Ficha del récord:** título, guion por escena (gancho, desarrollo, cierre), notas y etiquetas de jugador, club, selección, estadio, competición y tipo de récord. Se guarda sola al salir de cada campo. «Pegar guion completo» reparte un texto con encabezados GANCHO, DESARROLLO y CIERRE.
-- **Grabación cuadrada con prompter:** el guion de la escena aparece sobre la cámara y se desplaza al iniciar la grabación, con velocidad y tamaño ajustables. Con cámaras de 1080 líneas se graba a 1080 × 1080; con cámaras de 720, a 720 × 720.
-- **Videos por categoría:** además de la compilación semanal, se puede reunir todo lo exportado de un jugador, club, estadio u otra etiqueta. Un récord puede salir en la semanal y en varias compilaciones por categoría; su ficha indica en cuáles aparece.
-- **Aviso de categorías listas:** la pantalla principal avisa cuando una etiqueta reúne 8 o más Shorts exportados.
-
-Los proyectos creados con versiones anteriores siguen abriendo: sin etiquetas, y con la etapa deducida de su contenido.
+Aplicación de Windows para producir Shorts y compilaciones de fútbol. Edita, transcribe y renderiza localmente. Puedes importar investigación, guiones y planes de Claude Code como archivos JSON.
 
 ## Instalar en Windows
 
-1. En **Actions → Desktop Windows - pruebas y compilación**, abre el trabajo más reciente que haya terminado correctamente.
-2. Descarga el artefacto **11-records-studio-windows**.
-3. Extrae el ZIP y ejecuta **11 Récords Studio Setup 0.1.0.exe**.
-4. Cuando el instalador solicite una carpeta, selecciona una ubicación en **D:**.
-5. El programa creará su biblioteca en **D:\11-Records-Studio**. El disco D es obligatorio; no se redirigen silenciosamente los proyectos a C.
+1. Descarga el instalador más reciente desde [Releases](https://github.com/jeffer91/videoslistodoble/releases). Cada versión también queda disponible en [Actions](https://github.com/jeffer91/videoslistodoble/actions/workflows/windows-build.yml).
+2. Ejecuta **11 Récords Studio Setup** y selecciona una carpeta del disco **D:**.
+3. Abre la aplicación. La biblioteca se crea en **D:\11-Records-Studio** y reutiliza los proyectos anteriores.
+4. En **Configuración**, sitúa el respaldo en otra carpeta. Pulsa **Instalar Whisper** para descargar una vez el motor y el modelo multilingüe. En otra arquitectura puedes seleccionar manualmente los dos archivos.
 
-El instalador no tiene firma de editor comercial. Windows puede mostrar una advertencia de reputación SmartScreen. Revisa el origen del instalador antes de ejecutarlo.
+El instalador se genera sin firma de editor comercial. Configuración muestra la versión instalada y permite buscar, descargar e instalar actualizaciones desde Releases. Las versiones se publican después de las pruebas sobre la aplicación instalada.
 
-## Desarrollo local
+## Producir un Short
 
-```powershell
+1. Crea una idea con fuente y fecha. Al aprobarla, se crea una ficha. Asigna su fecha de producción para que aparezca en Inicio.
+2. Escribe el guion por escenas o impórtalo con sus etiquetas. La ficha y la biblioteca conservan la fecha, la etapa y el uso de Claude.
+3. Abre el editor y graba el gancho, el desarrollo y el cierre. Elige cámara y micrófono, comprueba el medidor y usa el prompter. La captura genera archivos de 1080 × 1080. Una cámara de menor resolución se escala conservando el encuadre.
+4. Pausa, reanuda, revisa y guarda la toma. Si el programa se cerró durante la captura, abre **Recuperar toma** en la ficha. Los fragmentos escritos siguen en disco. También puedes importar videos y crear una copia cuadrada con fondo desenfocado desde la biblioteca del proyecto.
+5. Ajusta los cortes, fondo, marco, apoyo visual y texto de cada escena. Desde **Transcripción y plan** puedes generar subtítulos con resaltado palabra por palabra, corregir los tiempos, seleccionar un perfil de voz e insertar rótulos, gráficos y memes.
+6. Aprueba las escenas, revisa el montaje y exporta. Puedes **Renderizar vista previa** para ver el montaje de FFmpeg con efectos y audio antes de exportar. La exportación verifica duración, resolución, audio, márgenes de los rótulos generados y reproducción.
+7. Abre el MP4 exportado. Genera tres miniaturas y guarda título, descripción y etiquetas por red. Tras la revisión del MP4 puedes aprobar ese archivo y autorizar el envío a cada cuenta.
+
+## Videos largos
+
+La compilación semanal propone los récords con Short exportado que aún no se usaron en otra semanal. Una compilación temática reúne los de una etiqueta y puede reutilizar récords. La app avisa cuando los desarrollos elegibles alcanzan ocho minutos.
+
+La línea de tiempo permite reordenar los récords y grabar introducción y cierre. El render recompone el material original en 1920 × 1080 y vuelve a leer los cambios de las escenas. Desde la exportación puedes consultar los capítulos con sus tiempos. También se guardan en un TXT junto al MP4.
+
+## Conectar redes
+
+**Configuración → Cuentas de publicación** guarda los accesos con el cifrado del equipo. Al mover la biblioteca a otro equipo se vuelven a conectar las cuentas.
+
+| Red | Configuración | Portada |
+| --- | --- | --- |
+| YouTube | Activa YouTube Data API v3 y YouTube Analytics API en Google Cloud. Crea un cliente OAuth de escritorio y autoriza el canal desde la app. | Miniatura generada o la predeterminada del video. |
+| TikTok | Vincula TikTok en un perfil de Ayrshare con acceso a su API e introduce su clave. Un cliente propio requiere los permisos de TikTok para publicar y consultar videos. | Variante generada vía Ayrshare o fotograma por tiempo. |
+| Instagram | Usa una cuenta profesional conectada a una página de Facebook y un token de Meta para su ID de Instagram. Los permisos incluyen instagram_basic e instagram_content_publish. Para métricas añade instagram_manage_insights. | Fotograma o URL HTTPS de una imagen para la portada. |
+
+TikTok reserva la publicación directa pública a clientes que cumplen sus condiciones. Los proyectos de uso interno pueden recurrir a un servicio aprobado o registrar el enlace después de publicar desde TikTok. [TikTok Content Sharing Guidelines](https://developers.tiktok.com/docs/en/content-sharing-guidelines) · [Ayrshare para TikTok](https://www.ayrshare.com/tiktok-api/)
+
+La cola respeta la hora local del equipo y procesa publicaciones cuando la aplicación está abierta. El archivo y la cuenta autorizados se verifican antes de cada envío. Si hay un corte durante una entrega, verifica lo que recibió la red antes de reintentar. La ficha conserva los enlaces devueltos por la red o registrados por ti.
+
+**Estadísticas** filtra por red, categoría y semana. Las cifras pueden sincronizarse con las cuentas conectadas o registrarse manualmente si la plataforma no las devuelve. El panel muestra vistas, me gusta, comentarios, seguidores y porcentaje medio visto cuando la cuenta lo ofrece. Exporta el JSON para que Claude prepare las siguientes ideas.
+
+## Trabajo con Claude Code
+
+Puedes usar el repositorio local en D con Node.js 22 o superior. Los pasos de edición y exportación funcionan con los controles de la app y los planes manuales.
+
+~~~powershell
 git clone https://github.com/jeffer91/videoslistodoble.git D:\videoslistodoble
 cd D:\videoslistodoble
-npm install
-npm test
 npm start
-```
+npm run studio -- --help
+~~~
 
-Requisitos para desarrollo: Node.js 22 o superior y Windows con unidad D accesible.
+Los comandos imprimen JSON y el progreso de render va a la consola. **Ctrl+C** cancela los procesos de FFmpeg o Whisper. El tipo de compilación en los comandos es **week**.
 
-## Flujo actual
+~~~powershell
+npm run studio -- list
+npm run studio -- ideas D:\planes\ideas.json
+npm run studio -- script ID_DEL_RECORD D:\planes\guion.json
+npm run studio -- transcribe ID_DEL_RECORD
+npm run studio -- handoff ID_DEL_RECORD
+npm run studio -- plan ID_DEL_RECORD D:\planes\edicion.json
+npm run studio -- preview short ID_DEL_RECORD
+npm run studio -- render short ID_DEL_RECORD
+npm run studio -- covers short ID_DEL_RECORD
+npm run studio -- metrics
+~~~
 
-1. **Nuevo récord:** título del video y proyecto en la biblioteca local.
-2. **Gancho, desarrollo y cierre:** importa un video principal con narración en cada escena, además de fotografías y videos de apoyo.
-3. **Silencios:** el programa identifica pausas de 0,5 segundos (configurable). Rojo significa "omitir"; gris significa "conservar". Se guardan como recortes no destructivos.
-4. **Dos composiciones:** 9:16 y 16:9 parten de los archivos originales y guardan ajustes por separado.
-5. **Exportación Short:** renderiza los segmentos como MP4 H.264 + AAC con FFmpeg local.
-6. **Compilación semanal:** propone los Shorts exportados todavía no utilizados y reúne solamente los desarrollos, agregando introducción, cierre y transiciones.
-7. **Al exportar** la compilación, se marcan sus récords como utilizados. Los archivos originales de cada récord permanecen intactos; reeditar un récord y volver a exportar la compilación toma los cambios actuales.
+Plantilla del archivo de guion.
 
-## Biblioteca
+~~~json
+{
+  "source": "claude",
+  "title": "El gol más rápido de la fecha",
+  "tags": { "jugadores": ["Nombre"], "competiciones": ["Torneo"], "tipos": ["Gol rápido"] },
+  "script": { "hook": "Gancho", "body": "Desarrollo", "closing": "Cierre" }
+}
+~~~
 
-```text
-D:\11-Records-Studio\
-  Proyectos\<id>\proyecto.json
-  Proyectos\<id>\Originales\
-  Compilaciones\<id>\compilacion.json
-  Exportaciones\Shorts\
-  Exportaciones\Videos-Largos\
-  Recursos\logo-11-records.png
-  Configuracion\ajustes.json
-  Respaldos\
-  Temporales\
-```
+El plan usa segundos del original. Las escenas admitidas son hook, body y closing. En los cortes, mode acepta both, audio o video. Los recursos se referencian por el ID del archivo en el proyecto. La transcripción exportada incluye esos IDs y los tiempos para trabajar con texto.
 
-**Importante:** los originales se copian dentro de la biblioteca. El archivo JSON no contiene el video: contiene referencias a la copia local. No borres manualmente sus carpetas. Las compilaciones referencian los mismos originales y no vuelven a copiar su material. La carpeta `Respaldos` existe para la estrategia de recuperación, pero todavía no sustituye un respaldo externo verificado.
+~~~json
+{
+  "version": 1,
+  "source": "claude",
+  "voice": "limpia",
+  "captions": true,
+  "scenes": {
+    "body": {
+      "cuts": [{ "start": 2.8, "end": 3.5, "mode": "both" }],
+      "texts": [{ "start": 1, "end": 3, "text": "La cifra oficial" }],
+      "highlights": ["récord", "segundos"],
+      "graphics": [{ "start": 1.4, "end": 4.4, "text": "La marca anterior" }],
+      "memes": []
+    }
+  }
+}
+~~~
 
-## Estructura del código
+Para HyperFrames, ejecuta **npm run studio -- hyperframe ID_DEL_RECORD D:\planes\grafico.json**. El JSON puede tener title, detail, duration y format (short o wide). Desde la carpeta que devuelve el comando, ejecuta **npx hyperframes render --format webm --output grafico.webm** con HyperFrames disponible. Importa el WebM al proyecto y selecciónalo en **Añadir gráfico**. El plan manual también tiene un rótulo animado que renderiza sin HyperFrames. [Documentación de HyperFrames](https://hyperframes.app/docs/5-packages/cli)
 
-- `main.cjs`: proceso principal Electron, acceso a disco, diálogos y protocolos de archivos.
-- `preload.cjs`: puente limitado entre la interfaz y el proceso principal.
-- `backend/store.cjs`: proyectos, biblioteca, importaciones y metadatos.
-- `backend/media.cjs`: análisis de audio, recortes no destructivos y renderizado FFmpeg.
-- `renderer/`: interfaz de escritorio y composición de vista previa.
-- `legacy/`: copia de Videoshort v20; **no** comparte aún los proyectos guardados del editor nuevo.
-- `tests/`: pruebas automáticas de guardado, lógica de silencios y renderizado MP4.
+Para ordenar una compilación, **Importar plan** acepta version, title, projectIds, intro, closing, source y transition (title o cut). Conserva los IDs de los récords de la compilación y cambia su orden. El guion de introducción y cierre aparece en el prompter de sus escenas.
 
-## Limitaciones a verificar
+## Biblioteca y pruebas
 
-- El motor FFmpeg local no reproduce todavía **todas** las animaciones ni el recorte avanzado de fondo con MediaPipe del editor web. Los videos de presentador se incluyen como superposiciones de imagen; el editor web original se conserva para referencia.
-- La vista previa CSS sirve para seleccionar medios y composición; el MP4 final es generado por FFmpeg y debe comprobarse visualmente.
-- La detección de silencios se basa en nivel de audio; una pausa con ruido de fondo puede no clasificarse como silencio.
-- El motor de renderizado utiliza CPU. Compilaciones largas pueden tardar; probar con archivos reales.
-- La generación de clips realiza recortes suaves y permite velocidad de apoyo, pero no evita reclamaciones de copyright o Content ID.
-- La compilación requiere al menos 8 minutos de contenido. No agrega material automáticamente para rellenar el tiempo.
-- Los proyectos no se sincronizan con la nube. Guarda copias externas cuando sean importantes.
-- La versión de escritorio no incluye aún edición de subtítulos ni herramientas de creación de miniaturas.
+La raíz de Windows contiene **Proyectos**, **Compilaciones**, **Recursos**, **Exportaciones**, **Configuracion** y **Temporales**. Los originales se copian al importar. Los respaldos incluyen los proyectos, recetas, recursos, exportaciones y configuración. El almacén de accesos permanece ligado al equipo. Para restaurar una copia, cierra la app, conserva otra copia de los archivos que estés reemplazando y repón las carpetas en la misma raíz D.
 
-## Construcción y pruebas
+~~~powershell
+npm ci
+npm run check
+npm test
+npm run test:desktop
+~~~
 
-En equipos cuyo FFmpeg incluido carece de algún filtro (por ejemplo `drawtext` en la compilación para Linux), las pruebas de renderizado pueden ejecutarse con otro binario: `RECORDS_FFMPEG=/ruta/ffmpeg RECORDS_FFPROBE=/ruta/ffprobe npm test`.
-
-GitHub Actions ejecuta `npm run check`, `npm test` y `npm run dist:win`. Si estas pruebas no pasan, **no debe tratarse el instalador como una versión lista para producción**.
-
-Se solicita una prueba de extremo a extremo en un equipo Windows real: importar tres videos, guardar y reabrir proyecto, eliminar silencios, exportar MP4, abrirlo en un reproductor, crear recopilación con intro/cierre y revisar sincronización y calidad.
+GitHub Actions instala y prueba la aplicación de Windows con dispositivos audiovisuales simulados. En un equipo real, comprueba la cámara, el micrófono y la calidad del MP4 con sus propios medios. Las pruebas de publicación simulan las respuestas de las plataformas sin producir publicaciones reales.

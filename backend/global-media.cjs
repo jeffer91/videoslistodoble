@@ -4,6 +4,7 @@ const sharp=require('sharp');
 const {spawnSync}=require('node:child_process');
 const {IMAGE_SET}=require('./image-import.cjs');
 const VIDEO_EXT=new Set(['.mp4','.mov','.mkv','.webm','.avi']);
+const AUDIO_EXT=new Set(['.wav','.mp3','.m4a','.aac','.flac','.ogg']);
 const ID=/^[a-f0-9-]{36}$/i;
 const folder=root=>path.join(root,'Recursos','Medios');
 const index=root=>path.join(folder(root),'biblioteca.json');
@@ -12,8 +13,8 @@ function write(root,items){fs.mkdirSync(folder(root),{recursive:true});const tmp
 function get(root,id){if(typeof id!=='string'||!ID.test(id))throw Error('Identificador inválido');const item=list(root).find(x=>x.id===id);if(!item)throw Error('Recurso global inexistente');return item}
 function resolve(root,id){const item=get(root,id);const base=path.resolve(folder(root)),file=path.resolve(base,item.file);if(!file.startsWith(base+path.sep)||!fs.existsSync(file))throw Error('Archivo no encontrado');return file}
 async function importFile(root,source,name){
- const ext=path.extname(source).toLowerCase(),isImage=IMAGE_SET.has(ext),isVideo=VIDEO_EXT.has(ext);
- if(!isImage&&!isVideo)throw Error('Solo se permiten imágenes y videos compatibles');
+ const ext=path.extname(source).toLowerCase(),isImage=IMAGE_SET.has(ext),isVideo=VIDEO_EXT.has(ext),isAudio=AUDIO_EXT.has(ext);
+ if(!isImage&&!isVideo&&!isAudio)throw Error('Solo se permiten imágenes, videos y audio compatibles');
  const stat=fs.statSync(source),max=isImage?200*1024*1024:2*1024*1024*1024;
  if(!stat.isFile()||!stat.size||stat.size>max)throw Error('El archivo está vacío o excede el límite permitido');
  const id=crypto.randomUUID(),destExt=isImage?'.png':ext,relative=id+destExt,dest=path.join(folder(root),relative);
@@ -31,7 +32,7 @@ async function importFile(root,source,name){
     if(result.error||result.status!==0)throw Error('No se pudo convertir la imagen: '+(result.stderr||err.message).slice(0,180));
    }
   }else fs.copyFileSync(source,dest);
-  const item={id,name:String(name||path.basename(source)).slice(0,120),type:isImage?'image':'video',file:relative,size:fs.statSync(dest).size,createdAt:new Date().toISOString()};
+  const item={id,name:String(name||path.basename(source)).slice(0,120),type:isImage?'image':isAudio?'audio':'video',file:relative,size:fs.statSync(dest).size,createdAt:new Date().toISOString()};
   write(root,[...list(root),item]);return item;
  }catch(err){if(fs.existsSync(dest))fs.rmSync(dest,{force:true});throw err}
 }

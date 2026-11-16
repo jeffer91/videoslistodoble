@@ -1,26 +1,31 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Editor local para Shorts y recopilaciones semanales de 11 Récords",
+  "description": "Estudio local para crear, revisar y publicar videos de 11 Récords",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check main.cjs && node --check preload.cjs && node --check backend/store.cjs && node --check backend/media.cjs && node --check backend/corner-balls.cjs && node --check backend/review.cjs && node --check backend/master-audio.cjs && node --check backend/templates.cjs && node --check backend/global-media.cjs && node --check backend/logo.cjs && node --check renderer/app.js && node --check renderer/visual-director.js && node --check renderer/live-review.js && node --check renderer/wave-zoom.js && node --check renderer/presenter-frame.js && node --check backend/catalog.cjs && node --check renderer/catalog.js && node --check renderer/factory.js && node --check scripts/ensure-deps.cjs",
+    "check": "node scripts/check.cjs",
     "dist:win": "electron-builder --win nsis --publish never",
     "dist:dir": "electron-builder --dir",
-    "prestart": "node scripts/ensure-deps.cjs"
+    "prestart": "node scripts/ensure-deps.cjs",
+    "studio": "node scripts/studio.cjs",
+    "test:desktop": "node tests/studio-desktop.cjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
-    "sharp": "^0.34.4"
+    "sharp": "^0.34.4",
+    "electron-updater": "^6.6.2",
+    "gsap": "^3.13.0"
   },
   "devDependencies": {
     "electron": "^34.3.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "playwright": "^1.53.2"
   },
   "build": {
     "appId": "com.records11.studio",
@@ -40,13 +45,15 @@
       "legacy/**",
       "assets/**",
       "package.json",
-      "node_modules/**"
+      "node_modules/**",
+      "scripts/studio.cjs"
     ],
     "directories": {
       "output": "dist"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "11-Records-Studio-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -54,6 +61,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "jeffer91",
+      "repo": "videoslistodoble",
+      "releaseType": "release"
     }
   }
 }

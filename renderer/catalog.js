@@ -9,8 +9,8 @@
 
 const TAG_FIELDS=['jugadores','clubes','selecciones','estadios','competiciones','tipos'];
 const TAG_LABELS={jugadores:'Jugador',clubes:'Club',selecciones:'Selección',estadios:'Estadio',competiciones:'Competición',tipos:'Tipo de récord'};
-const STAGES=['idea','guion','grabado','editado','aprobado','publicado'];
-const STAGE_LABELS={idea:'Idea',guion:'Guion listo',grabado:'Grabado',editado:'Editado',aprobado:'Aprobado',publicado:'Publicado'};
+const STAGES=['idea','guion','grabado','transcrito','planificado','editado','aprobado','publicado'];
+const STAGE_LABELS={idea:'Idea',guion:'Guion listo',grabado:'Grabado',transcrito:'Transcrito',planificado:'Planificado',editado:'Editado',aprobado:'Aprobado',publicado:'Publicado'};
 const SCRIPT_PARTS=['hook','body','closing'];
 const MAX_TAGS=12,MAX_TAG_LENGTH=60,MAX_SCRIPT=8000,MAX_NOTES=4000;
 
@@ -62,6 +62,13 @@ function normalizeStage(stage){
  if(!STAGES.includes(stage))throw Error('Etapa de producción inválida');
  return stage;
 }
+function normalizeDate(value){
+ const text=String(value??'');
+ if(!text)return '';
+ const date=new Date(text);
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(text)||!Number.isFinite(+date)||date.toISOString().slice(0,10)!==text)throw Error('Fecha inválida');
+ return text;
+}
 function normalizeNotes(text){
  if(text===undefined||text===null)return '';
  if(typeof text!=='string'||text.length>MAX_NOTES)throw Error('Notas inválidas o demasiado largas');
@@ -76,6 +83,8 @@ function hasScript(project){
 function deriveStage(project){
  let content='idea';
  if(project?.status==='exported'||(project?.exports||[]).length)content='editado';
+ else if(project?.editingPlan&&Object.values(project?.scenes||{}).some(scene=>scene?.video))content='planificado';
+ else if(Object.entries(project?.transcripts||{}).some(([key,transcript])=>transcript.assetId===project.scenes?.[key]?.video))content='transcrito';
  else if(Object.values(project?.scenes||{}).some(scene=>scene&&scene.video))content='grabado';
  else if(hasScript(project))content='guion';
  const stored=STAGES.includes(project?.stage)?project.stage:'idea';
@@ -92,6 +101,8 @@ function hasTag(project,field,value){
 // query: {text, stage, field, value}. Todos los criterios son opcionales y se combinan.
 function matches(project,query={}){
  if(query.stage&&deriveStage(project)!==query.stage)return false;
+ const date=project?.plannedDate||(project?.createdAt||'').slice(0,10);
+ if((query.from&&date<query.from)||(query.to&&date>query.to))return false;
  if(query.field&&query.value&&!hasTag(project,query.field,query.value))return false;
  const text=fold(query.text);
  if(text){
@@ -146,5 +157,5 @@ function parseScript(text){
 }
 
 return {TAG_FIELDS,TAG_LABELS,STAGES,STAGE_LABELS,SCRIPT_PARTS,fold,emptyTags,emptyScript,normalizeTags,
- normalizeScript,normalizeStage,normalizeNotes,hasScript,deriveStage,tagsOf,hasTag,matches,tagIndex,parseScript};
+ normalizeScript,normalizeStage,normalizeNotes,normalizeDate,hasScript,deriveStage,tagsOf,hasTag,matches,tagIndex,parseScript};
 });

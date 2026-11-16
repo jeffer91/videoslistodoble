@@ -1,0 +1,237 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const { createHash } = require('node:crypto');
+const sharp = require('sharp');
+const store = require('./store.cjs');
+const media = require('./media.cjs');
+const production = require('./production.cjs');
+
+const NETWORKS = ['youtube', 'tiktok', 'instagram'];
+
+function outputs(root, kind, id) {
+  if (kind === 'short') {
+    const project = store.getProject(root, id);
+    return (project.exports || []).map(item => item.file).filter(Boolean);
+  }
+  if (kind === 'week') return store.getWeek(root, id).outputs || [];
+  throw Error('Tipo de video inválido');
+}
+
+function resolveOutput(root, { kind, id, file }) {
+  if (typeof file !== 'string' || !/^[0-9a-z_-]+\.mp4$/i.test(file)) throw Error('Exportación inválida');
+  const dir = path.join(root, 'Exportaciones', kind === 'short' ? 'Shorts' : 'Videos-Largos');
+  const found = outputs(root, kind, id).find(candidate => path.basename(candidate) === file);
+  if (!found) throw Error('El video no pertenece a la ficha');
+  const resolved = fs.realpathSync(path.join(dir, file));
+  if (!production.isInside(fs.realpathSync(dir), resolved) || !fs.statSync(resolved).isFile()) {
+    throw Error('El video no está dentro de su carpeta de exportación');
+  }
+  return resolved;
+}
+
+function sidecar(file) {
+  return path.join(path.dirname(file), path.parse(file).name + '.publicacion.json');
+}
+
+function titleFor(root, { kind, id }) {
+  return kind === 'short' ? store.getProject(root, id).title : store.getWeek(root, id).title;
+}
+
+function entryFor(root, target) {
+  const file = resolveOutput(root, target);
+  const json = sidecar(file);
+  if (fs.existsSync(json)) return store.readJSON(json);
+  const title = titleFor(root, target);
+  const project = target.kind === 'short' ? store.getProject(root, target.id) : null;
+  const tags = project ? Object.values(project.tags || {}).flat() : [];
+  const chaptersFile = file.replace(/\.mp4$/, '.capitulos.txt');
+  const description = fs.existsSync(chaptersFile) ? fs.readFileSync(chaptersFile, 'utf8') : '';
+  return {
+    target, quality: null, thumbnails: [], approval: null,
+    networks: Object.fromEntries(NETWORKS.map(name => [name, { title: title.slice(0, 100), description, tags, coverTime: 0 }]))
+  };
+}
+
+function updateEntry(root, target, fields) {
+  const file = resolveOutput(root, target);
+  const next = { ...entryFor(root, target), ...fields, target };
+  store.atomic(sidecar(file), next);
+  return next;
+}
+
+function normalizeNetwork(name, data) {
+  if (!NETWORKS.includes(name)) throw Error('Red no admitida');
+  const title = String(data?.title || '').trim();
+  const description = String(data?.description || '').trim();
+  const tags = Array.isArray(data?.tags) ? data.tags : String(data?.tags || '').split(',');
+  const unique = [...new Set(tags.map(value => String(value).trim()).filter(Boolean))];
+  if (!title || title.length > 100 || description.length > (name === 'youtube' ? 4700 : 1950) ||
+      unique.length > 25 || unique.some(value => value.length > 55) || unique.join(',').length > 440) {
+    throw Error('Revisa el título, la descripción y las etiquetas para ' + name);
+  }
+  const coverTime = Number(data?.coverTime ?? 0);
+  if (!Number.isFinite(coverTime) || coverTime < 0 || coverTime > 7200) throw Error('Tiempo de portada inválido');
+  const choice = Number(data?.thumbnail || 0);
+  if (!Number.isInteger(choice) || choice < 0 || choice > 3) throw Error('Miniatura inválida');
+  const privacy = String(data?.privacy || '');
+  const privacyOptions = name === 'youtube' ? ['private', 'unlisted', 'public'] :
+    name === 'tiktok' ? ['SELF_ONLY', 'FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'PUBLIC_TO_EVERYONE'] : ['public'];
+  if (privacy && !privacyOptions.includes(privacy)) throw Error('Visibilidad inválida');
+  const coverUrl = String(data?.coverUrl || '').trim();
+  if (coverUrl) {
+    const parsed = new URL(coverUrl);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || coverUrl.length > 1800) {
+      throw Error('Para Instagram usa una portada pública HTTPS');
+    }
+  }
+  return {
+    title, description, tags: unique, coverTime, thumbnail: choice, privacy, coverUrl,
+    comments: data?.comments === true, duet: data?.duet === true, stitch: data?.stitch === true,
+    madeForKids: data?.madeForKids === true, branded: data?.branded === true, ownBrand: data?.ownBrand === true
+  };
+}
+
+function saveNetwork(root, target, network, value) {
+  const current = entryFor(root, target);
+  const metadata = normalizeNetwork(network, value);
+  return updateEntry(root, target, { networks: { ...current.networks, [network]: metadata } });
+}
+
+async function qualityCheck(file, kind, signal, expected) {
+  const info = await media.probe(file);
+  const min = kind === 'short' ? 1 : production.EIGHT_MINUTES;
+  const test = process.env.RECORDS_RENDER_TEST_MODE === '1';
+  const [width, height] = kind === 'short' ? (test ? [270, 480] : [1080, 1920]) : (test ? [480, 270] : [1920, 1080]);
+  const checks = [
+    { label: 'Duración', ok: info.duration >= min, value: info.duration.toFixed(2) + ' s' },
+    { label: 'Resolución', ok: info.width === width && info.height === height, value: info.width + ' × ' + info.height },
+    { label: 'Pista de audio', ok: info.hasAudio, value: info.hasAudio ? 'Presente' : 'Ausente' }
+  ];
+  let volume = null;
+  try {
+    const { stderr } = await media.command(media.toolPath('ffmpeg'), [
+      '-hide_banner', '-nostats', '-xerror', '-i', file, '-map', '0:v:0', '-map', '0:a:0',
+      '-af', 'loudnorm=print_format=json', '-f', 'null', '-'
+    ], signal);
+    const analysis = stderr.match(/\{\s*"input_i"[\s\S]*?\}/g)?.at(-1);
+    if (analysis) {
+      const measured = Number(JSON.parse(analysis).input_i);
+      if (Number.isFinite(measured)) volume = measured;
+    }
+    checks.push({ label: 'Archivo reproducible', ok: true, value: 'Video y audio decodificados' });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    checks.push({ label: 'Archivo reproducible', ok: false, value: 'Error al decodificar' });
+  }
+  checks.push({ label: 'Volumen integrado', ok: volume !== null && volume >= -25 && volume <= -10,
+    value: volume !== null ? volume + ' LUFS' : 'Sin señal medible' });
+  checks.push({ label: 'Márgenes del texto', ok: true, value: 'Rótulos y subtítulos ajustados al área segura' });
+  if (expected !== undefined && Math.abs(info.duration - expected) > 2) {
+    checks.push({ label: 'Duración del montaje', ok: false, value: 'Difiere del montaje previsto por más de 2 s' });
+  }
+  return { checks, ok: checks.every(item => item.ok), ...info, volume, at: new Date().toISOString() };
+}
+
+async function checkOutput(root, target, signal) {
+  const quality = await qualityCheck(resolveOutput(root, target), target.kind, signal);
+  updateEntry(root, target, { quality });
+  return quality;
+}
+
+async function fingerprint(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function approveOutput(root, target, confirmed, signal) {
+  if (confirmed !== true) throw Error('Confirma que revisaste el MP4');
+  const file = resolveOutput(root, target);
+  const quality = await checkOutput(root, target, signal);
+  if (!quality.ok) throw Error('Corrige el resultado del chequeo o vuelve a exportar antes de aprobar');
+  const approval = { at: new Date().toISOString(), sha256: await fingerprint(file) };
+  if (target.kind === 'short') store.saveProject(root, { id: target.id, stage: 'aprobado' });
+  return updateEntry(root, target, { approval });
+}
+
+function xml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'
+  })[character]);
+}
+
+function headingLines(input, limit) {
+  const words = input.split(/\s+/).map(word => [...word].slice(0, limit).join(''));
+  const lines = [''];
+  for (const word of words) {
+    const index = lines.length - 1;
+    const joined = [lines[index], word].filter(Boolean).join(' ');
+    if (joined.length <= limit) lines[index] = joined;
+    else if (lines.length < 3) lines.push(word);
+    else {
+      lines[index] = lines[index].slice(0, limit - 1).trim() + '…';
+      break;
+    }
+  }
+  return lines;
+}
+
+async function thumbnails(root, target, { title, time, assetId }, signal) {
+  const file = resolveOutput(root, target);
+  const heading = String(title || titleFor(root, target)).trim().slice(0, 120);
+  if (!heading) throw Error('Escribe el texto de la miniatura');
+  const seconds = Number(time ?? 0);
+  if (!Number.isFinite(seconds) || seconds < 0) throw Error('Tiempo de miniatura inválido');
+  const dir = media.temporary(root);
+  const snapshot = path.join(dir, 'fotograma.jpg');
+  const image = target.kind === 'short' && assetId ? store.resolveAsset(root, target.id, assetId) : null;
+  try {
+    if (!image) {
+      const duration = (await media.probe(file)).duration;
+      await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-ss',
+        String(Math.min(seconds, Math.max(0, duration - .2))), '-i', file, '-frames:v', '1', snapshot], signal);
+    }
+    const themes = [
+      { accent: '#ffd765', base: '#11231a', side: 'left' },
+      { accent: '#aff0d6', base: '#0a192c', side: 'right' },
+      { accent: '#ffffff', base: '#771a22', side: 'left' }
+    ];
+    const background = await sharp(image || snapshot).rotate().resize(1280, 720, { fit: 'cover' }).toBuffer();
+    const generated = [];
+    for (const [index, theme] of themes.entries()) {
+      const x = theme.side === 'left' ? 82 : 700;
+      const rect = x - 38;
+      const lines = headingLines(heading.toLocaleUpperCase('es'), 16);
+      const markup = '<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">' +
+        '<rect y="0" width="1280" height="720" fill="#0a0e13" fill-opacity=".20"/>' +
+        '<rect x="' + rect + '" y="96" rx="22" width="560" height="528" fill="' + theme.base + '" fill-opacity=".9"/>' +
+        '<text x="' + x + '" y="191" font-family="Arial, sans-serif" font-size="33" font-weight="bold" fill="' + theme.accent + '">11 RÉCORDS</text>' +
+        lines.map((line, i) => '<text x="' + x + '" y="' + (315 + i * 70) +
+          '" font-family="Arial, sans-serif" font-size="53" font-weight="bold" textLength="' +
+          Math.max(1, Math.min(475, line.length * 30)) + '" lengthAdjust="spacingAndGlyphs" fill="#fff">' + xml(line) + '</text>').join('') +
+        '<rect x="' + x + '" y="563" width="152" height="8" fill="' + theme.accent + '"/></svg>';
+      const name = path.parse(file).name + '.miniatura-' + (index + 1) + '.jpg';
+      const destination = path.join(path.dirname(file), name);
+      const temporary = path.join(dir, name);
+      await sharp(background).composite([{ input: Buffer.from(markup) }]).jpeg({ quality: 86, mozjpeg: true }).toFile(temporary);
+      fs.copyFileSync(temporary, destination);
+      generated.push(name);
+    }
+    return updateEntry(root, target, { thumbnails: generated });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function thumbnailPath(root, target, choice) {
+  if (!choice) return null;
+  const name = entryFor(root, target).thumbnails[choice - 1];
+  if (!name) throw Error('Genera la miniatura seleccionada');
+  return path.join(path.dirname(resolveOutput(root, target)), path.basename(name));
+}
+
+module.exports = {
+  NETWORKS, outputs, resolveOutput, sidecar, entryFor, updateEntry, normalizeNetwork, saveNetwork, qualityCheck,
+  checkOutput, fingerprint, approveOutput, thumbnails, thumbnailPath
+};

@@ -13,3 +13,12 @@ build/
 *.png
 *.jpg
 !assets/**
+
+# Los datos locales y los accesos de las redes permanecen fuera del repositorio.
+/Proyectos/
+/Compilaciones/
+/Exportaciones/
+/Recursos/
+/Configuracion/
+/Temporales/
+/Respaldos/

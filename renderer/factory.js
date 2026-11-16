@@ -4,7 +4,7 @@
 // Se carga antes de app.js; usa sus utilidades (state, api, esc, btn, titlebar, render…) solo al ejecutarse.
 (function(){
  const C=window.Catalog;
- const filters={text:'',stage:'',field:'',value:''};
+ const filters={text:'',stage:'',field:'',value:'',from:'',to:''};
  const prompter={timer:null,position:0,speed:38,size:26,running:false,last:0};
  const SCENE_LABELS={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
  const q=selector=>document.querySelector(selector);
@@ -33,24 +33,19 @@
   if(!list.length)return '<div class="empty"><h2>Ningún récord coincide</h2><p>Cambia la búsqueda o quita los filtros.</p>'+btn('library-clear','Quitar filtros','secondary')+'</div>';
   return '<p class="muted mini library-count">'+list.length+' de '+all.length+' récords</p><div class="grid">'+list.map(recordTile).join('')+'</div>';
  }
- // Avisos de categorías que ya tienen material suficiente para un video largo.
- function readyCategories(){
-  const index=C.tagIndex(visibleProjects()),ready=[];
-  for(const field of C.TAG_FIELDS)for(const entry of index[field])if(entry.exported>=8)ready.push({field,...entry});
-  return ready.sort((a,b)=>b.exported-a.exported).slice(0,3);
- }
  function home(){
   const index=C.tagIndex(visibleProjects());
   const valueOptions=filters.field?index[filters.field]:[];
-  const ready=readyCategories();
   return titlebar('Mis récords','Busca por título o etiqueta y filtra por etapa. Todo se guarda en tu disco.',btn('new','＋ Nuevo récord')+btn('new-week','Crear video semanal','secondary')+btn('new-category','Video por categoría','secondary'))+
-   (ready.length?'<div class="success ready-banner">'+ready.map(r=>'<span><strong>'+esc(r.value)+'</strong> ya tiene '+r.exported+' Shorts exportados '+btn('quick-category','Crear video largo','secondary','data-field="'+r.field+'" data-value="'+esc(r.value)+'"')+'</span>').join('')+'</div>':'')+
+   StudioWorkflow.readyPanel()+
    '<div class="panel library-filters"><div class="filter-row">'+
    '<input id="library-search" type="search" placeholder="Buscar: Messi, Bernabéu, goleador…" value="'+esc(filters.text)+'" aria-label="Buscar récords">'+
    '<select id="library-stage" aria-label="Filtrar por etapa"><option value="">Todas las etapas</option>'+C.STAGES.map(s=>'<option value="'+s+'" '+(filters.stage===s?'selected':'')+'>'+esc(C.STAGE_LABELS[s])+'</option>').join('')+'</select>'+
    '<select id="library-field" aria-label="Tipo de etiqueta"><option value="">Cualquier etiqueta</option>'+C.TAG_FIELDS.map(f=>'<option value="'+f+'" '+(filters.field===f?'selected':'')+'>'+esc(C.TAG_LABELS[f])+'</option>').join('')+'</select>'+
    '<select id="library-value" aria-label="Etiqueta" '+(filters.field?'':'disabled')+'><option value="">'+(filters.field?'Todas':'—')+'</option>'+valueOptions.map(v=>'<option value="'+esc(v.value)+'" '+(C.fold(filters.value)===C.fold(v.value)?'selected':'')+'>'+esc(v.value)+' ('+v.total+')</option>').join('')+'</select>'+
-   btn('library-clear','Quitar filtros','secondary')+'</div></div>'+
+   btn('library-clear','Quitar filtros','secondary')+'</div>'+
+   '<div class="workflow-filters"><label class="field">Desde <input id="library-from" type="date" value="'+esc(filters.from)+'"></label>'+
+   '<label class="field">Hasta <input id="library-to" type="date" value="'+esc(filters.to)+'"></label></div></div>'+
    '<div id="library-grid">'+gridHTML()+'</div>';
  }
  function refreshGrid(){const grid=q('#library-grid');if(grid)grid.innerHTML=gridHTML()}
@@ -62,15 +57,16 @@
   if(!p)return home();
   const tags=C.tagsOf(p),script=C.normalizeScript(p.script),stage=C.deriveStage(p),inWeeks=compilationsOf(p.id);
   const words=C.SCRIPT_PARTS.map(part=>script[part]).join(' ').trim().split(/\s+/).filter(Boolean).length;
-  return titlebar('Ficha del récord','Guion, etiquetas y etapa. El guion aparece en el prompter al grabar.',btn('home','← Mis récords','secondary')+btn('card-save','Guardar ficha')+btn('card-go-editor','Grabar y editar →'))+
+  return titlebar('Ficha del récord','Guion, etiquetas y etapa. El guion aparece en el prompter al grabar.',btn('home','← Mis récords','secondary')+btn('card-save','Guardar ficha')+btn('card-go-editor','Grabar y editar →')+btn('studio-editing','Transcripción y plan','secondary')+btn('record-recovery','Recuperar toma','secondary'))+
    '<div class="card-layout"><section>'+
    '<div class="panel"><div class="field"><label for="card-title">Título del récord</label><input id="card-title" maxlength="120" value="'+esc(p.title)+'"></div>'+
    '<div class="two"><div class="field"><label for="card-stage">Etapa</label><select id="card-stage">'+C.STAGES.map(s=>'<option value="'+s+'" '+(stage===s?'selected':'')+'>'+esc(C.STAGE_LABELS[s])+'</option>').join('')+'</select></div>'+
-   '<div class="field"><label>Creado</label><input disabled value="'+esc(new Date(p.createdAt).toLocaleDateString('es-EC'))+'"></div></div>'+
+   '<div class="field"><label for="card-planned">Fecha de producción</label><input id="card-planned" type="date" value="'+esc(p.plannedDate||'')+'"></div></div>'+
+   '<p class="muted mini">Creado el '+esc(new Date(p.createdAt).toLocaleDateString('es-EC'))+' · '+(p.withClaude?'Con aportes de Claude':'Modo manual')+'</p>'+
    '<p class="muted mini">La etapa avanza sola cuando hay guion, grabación o Short exportado. Marca «Aprobado» y «Publicado» a mano.</p></div>'+
    '<div class="panel"><div class="row between"><h2>Guion</h2><span class="muted mini" id="card-words">'+words+' palabras · unos '+Math.max(1,Math.round(words/2.6))+' s hablando</span></div>'+
    C.SCRIPT_PARTS.map(part=>'<div class="field"><label for="card-script-'+part+'">'+SCENE_LABELS[part]+'</label><textarea id="card-script-'+part+'" class="script-area" data-script="'+part+'" rows="'+(part==='body'?9:4)+'" placeholder="'+(part==='hook'?'La frase que detiene el dedo en los primeros 2 segundos':part==='body'?'El récord, la cifra exacta y el contexto':'Pregunta final y «síguenos»')+'">'+esc(script[part])+'</textarea></div>').join('')+
-   '<div class="row wrap">'+btn('card-paste-script','Pegar guion completo','secondary')+'<span class="muted mini">Reconoce los encabezados GANCHO, DESARROLLO y CIERRE.</span></div></div>'+
+   '<div class="row wrap">'+btn('card-paste-script','Pegar guion completo','secondary')+btn('studio-script-import','Importar guion y etiquetas','secondary')+'<span class="muted mini">Reconoce los encabezados GANCHO, DESARROLLO y CIERRE.</span></div></div>'+
    '</section><section>'+
    '<div class="panel"><h2>Etiquetas</h2><p class="muted mini">Separa con comas. Sirven para buscar y para armar videos por categoría.</p>'+
    C.TAG_FIELDS.map(field=>'<div class="field"><label for="card-tag-'+field+'">'+esc(C.TAG_LABELS[field])+'</label><input id="card-tag-'+field+'" data-tagfield="'+field+'" list="taglist-'+field+'" value="'+esc(tags[field].join(', '))+'" placeholder="'+esc({jugadores:'Lamine Yamal, Lionel Messi',clubes:'Barcelona',selecciones:'España',estadios:'Santiago Bernabéu',competiciones:'Champions League',tipos:'Más joven, goleador, racha'}[field])+'"></div>').join('')+
@@ -78,7 +74,7 @@
    '<div class="panel"><h2>Notas y fuentes</h2><div class="field"><textarea id="card-notes" rows="4" placeholder="Enlaces, cifras por verificar, ideas para el gráfico…">'+esc(p.notes||'')+'</textarea></div></div>'+
    '<div class="panel"><h2>Aparece en</h2>'+(inWeeks.length?'<div class="list">'+inWeeks.map(w=>'<div class="asset"><span><strong>'+esc(w.title)+'</strong> <small>· '+(w.kind==='category'?'Por categoría':'Semanal')+(w.exportedAt?' · exportada':'')+'</small></span>'+btn('open-week','Abrir','secondary','data-id="'+esc(w.id)+'"')+'</div>').join('')+'</div>':'<p class="muted">Todavía no está en ningún video largo.</p>')+
    '<p class="muted mini">Un récord puede salir en la compilación semanal y también en videos por categoría.</p></div>'+
-   '</section></div>';
+   StudioWorkflow.projectDeliveries(p)+'</section></div>';
  }
  function readCard(){
   const p=state.project;if(!p)throw Error('Abre un récord');
@@ -91,18 +87,20 @@
   p.title=title;p.tags=C.normalizeTags(tags);p.script=C.normalizeScript(script);
   p.notes=C.normalizeNotes(q('#card-notes')?.value||'');
   p.stage=C.normalizeStage(q('#card-stage')?.value||'idea');
+  p.plannedDate=C.normalizeDate(q('#card-planned')?.value);
  }
  async function saveCard(silent){
   readCard();
   // Solo se envían los campos de la ficha: así no se pisa nada del editor.
-  const p=state.project,saved=await api('projects:save',{id:p.id,title:p.title,tags:p.tags,script:p.script,notes:p.notes,stage:p.stage});
-  Object.assign(p,{title:saved.title,tags:saved.tags,script:saved.script,notes:saved.notes,stage:saved.stage,updatedAt:saved.updatedAt});
+  const p=state.project,saved=await api('projects:save',{id:p.id,title:p.title,tags:p.tags,script:p.script,notes:p.notes,stage:p.stage,plannedDate:p.plannedDate});
+  Object.assign(p,{title:saved.title,tags:saved.tags,script:saved.script,notes:saved.notes,stage:saved.stage,plannedDate:saved.plannedDate,updatedAt:saved.updatedAt});
   await loadLibrary();
   if(!silent){render();notice('Ficha guardada')}
  }
  async function openRecordCard(id){
   state.project=await api('projects:get',{id});state.scene='hook';state.orientation='short';
-  state.page='record-card';state.status='';state.editingWeekId=null;render();
+  state.page='record-card';state.status='';state.editingWeekId=null;
+  await StudioWorkflow.refreshProjectLinks(id);render();
  }
  function updateWordCount(){
   const el=q('#card-words');if(!el)return;
@@ -193,7 +191,7 @@
   const action=b.dataset.action;
   try{
    if(action==='open-record-card')return await openRecordCard(b.dataset.id);
-   if(action==='record-card'){if(!state.project)throw Error('Abre un récord');if(state.page==='project')await saveNow();state.page='record-card';return render()}
+   if(action==='record-card'){if(!state.project)throw Error('Abre un récord');if(state.page==='project')await saveNow();return await openRecordCard(state.project.id)}
    if(action==='card-save')return await saveCard(false);
    if(action==='card-go-editor'){await saveCard(true);return await openProject(state.project.id,'hook')}
    if(action==='card-paste-script')return pasteScriptModal();
@@ -201,17 +199,15 @@
     const parts=C.parseScript(q('#paste-script-text')?.value||'');
     const modal=q('#modal-root');modal.hidden=true;modal.innerHTML='';
     for(const part of C.SCRIPT_PARTS){const area=q('#card-script-'+part);if(area)area.value=parts[part]}
-    updateWordCount();notice('Guion repartido. Revisa y guarda la ficha.');return;
+    updateWordCount();await saveCard(true);notice('Guion repartido y guardado');return;
    }
-   if(action==='library-clear'){Object.assign(filters,{text:'',stage:'',field:'',value:''});return render()}
+   if(action==='library-clear'){Object.assign(filters,{text:'',stage:'',field:'',value:'',from:'',to:''});return render()}
    if(action==='new-category')return categoryModal();
    if(action==='quick-category')return await createCategory(b.dataset.field,b.dataset.value);
    if(action==='category-confirm')return await createCategory(q('#category-field')?.value,q('#category-value')?.value,q('#category-title')?.value.trim());
    if(action==='prompter-toggle')return prompter.running?stopPrompter():startPrompter();
    if(action==='prompter-reset')return resetPrompter();
-   if(action==='record-start')return startPrompter();
    if(action==='record-stop'||action==='modal-close'||action==='record-save')return stopPrompter();
-   if(action==='record-retry')return resetPrompter();
   }catch(err){notice(err.message,true);console.error(err)}
  });
  document.addEventListener('input',e=>{
@@ -225,6 +221,7 @@
   const el=e.target;
   if(el.id==='library-stage'){filters.stage=el.value;refreshGrid();return}
   if(el.id==='library-field'){filters.field=el.value;filters.value='';render();return}
+  if(el.id==='library-from'||el.id==='library-to'){filters[el.id.slice(8)]=el.value;refreshGrid();return}
   if(el.id==='library-value'){filters.value=el.value;refreshGrid();return}
   if(el.id==='category-field'){categoryModal({field:el.value});return}
   // La ficha se guarda sola al salir de cada campo.
@@ -233,5 +230,5 @@
  // Al mover el texto a mano, el desplazamiento automático continúa desde ahí.
  document.addEventListener('scroll',e=>{if(e.target?.id==='prompter-text'&&!prompter.running)prompter.position=e.target.scrollTop},true);
 
- window.Factory={home,weeksPage,recordCardPage,mountPrompter,stopPrompter,openRecordCard,filters};
+ window.Factory={home,weeksPage,recordCardPage,mountPrompter,startPrompter,stopPrompter,resetPrompter,openRecordCard,saveCard,filters};
 })();

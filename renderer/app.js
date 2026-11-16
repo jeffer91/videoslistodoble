@@ -1,6 +1,6 @@
 'use strict';
 const $=s=>document.querySelector(s);
-const state={page:'home',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},templates:[],globalAssets:[],globalTab:'backgrounds',projectFilter:'all',status:'',progress:0,recordStream:null,recordCapture:null,recordTimer:null,recorder:null,recordParts:[],recordDraft:null,recordDraftUrl:null,recordFormat:'square',recordStartAt:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},waveErrors:{},videoDurations:{},showSafe:false,previewIndex:-1,previewUrls:{},previewErrors:{},previewTimelines:{},previewPending:{},reviewKind:'short',reviewInfo:null,reviewBusy:false,reviewError:'',reviewOutput:null};
+const state={page:'dashboard',projects:[],weeks:[],project:null,week:null,scene:'hook',orientation:'short',settings:{},templates:[],globalAssets:[],globalTab:'backgrounds',projectFilter:'all',status:'',progress:0,silencesOpen:false,editorPanel:'audio',cutZoom:1,cutSelection:{start:0,end:1},cutMode:'both',cutUndo:[],cutRedo:[],playSelectionOnly:false,recTarget:null,editingWeekId:null,waveforms:{},waveErrors:{},videoDurations:{},showSafe:false,previewIndex:-1,previewUrls:{},previewErrors:{},previewTimelines:{},previewPending:{},reviewKind:'short',reviewInfo:null,reviewBusy:false,reviewError:'',reviewOutput:null,reviewRendered:null,readiness:null};
 const names={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
 const order=['hook','body','closing'];
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9,7 +9,13 @@ const value=(a,k,f)=>a?.[k]??f;
 const fmt=s=>{const n=Number(s)||0;return Math.floor(n/60)+':'+String(Math.floor(n%60)).padStart(2,'0')};
 async function api(key,payload){const r=await window.studio.call(key,payload||{});if(!r.ok)throw Error(r.error||'Error desconocido');return r.data}
 function notice(msg,error=false){const el=$('#toast');el.textContent=msg;el.hidden=false;el.classList.toggle('error',error);clearTimeout(notice.timer);notice.timer=setTimeout(()=>el.hidden=true,6500)}
-async function loadLibrary(){const [projects,weeks,templates,globalAssets]=await Promise.all([api('projects:list'),api('weekly:list'),api('templates:list'),api('global:list')]);state.projects=projects;state.weeks=weeks;state.templates=templates;state.globalAssets=globalAssets}
+async function loadLibrary(){
+ const [projects,weeks,templates,globalAssets,readiness]=await Promise.all([
+  api('projects:list'),api('weekly:list'),api('templates:list'),api('global:list'),
+  StudioWorkflow.flow('home').catch(()=>null)
+ ]);
+ Object.assign(state,{projects,weeks,templates,globalAssets,readiness});
+}
 function titlebar(title,description,buttons=''){return '<div class="topbar"><div><h1>'+esc(title)+'</h1><p>'+esc(description||'')+'</p></div><div class="row wrap">'+buttons+'</div></div>'}
 function btn(action,label,cls='',attrs=''){return '<button data-action="'+action+'" class="'+cls+'" '+attrs+'>'+label+'</button>'}
 function projectTile(p){return '<article class="card" data-action="open-project" data-id="'+esc(p.id)+'"><div class="row between"><span class="pill">'+(p.status==='exported'?'Short exportado':p.status==='auxiliary'?'Complementario':'En edición')+'</span><span class="muted mini">'+new Date(p.updatedAt).toLocaleDateString('es-EC')+'</span></div><h3>'+esc(p.title)+'</h3><div class="row between"><small>'+(p.exports||[]).length+' exportaciones · '+(p.usedBy||[]).length+' compilaciones</small><strong>Editar →</strong></div></article>'}
@@ -264,7 +270,7 @@ function sceneView(){
  const approved=order.every(k=>p.scenes[k].approved);
  const open=k=>state.editorPanel===k?' open':'';
  const details=(key,summary,content)=>'<details name="scene-tool" data-tool="'+key+'" class="panel panel-fold scene-tool"'+open(key)+'><summary>'+summary+'</summary>'+content+'</details>';
- const recording= '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+'</div></div>'+
+ const recording= '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+btn('record-recovery','Recuperar toma','secondary')+'</div></div>'+
  '<div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
  '<div class="two"><div class="field"><label>Cifra (opcional)</label><input maxlength="18" data-field="number" value="'+esc(s.number||'')+'"></div><div class="field"><label>Protagonista (opcional)</label><input maxlength="50" data-field="name" value="'+esc(s.name||'')+'"></div></div>'+
  '<div class="field"><label>Fondo de '+names[state.scene]+' ('+(wide?'16:9':'9:16')+')</label><div class="row template-project-choice">'+(currentBackground?'<img src="'+templateUrl(currentBackground)+'" alt="">':'<div class="template-empty">Sin fondo</div>')+'<div class="template-choice-info"><strong>'+esc(currentBackground?.name||'Fondo desenfocado')+'</strong><small>'+(currentBackground?'Biblioteca de fondos':'Fondo automático')+'</small></div>'+btn('choose-template','Cambiar fondo','secondary')+'</div></div>'+
@@ -300,14 +306,14 @@ function globalLibraryPage(){
  const current=state.project?'<span class="pill">Proyecto conectado: '+esc(state.project.title)+'</span>':'<span class="muted mini">Abre un proyecto para copiar recursos directamente.</span>';
  const mediaControls='<div class="row wrap">'+btn('global-import','＋ Importar fotos o clips','secondary')+btn('global-paste','▣ Pegar imagen','outline')+'</div>';
  const cards=state.globalAssets.length?'<div class="library-grid">'+state.globalAssets.map(item=>'<article class="library-card">'+
-  (item.type==='image'?'<img loading="lazy" src="'+globalMediaUrl(item)+'" alt="'+esc(item.name)+'">':'<div class="library-video">▣ Video</div>')+
-  '<strong title="'+esc(item.name)+'">'+esc(item.name)+'</strong><small>'+esc(item.type==='image'?'Imagen compartida':'Video compartido')+'</small>'+
+  (item.type==='image'?'<img loading="lazy" src="'+globalMediaUrl(item)+'" alt="'+esc(item.name)+'">':'<div class="library-video">'+(item.type==='audio'?'♫ Audio':'▣ Video')+'</div>')+
+  '<strong title="'+esc(item.name)+'">'+esc(item.name)+'</strong><small>'+esc(item.type==='image'?'Imagen compartida':item.type==='audio'?'Audio compartido':'Video compartido')+'</small>'+
   '<div class="row wrap">'+(state.project?btn('global-copy-project','Copiar al proyecto','','data-id="'+item.id+'"'):'')+
   btn('global-rename','Renombrar','secondary','data-id="'+item.id+'"')+btn('global-delete','Eliminar','danger','data-id="'+item.id+'"')+'</div></article>').join('')+'</div>':'<div class="empty">No hay fotos ni clips compartidos. Importa tus primeros recursos.</div>';
  return titlebar('Biblioteca general','Fondos y medios disponibles para todos tus proyectos')+
   '<div class="panel"><div class="row wrap">'+buttons+'</div><p class="muted mini">Los fondos y medios se guardan en Recursos del disco D; los proyectos mantienen sus propios originales.</p>'+current+'</div>'+
   (tab==='backgrounds'?'<div class="panel"><h2>Fondos reutilizables</h2>'+templateGallery('short')+templateGallery('wide')+'</div>':
-   '<div class="panel"><div class="row between"><h2>Fotografías y videos compartidos</h2>'+mediaControls+'</div>'+cards+'</div>');
+   '<div class="panel"><div class="row between"><h2>Fotos, videos y audio compartido</h2>'+mediaControls+'</div>'+cards+'</div>');
 }
 function assetUsedInProject(project,item){
  return order.flatMap(key=>{
@@ -321,8 +327,8 @@ function assetUsedInProject(project,item){
 }
 function projectLibraryPage(){
  const p=state.project;if(!p)return titlebar('Biblioteca del proyecto','Abre un proyecto para acceder a sus recursos')+btn('home','Mis proyectos','secondary');
- const filters=['all','image','video'];
- const tabs=filters.map(k=>btn('project-filter',({all:'Todos',image:'Fotos',video:'Videos'}[k]),state.projectFilter===k?'active':'secondary','data-type="'+k+'"')).join('');
+ const filters=['all','image','video','audio'];
+ const tabs=filters.map(k=>btn('project-filter',({all:'Todos',image:'Fotos',video:'Videos',audio:'Audio'}[k]),state.projectFilter===k?'active':'secondary','data-type="'+k+'"')).join('');
  const items=p.assets.filter(a=>state.projectFilter==='all'||a.type===state.projectFilter);
  const cards=items.length?'<div class="library-grid">'+items.map(a=>{
   const usage=assetUsedInProject(p,a),isVideo=a.type==='video';
@@ -331,7 +337,7 @@ function projectLibraryPage(){
    '<small>'+(usage.length?esc(usage.join(' · ')):'Sin asignar · disponible para reutilizar')+'</small>'+
    '<div class="row wrap">'+(a.type==='image'?btn('project-asset-background','Fondo '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
    ((isVideo||a.type==='image')&&state.scene!=='closing'?btn('project-asset-attach','Apoyo '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
-   (isVideo?btn('project-asset-voice','Narración '+names[state.scene],'secondary','data-id="'+a.id+'"'):'')+
+   (isVideo?btn('project-asset-voice','Narración '+names[state.scene],'secondary','data-id="'+a.id+'"')+btn('project-square','Convertir a cuadrado','secondary','data-id="'+a.id+'"'):'')+
    btn('project-asset-publish','Compartir en general','secondary','data-id="'+a.id+'"')+
    btn('project-asset-rename','Renombrar','secondary','data-id="'+a.id+'"')+
    btn('project-asset-delete','Eliminar','danger','data-id="'+a.id+'"')+'</div></article>';
@@ -471,11 +477,13 @@ function reviewPage(){
  '<input type="range" class="review-seekbar" id="review-seekbar" min="0" max="'+duration+'" step=".05" value="0" aria-label="Avanzar en el montaje">'+
  '<div class="row between review-controls"><span id="review-clock">0:00 / '+fmt(duration)+'</span><small>Gancho · Desarrollo · Cierre</small></div>'+
  timeline+warnings+(busy?'<div class="review-working"><span class="review-spinner"></span><div><strong>Exportando MP4</strong>'+
- '<small id="review-progress-msg">Preparando el montaje final…</small></div>'+btn('cancel-render','Cancelar','danger')+'</div>':'')+
+ '<small id="review-progress-msg">Preparando el montaje final…</small><progress id="review-progress" max="100" value="0" aria-label="Avance de render"></progress></div>'+btn('cancel-render','Cancelar','danger')+'</div>':'')+
  '<div class="row wrap review-actions">'+btn('review-export','Exportar MP4',m?.canExport&&!busy?'':'secondary',
- !m?.canExport||busy?'disabled':'')+'</div>'+
+ !m?.canExport||busy?'disabled':'')+btn('review-render-preview','Renderizar vista previa','secondary',m?.complete&&!busy?'':'disabled')+'</div>'+
+ (state.reviewRendered&&state.reviewRendered.hash===m?.hash?'<video class="delivery-video" controls src="'+esc(state.reviewRendered.url)+'"></video>':'')+
  (state.reviewOutput?'<div class="review-exported"><strong>MP4 exportado</strong><small>'+esc(state.reviewOutput.file)+'</small>'+
- btn('review-open-output','Abrir archivo','secondary')+'</div>':'')+
+ btn('review-open-output','Abrir archivo','secondary')+(state.reviewOutput.target?
+  btn('delivery-open','Revisar MP4 y preparar publicación','secondary','data-kind="'+state.reviewOutput.target.kind+'" data-id="'+esc(state.reviewOutput.target.id)+'" data-file="'+esc(state.reviewOutput.target.file)+'"'):'')+'</div>':'')+
  '<p class="muted mini">Vista previa sin MP4. La exportación aplica velocidad, transiciones, mezcla y sonido normalizado.</p></section>'+
  '<section class="panel"><h2>Escenas y correcciones</h2><p class="muted mini">Selecciona una escena para verla o regresar a modificarla.</p>'+
  '<div class="review-chapters">'+cards+'</div>'+visualBar+masterControls+transitionSettings+
@@ -486,7 +494,7 @@ async function openReview(kind){
  if(kind==='short'){if(!state.project)throw Error('Abre un proyecto');await saveNow()}
  else if(!state.week)throw Error('Abre una compilación');
  const id=kind==='short'?state.project.id:state.week.id;
- state.reviewKind=kind;state.reviewInfo=null;state.reviewOutput=null;
+ state.reviewKind=kind;state.reviewInfo=null;state.reviewOutput=null;state.reviewRendered=null;
  state.reviewError='';state.reviewBusy=false;state.page='review';
  livePause();render();
  try{
@@ -500,6 +508,14 @@ async function buildReview(){
  const kind=state.reviewKind,id=kind==='short'?state.project.id:state.week.id;
  state.reviewInfo=await api('review:status',{kind,id});
  render();await livePrepare();
+}
+async function renderReviewPreview(){
+ if(state.reviewBusy||!state.reviewInfo?.complete)throw Error('Completa las escenas para renderizar la vista previa');
+ const {kind,id,hash}=state.reviewInfo;
+ livePause();state.reviewBusy=true;state.reviewError='';render();
+ try{state.reviewRendered={hash,...await api('review:rendered',{kind,id,hash})}}
+ catch(error){state.reviewError=error.message}
+ finally{state.reviewBusy=false;if(state.page==='review'){render();await livePrepare()}}
 }
 async function exportReview(){
  if(state.reviewBusy||!state.reviewInfo?.canExport)throw Error('Aprueba las escenas antes de exportar');
@@ -521,36 +537,36 @@ function settingsPage(){
  '<div class="panel"><h2>Biblioteca y dispositivos</h2><p>Los originales y exportaciones se guardan en <code>D:\\11-Records-Studio</code>.</p>'+
  '<div class="field"><label>Umbral de detección de silencios (segundos)</label><input type="number" id="silenceThreshold" min=".5" max="5" step=".1" value="'+(s.silenceThreshold||.5)+'"></div>'+
  '<label class="row"><input type="checkbox" id="autoMicrocuts" '+(s.autoMicrocuts?'checked':'')+'> Montaje de apoyo con microcortes opcionales</label>'+
+ '<label class="field">Estilo predeterminado<select id="default-style">'+[['historic','Histórico'],['numbers','Cifras'],['legends','Leyendas']].map(([value,label])=>'<option value="'+value+'" '+((s.defaultStyle||'historic')===value?'selected':'')+'>'+label+'</option>').join('')+'</select></label>'+
  '<div class="divider"></div><h3>Logo del canal</h3>'+
  '<div class="row wrap"><span class="muted">'+(s.logo?esc(s.logo):'Todavía no se ha importado el logo')+'</span>'+btn('import-logo','Seleccionar logo','secondary')+'</div>'+
- '<div class="row" style="margin-top:15px">'+btn('save-settings','Guardar preferencias')+'</div></div>';
+ '<div class="row" style="margin-top:15px">'+btn('save-settings','Guardar preferencias')+'</div></div>'+StudioWorkflow.settingsExtension();
 }
 async function weeklyDuration(){
  const w=state.week;if(!w)return 0;
- let secs=Math.max(0,w.projectIds.length-1);const entries=[w.intro,w.closing,...w.projectIds.map(id=>({projectId:id,scene:'body'}))];
- for(const entry of entries){if(!entry)continue;try{const p=await api('projects:get',{id:entry.projectId}),s=p.scenes[entry.scene];if(s?.video){const info=await api('media:metadata',{projectId:p.id,assetId:s.video});const raw=info.duration;secs+=Math.max(0,(s.end>s.start?s.end:raw)-(s.start||0))-(s.silences||[]).filter(g=>g.remove).reduce((sum,g)=>sum+Math.max(0,Math.min(s.end||raw,g.end)-Math.max(s.start||0,g.start)),0)}}catch(e){}}
- return Math.max(0,secs);
+ try{return (await api('review:status',{kind:'week',id:w.id})).duration}catch{return 0}
 }
 function weeklyPage(){
  const w=state.week,ids=w.projectIds,all=state.projects.filter(p=>p.status==='exported');
  const mins=state.weekLength||0;
- return titlebar(w.title,(w.kind==='category'?'Video por categoría · '+(w.filter?.value||''):'Compilación semanal')+' · 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('open-week-review','▶ Revisar y exportar MP4'))+
+ return titlebar(w.title,(w.kind==='category'?'Video por categoría · '+(w.filter?.value||''):'Compilación semanal')+' · 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('open-week-review','▶ Revisar y exportar MP4')+btn('studio-week-import','Importar plan','secondary'))+
  '<div class="stagegrid"><section><div class="panel"><h2>Secuencia del video</h2><div class="list">'+
  '<div class="asset"><span>Introducción exclusiva</span>'+btn('edit-week-intro',w.intro?'Editar / grabar':'Preparar introducción','secondary')+'</div>'+
  ids.map((id,i)=>{const p=state.projects.find(x=>x.id===id);return '<div class="asset"><span><strong>'+esc(p?.title||'Récord')+'</strong> <small>· Desarrollo · título original</small></span><div class="row">'+btn('move-record','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-record','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-record','×','danger','data-id="'+id+'"')+'</div></div>'}).join('')+
  '<div class="asset"><span>Cierre exclusivo</span>'+btn('edit-week-closing',w.closing?'Editar / grabar':'Preparar cierre','secondary')+'</div></div>'+
+ '<div class="field"><label for="week-transition">Transición entre récords</label><select id="week-transition"><option value="title">Cartela con el título</option><option value="cut" '+(w.transition==='cut'?'selected':'')+'>Corte directo</option></select></div>'+
  '<div class="divider"></div><h3>Añadir récord exportado</h3><select id="add-record-select"><option value="">Elige un proyecto…</option>'+all.filter(p=>!ids.includes(p.id)).map(p=>'<option value="'+p.id+'">'+esc(p.title)+'</option>').join('')+'</select> '+btn('add-record','Agregar','secondary')+'</div></section>'+
  '<section><div class="panel"><h2>Duración estimada</h2><h1>'+fmt(mins)+'</h1><div class="progressbar"><div style="width:'+Math.min(100,mins/480*100)+'%"></div></div>'+(mins<480?'<div class="warning">Faltan aproximadamente '+fmt(480-mins)+' para llegar al objetivo de 8 minutos. Añade desarrollos o contenido antes de exportar.</div>':'<div class="success">La compilación alcanza el mínimo de 8 minutos.</div>')+
  '<p class="muted mini">Incluye cada desarrollo una sola vez, sin sus ganchos ni cierres. Una transición automática breve separa los récords. Las imágenes se recomponen desde originales para 16:9.</p>'+
  '<p class="muted mini">Después de exportar una compilación semanal, sus récords dejan de proponerse para la siguiente semanal, pero siguen disponibles para videos por categoría. Puedes editar sus fuentes y regenerar esta compilación.</p></div></section></div>'+
- (state.status?'<div class="panel">'+esc(state.status)+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
+ StudioWorkflow.weekDeliveries(w)+(state.status?'<div class="panel">'+esc(state.status)+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
 }
 function render(){
  const el=$('#view');const page=state.page;
  const waveLeft=$('#edit-wave-scroll')?.scrollLeft||0;
  const oldVideo=$('#speaker-preview'),oldAsset=oldVideo?.dataset.asset;
  const wasPlaying=Boolean(oldVideo&&!oldVideo.paused&&!oldVideo.ended),oldTime=Number(oldVideo?.currentTime)||0;
- el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='record-card'&&window.Factory?Factory.recordCardPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':home();
+ el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='record-card'&&window.Factory?Factory.recordCardPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':(StudioWorkflow.page(page)||home());
  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.action===(page==='project'?'home':page==='week'?'weeks':page)));
  const sidebar=$('#sidebar-project'),title=$('#sidebar-project-title');
  if(sidebar)sidebar.hidden=!state.project;
@@ -742,153 +758,6 @@ async function detect(){const p=state.project,s=p.scenes[state.scene];if(!s.vide
  notice('Analizando pausas del audio…');
  const data=await api('media:analyze',{projectId:p.id,assetId:s.video,threshold:state.settings.silenceThreshold||.5});
  s.silences=data.map(d=>({...d,remove:true}));s.approved=false;queueSave();render();notice(data.length+' silencios detectados (rojo = borrar; gris = conservar)')}
-function releaseCamera(){
- if(state.recordTimer){clearInterval(state.recordTimer);state.recordTimer=null}
- if(state.recordCapture){state.recordCapture.getTracks().forEach(t=>t.stop());state.recordCapture=null}
- if(state.recordStream){state.recordStream.getTracks().forEach(t=>t.stop());state.recordStream=null}
- const v=$('#camera-preview');if(v){v.pause();v.srcObject=null}
-}
-function discardRecording(){
- state.recordDraft=null;state.recordParts=[];
- if(state.recordDraftUrl){URL.revokeObjectURL(state.recordDraftUrl);state.recordDraftUrl=null}
- const v=$('#record-review');if(v){v.pause();v.removeAttribute('src');v.load()}
-}
-function closeRecorder(){
- if(state.recorder&&state.recorder.state!=='inactive')state.recorder.stop();
- state.recorder=null;releaseCamera();discardRecording();
- const root=$('#modal-root');root.hidden=true;root.innerHTML='';
-}
-function captureDimensions(){
- // Si la cámara entrega 1080 líneas se graba a 1080; con cámaras de 720 no se inventa resolución.
- const full=(state.recordStream?.getVideoTracks()[0]?.getSettings().height||0)>=1080;
- return state.recordFormat==='portrait'?[720,1280]:state.recordFormat==='wide'?(full?[1920,1080]:[1280,720]):(full?[1080,1080]:[720,720]);
-}
-function selectRecordFormat(format){
- if(!['square','portrait','wide'].includes(format)||state.recorder?.state==='recording')return;
- state.recordFormat=format;
- const el=$('#record-stage');if(el)el.className='record-stage format-'+format;
- document.querySelectorAll('[data-action="record-format"]').forEach(b=>b.classList.toggle('active',b.dataset.format===format));
- const [w,h]=captureDimensions(),hint=$('#record-resolution');
- if(hint)hint.textContent=w+' × '+h+' px · 30 FPS';
-}
-async function openCamera(){
- const video=$('#camera-preview');if(!video)return;
- const camera=$('#camera-choice')?.value||state.settings.defaultCamera||undefined;
- const mic=$('#mic-choice')?.value||state.settings.defaultMic||undefined;
- releaseCamera();
- const stream=await navigator.mediaDevices.getUserMedia({
-  video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30},...(camera?{deviceId:{ideal:camera}}:{})},
-  audio:mic?{deviceId:{ideal:mic}}:true
- });
- if(!$('#camera-preview')){stream.getTracks().forEach(t=>t.stop());return}
- state.recordStream=stream;video.srcObject=stream;await video.play();
- selectRecordFormat(state.recordFormat);
- const devices=await navigator.mediaDevices.enumerateDevices().catch(()=>[]);
- for(const [id,kind,track] of [['camera-choice','videoinput',stream.getVideoTracks()[0]],['mic-choice','audioinput',stream.getAudioTracks()[0]]]){
-  const select=$('#'+id);if(!select)continue;
-  const list=devices.filter(d=>d.kind===kind),selected=track?.getSettings().deviceId||'';
-  select.innerHTML=list.map((d,k)=>'<option value="'+esc(d.deviceId)+'" '+(selected===d.deviceId?'selected':'')+'>'+esc(d.label||((kind==='videoinput'?'Cámara ':'Micrófono ')+(k+1)))+'</option>').join('');
- }
-}
-async function manageRecording(){
- if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')throw Error('La cámara o el grabador no están disponibles en este equipo');
- closeRecorder();state.recordFormat='square';
- const modal=$('#modal-root');modal.hidden=false;
- modal.innerHTML='<div class="modalback"><div class="modal recorder-modal">'+
- '<div class="row between"><div><h2>Grabar presentador</h2><p class="muted mini">La proporción elegida se guarda en el video real.</p></div>'+btn('modal-close','× Cerrar','secondary')+'</div>'+
- '<div class="two"><div class="field"><label>Cámara</label><select id="camera-choice"></select></div><div class="field"><label>Micrófono</label><select id="mic-choice"></select></div></div>'+
- '<div class="record-format-options">'+
- '<button class="record-format active" data-action="record-format" data-format="square">□ 1:1 Cuadrado</button>'+
- '<button class="record-format" data-action="record-format" data-format="portrait">▯ 9:16 Vertical</button>'+
- '<button class="record-format" data-action="record-format" data-format="wide">▭ 16:9 Horizontal</button></div>'+
- '<div class="record-stage format-square" id="record-stage"><video id="camera-preview" autoplay muted playsinline></video><video id="record-review" controls playsinline hidden></video><span id="record-guide">Encuadre de cámara</span></div>'+
- '<div class="row between recorder-meta"><span id="record-resolution">720 × 720 px · 30 FPS</span><strong id="record-clock">0:00</strong></div>'+
- '<div class="row wrap recorder-actions" id="record-live-actions">'+btn('record-start','● Iniciar grabación')+btn('record-stop','■ Detener','danger','disabled')+'</div>'+
- '<div class="row wrap recorder-actions" id="record-review-actions" hidden>'+btn('record-retry','↻ Repetir','secondary')+btn('record-save','✓ Guardar grabación')+'</div>'+
- '</div></div>';
- if(window.Factory)Factory.mountPrompter();
- try{await openCamera()}catch(e){closeRecorder();throw Error('No se pudo activar cámara y micrófono: '+e.message)}
-}
-async function startRecording(){
- if(state.recorder?.state==='recording')return;
- if(!state.recordStream)await openCamera();
- const camera=$('#camera-preview');
- if(!camera?.videoWidth||!camera.videoHeight)throw Error('La cámara todavía no está lista');
- const [width,height]=captureDimensions(),canvas=document.createElement('canvas');
- canvas.width=width;canvas.height=height;
- const ctx=canvas.getContext('2d',{alpha:false});
- if(!ctx)throw Error('No se pudo preparar la captura');
- state.recordStartAt=Date.now();
- const draw=()=>{
-  if(camera.readyState<2)return;
-  const sw=camera.videoWidth,sh=camera.videoHeight,target=width/height,actual=sw/sh;
-  const cw=actual>target?sh*target:sw,ch=actual>target?sh:sw/target;
-  ctx.drawImage(camera,(sw-cw)/2,(sh-ch)/2,cw,ch,0,0,width,height);
-  const clock=$('#record-clock');if(clock)clock.textContent=fmt((Date.now()-state.recordStartAt)/1000);
- };
- draw();
- const videoStream=canvas.captureStream(30);
- state.recordCapture=new MediaStream([...videoStream.getVideoTracks(),...state.recordStream.getAudioTracks()]);
- const mime=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'].find(x=>MediaRecorder.isTypeSupported(x));
- if(!mime){releaseCamera();throw Error('No se encontró un codificador de video compatible')}
- try{
-  state.recordParts=[];
-  state.recorder=new MediaRecorder(state.recordCapture,{mimeType:mime,videoBitsPerSecond:width*height>=1080*1080?6000000:4000000,audioBitsPerSecond:128000});
-  state.recorder.ondataavailable=e=>{if(e.data.size)state.recordParts.push(e.data)};
-  state.recorder.start(1000);
-  state.recordTimer=setInterval(draw,1000/30);
- }catch(e){state.recorder=null;releaseCamera();throw e}
- const start=$('[data-action="record-start"]'),stop=$('[data-action="record-stop"]');
- if(start)start.disabled=true;if(stop)stop.disabled=false;
- document.querySelectorAll('[data-action="record-format"],#camera-choice,#mic-choice').forEach(el=>el.disabled=true);
- state.settings.defaultCamera=$('#camera-choice')?.value||'';
- state.settings.defaultMic=$('#mic-choice')?.value||'';
- try{await api('settings:set',state.settings)}catch(e){console.warn('No se guardó el dispositivo predeterminado',e)}
-}
-async function stopRecording(){
- const rec=state.recorder;if(!rec||rec.state==='inactive')return;
- await new Promise((resolve,reject)=>{
-  rec.addEventListener('stop',resolve,{once:true});
-  rec.addEventListener('error',e=>reject(e.error||Error('Falló la grabación')),{once:true});
-  rec.stop();
- });
- state.recorder=null;releaseCamera();
- const blob=new Blob(state.recordParts,{type:'video/webm'});
- if(blob.size<100)throw Error('La grabación quedó vacía');
- state.recordDraft=blob;
- state.recordDraftUrl=URL.createObjectURL(blob);
- const live=$('#record-live-actions'),actions=$('#record-review-actions'),camera=$('#camera-preview'),review=$('#record-review');
- if(live)live.hidden=true;if(actions)actions.hidden=false;if(camera)camera.hidden=true;
- if(review){review.hidden=false;review.src=state.recordDraftUrl;review.load()}
- const guide=$('#record-guide');if(guide)guide.textContent='Revisa antes de guardar';
- notice('Grabación lista para revisar');
-}
-async function retryRecording(){
- discardRecording();
- const live=$('#record-live-actions'),actions=$('#record-review-actions'),camera=$('#camera-preview'),review=$('#record-review');
- if(live)live.hidden=false;if(actions)actions.hidden=true;if(camera)camera.hidden=false;if(review)review.hidden=true;
- const clock=$('#record-clock');if(clock)clock.textContent='0:00';
- const guide=$('#record-guide');if(guide)guide.textContent='Encuadre de cámara';
- const start=$('[data-action="record-start"]'),stop=$('[data-action="record-stop"]');
- if(start)start.disabled=false;if(stop)stop.disabled=true;
- document.querySelectorAll('[data-action="record-format"],#camera-choice,#mic-choice').forEach(el=>el.disabled=false);
- await openCamera();
-}
-async function saveRecordedVideo(){
- if(!state.recordDraft)throw Error('No hay grabación pendiente');
- const data=await new Promise((resolve,reject)=>{
-  const reader=new FileReader();
-  reader.onload=()=>resolve(String(reader.result).split(',')[1]);
-  reader.onerror=reject;reader.readAsDataURL(state.recordDraft);
- });
- const type={square:'cuadrada 1-1',portrait:'vertical 9-16',wide:'horizontal 16-9'}[state.recordFormat];
- const item=await api('assets:record',{projectId:state.project.id,name:'Grabación '+type+' '+new Date().toLocaleString('es-EC'),data});
- state.project=await api('projects:get',{id:state.project.id});
- const s=state.project.scenes[state.scene],info=await api('media:metadata',{projectId:state.project.id,assetId:item.id});
- s.video=item.id;s.start=0;s.end=Math.min(info.duration,180);s.silences=[];s.cuts=[];s.approved=false;resetCutEditor();
- await saveNow();
- closeRecorder();render();refreshWaveform();prepareScenePreview();notice('Grabación guardada en disco D · '+type);
-}
 async function exportNow(kind){const key=kind==='short'?'render:short':'render:weekly';state.status='Preparando exportación local con FFmpeg…';state.progress=3;render();try{
  const result=await api(key,kind==='short'?{projectId:state.project.id}:{id:state.week.id});
  state.status='';notice('Video exportado: '+result.file);await loadLibrary();if(kind==='short')await openProject(state.project.id,state.scene);else await openWeek(state.week.id);
@@ -998,7 +867,7 @@ document.addEventListener('error',e=>{
 document.addEventListener('click',async e=>{
  const b=e.target.closest('[data-action]');if(!b)return;
  const action=b.dataset.action;try{
-  if(['home','weeks','settings','legacy','global-library','project-library'].includes(action))return await navigate(action);
+  if(['home','weeks','legacy','global-library','project-library'].includes(action))return await navigate(action);
   if(action==='open-current-project'){if(!state.project)throw Error('Abre un proyecto');return openProject(state.project.id,state.scene)}
   if(action==='global-tab'){state.globalTab=b.dataset.tab;return render()}
   if(action==='project-filter'){state.projectFilter=b.dataset.type;return render()}
@@ -1101,6 +970,7 @@ document.addEventListener('click',async e=>{
    await saveNow();state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
    render();await livePrepare();notice('Transiciones actualizadas');return;
   }
+  if(action==='review-render-preview')return await renderReviewPreview();
   if(action==='review-open-output'){
    if(!state.reviewOutput?.file)throw Error('No existe un MP4 exportado');
    return await api('system:open-path',{path:state.reviewOutput.file});
@@ -1220,15 +1090,16 @@ document.addEventListener('click',async e=>{
   if(action==='stop-preview'){const v=$('#speaker-preview'),clip=$('#support-video');state.playSelectionOnly=false;if(v){v.pause();v.currentTime=Number(state.project.scenes[state.scene].start)||0;updatePreviewEdits()}if(clip)clip.pause();return}
   if(action==='export-short')return await openReview('short')
   if(action==='cancel-render'){await api('render:cancel');return notice('Cancelando proceso…')}
-  if(action==='start-recorder')return await manageRecording();
-  if(action==='record-format')return selectRecordFormat(b.dataset.format);
-  if(action==='record-start')return await startRecording();
-  if(action==='record-stop')return await stopRecording();
-  if(action==='record-retry')return await retryRecording();
-  if(action==='record-save')return await saveRecordedVideo();
-  if(action==='modal-close'){closeRecorder();return}
+  if(action==='start-recorder')return await Recording.open();
+  if(action==='record-start')return await Recording.start();
+  if(action==='record-pause')return Recording.pause();
+  if(action==='record-stop')return await Recording.stop();
+  if(action==='record-retry')return await Recording.retry();
+  if(action==='record-save'||action==='record-keep-recovered')return await Recording.keep(b.dataset.id);
+  if(action==='record-recovery')return await Recording.recovery();
+  if(action==='modal-close')return await Recording.close();
   if(action==='import-logo'){await api('assets:import-logo');state.settings=await api('settings:get');return render()}
-  if(action==='save-settings'){state.settings.silenceThreshold=Number($('#silenceThreshold').value)||.5;state.settings.autoMicrocuts=$('#autoMicrocuts').checked;state.settings=await api('settings:set',state.settings);return notice('Preferencias guardadas')}
+  if(action==='save-settings'){state.settings.defaultStyle=$('#default-style').value;state.settings.silenceThreshold=Number($('#silenceThreshold').value)||.5;state.settings.autoMicrocuts=$('#autoMicrocuts').checked;state.settings=await api('settings:set',state.settings);return notice('Preferencias guardadas')}
   if(action==='edit-week-intro'||action==='edit-week-closing'){
    state.editingWeekId=state.week.id;
    const entry=action==='edit-week-intro'?state.week.intro:state.week.closing;
@@ -1254,6 +1125,11 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',async e=>{
+ if(e.target.id==='week-transition'&&state.page==='week'){
+  try{await api('weekly:save',{id:state.week.id,transition:e.target.value});await openWeek(state.week.id)}
+  catch(error){notice(error.message,true)}
+  return;
+ }
  if(e.target?.dataset?.master!==undefined&&state.page==='review'&&state.reviewKind==='short'){
   try{
    const field=e.target.dataset.master,p=state.project;
@@ -1279,7 +1155,7 @@ document.addEventListener('change',async e=>{
   return;
  }
  if(e.target?.id==='review-seekbar'&&state.page==='review')return liveSeek(Number(e.target.value),live.playing);
- if(e.target.id==='camera-choice'||e.target.id==='mic-choice'){if(!state.recorder)try{await openCamera()}catch(err){notice(err.message,true)}return}
+ if(e.target.id==='camera-choice'||e.target.id==='mic-choice'){if(!Recording.busy())try{await Recording.openCamera()}catch(err){notice(err.message,true)}return}
  const p=state.project;if(!p||state.page!=='project')return;
  const s=p.scenes[state.scene],el=e.target;
  if(el.dataset.cutMarker){updateCutMarker(el.dataset.cutMarker,el.value);return}
@@ -1359,7 +1235,13 @@ document.addEventListener('input',e=>{
 });
 window.studio.onProgress(detail=>{
  state.status=detail.message||('Procesando segmentos: '+(detail.done||0));
- if(state.page==='review'){const el=$('#review-progress-msg');if(el)el.textContent=state.status;return}
+ StudioWorkflow.activity(detail.message,detail.percent);
+ if(state.page==='review'){
+  const text=$('#review-progress-msg'),bar=$('#review-progress');
+  if(text)text.textContent=state.status;
+  if(bar&&Number.isFinite(detail.percent))bar.value=detail.percent;
+  return;
+ }
  if(state.page==='project'||state.page==='week'){
   const banner=$('#view .panel:last-child');if(banner&&state.status)banner.dataset.progress=state.status;
  }
