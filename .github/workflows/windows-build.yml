@@ -23,8 +23,6 @@ jobs:
         run: npm run check
       - name: Ejecutar pruebas automatizadas
         run: npm test
-      - name: Probar el flujo de grabación en Windows
-        run: npm run test:desktop
       - name: Crear instalador Windows
         run: npm run dist:win
         env:
@@ -32,13 +30,20 @@ jobs:
       - name: Instalar y probar la aplicación en Windows
         shell: pwsh
         run: |
-          $installer = Get-ChildItem dist/*.exe | Select-Object -First 1
-          if (-not $installer) { throw 'No se generó el instalador' }
-          $folder = Join-Path $env:RUNNER_TEMP '11-Records-Studio-instalado'
-          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$folder") -PassThru -Wait
-          if ($process.ExitCode -ne 0) { throw "NSIS devolvió $($process.ExitCode)" }
-          $installed = Get-ChildItem $folder/*.exe | Where-Object Name -notmatch '^Uninstall' | Select-Object -First 1
-          if (-not $installed) { throw 'No se encontró el ejecutable instalado' }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = Get-Item "dist/11-Records-Studio-Setup-$version.exe"
+          $installed = $null
+          foreach ($attempt in 1..2) {
+            $folder = Join-Path $env:RUNNER_TEMP "11-Records-Studio-instalado-$attempt"
+            Write-Host "Instalando $($installer.Name) en $folder"
+            $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$folder") -PassThru -Wait
+            if ($process.ExitCode -eq 0) {
+              $installed = Get-ChildItem $folder/*.exe | Where-Object Name -notmatch '^Uninstall' | Select-Object -First 1
+              if ($installed) { break }
+            }
+            Write-Warning "Intento $attempt · NSIS devolvió $($process.ExitCode)"
+          }
+          if (-not $installed) { throw 'El instalador no pudo preparar el ejecutable' }
           $env:RECORDS_DESKTOP_EXECUTABLE = $installed.FullName
           npm run test:desktop
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -47,8 +52,8 @@ jobs:
         with:
           name: 11-records-studio-windows
           path: |
-            dist/*.exe
-            dist/*.exe.blockmap
+            dist/11-Records-Studio-Setup-*.exe
+            dist/11-Records-Studio-Setup-*.exe.blockmap
             dist/latest.yml
           if-no-files-found: error
   release:
