@@ -12,7 +12,7 @@ async function run() {
   const executablePath = process.env.RECORDS_DESKTOP_EXECUTABLE;
   const switches = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-gpu'];
   if (process.platform === 'linux' && !process.env.DISPLAY) switches.push('--headless', '--ozone-platform=headless', '--no-sandbox');
-  let app;
+  let app, page;
   try {
     app = await electron.launch({
       executablePath,
@@ -20,7 +20,7 @@ async function run() {
       env: { ...process.env, RECORDS_TEST_ROOT: root },
       timeout: 25000
     });
-    const page = await app.firstWindow();
+    page = await app.firstWindow();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.setDefaultTimeout(15000);
@@ -34,7 +34,10 @@ async function run() {
     await page.locator('#card-script-hook').fill('El momento que marcó la historia de este estadio.');
     await page.locator('#card-script-hook').press('Tab');
     await page.getByRole('button', { name: 'Grabar y editar' }).click();
-    await page.getByRole('button', { name: 'Grabar ahora' }).click();
+    const recordingPanel = page.locator('details[data-tool="recording"]');
+    await recordingPanel.waitFor();
+    if (await recordingPanel.getAttribute('open') === null) await recordingPanel.locator('summary').click();
+    await recordingPanel.getByRole('button', { name: 'Grabar ahora' }).click();
     await page.locator('#microphone-meter').waitFor();
     await page.waitForFunction(() => document.querySelector('#camera-preview')?.videoWidth > 0);
     await page.getByRole('button', { name: 'Iniciar grabación' }).click();
@@ -69,6 +72,16 @@ async function run() {
     await page.getByRole('heading', { name: 'Rendimiento por video' }).waitFor();
     assert.deepEqual(errors, []);
     console.log('Electron verificado: inicio, ideas, ficha, grabación 1080² con audio, pausa, recuperación, edición y pantallas de publicación.');
+  } catch (error) {
+    if (page && !page.isClosed()) {
+      const state = await page.evaluate(() => ({
+        heading: document.querySelector('h1')?.textContent,
+        toast: document.querySelector('#toast')?.textContent,
+        camera: document.querySelector('#camera-preview')?.videoWidth
+      })).catch(() => null);
+      if (state) console.error('Pantalla al fallar:', JSON.stringify(state));
+    }
+    throw error;
   } finally {
     await app?.close();
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 6, retryDelay: 150 });

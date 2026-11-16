@@ -229,3 +229,16 @@ test('la cola conserva autorización, cuenta y huella, y puede registrar métric
   assert.equal(queue.stats()[0].metrics.retention, 55.5);
   assert.equal(fs.existsSync(queue.exportStats()), true);
 });
+
+test('TikTok conserva todos los dígitos del enlace de publicación devuelto como int64', async t => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  global.fetch = async url => {
+    assert.equal(url.pathname, '/v2/post/publish/status/fetch/');
+    return new Response('{"data":{"status":"PUBLISH_COMPLETE","publicaly_available_post_id":[7293497837799632921]}}');
+  };
+  const { publish } = require('../backend/network-clients.cjs');
+  const result = await publish.tiktok({ account: {}, token: 'simulado', remote: { publishId: 'pendiente', username: 'records' } });
+  assert.equal(result.id, '7293497837799632921');
+  assert.equal(result.url, 'https://www.tiktok.com/@records/video/7293497837799632921');
+});

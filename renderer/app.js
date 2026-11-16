@@ -708,7 +708,8 @@ function resetCutEditor(){
  const saved=state.project?.scenes?.[state.scene]?.cutHistory||{};
  state.cutUndo=Array.isArray(saved.undo)?saved.undo.slice(-30):[];
  state.cutRedo=Array.isArray(saved.redo)?saved.redo.slice(-30):[];
- state.playSelectionOnly=false;state.editorPanel='audio';
+ state.playSelectionOnly=false;
+ state.editorPanel=state.project?.scenes[state.scene]?.video?'audio':'recording';
 }
 async function openWeek(id){state.week=await api('weekly:get',{id});state.page='week';state.status='';state.weekLength=0;render();state.weekLength=await weeklyDuration();if(state.page==='week')render()}
 let saving=null;

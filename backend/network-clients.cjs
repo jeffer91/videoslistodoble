@@ -53,7 +53,13 @@ async function request(base, { query, method, token, json, form, headers, upload
     await response.body?.cancel();
     return { status: response.status, headers: response.headers };
   }
-  const data = await response.json().catch(() => null);
+  const data = await response.text().then(text => JSON.parse(text, (_key, value, context) => {
+    // TikTok returns post IDs as int64. Keep the original digits before Number rounds them.
+    if (typeof value === 'number' && !Number.isSafeInteger(value) && /^-?\d+$/.test(context?.source || '')) {
+      return context.source;
+    }
+    return value;
+  })).catch(() => null);
   const apiError = typeof data?.error === 'string' ? data.error : data?.error?.code;
   if (!response.ok || apiError && apiError !== 'ok') {
     const code = /^[a-zA-Z0-9_.-]{1,100}$/.test(String(apiError ?? '')) ? ' · ' + apiError : '';
@@ -65,7 +71,7 @@ async function request(base, { query, method, token, json, form, headers, upload
 }
 
 function numericId(value) {
-  if (!/^\d{1,40}$/.test(String(value))) throw new NetworkError('Identificador de la plataforma inválido');
+  if (typeof value === 'number' && !Number.isSafeInteger(value) || !/^\d{1,40}$/.test(String(value))) throw new NetworkError('Identificador de la plataforma inválido');
   return String(value);
 }
 
