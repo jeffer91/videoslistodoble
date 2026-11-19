@@ -128,7 +128,7 @@ function liveStageHTML(chapter){
  const backdrop=background?'<img id="review-motion-background" class="template-back" src="'+esc(background)+'" alt="">':
   '<div id="review-motion-background" class="fallback-back"></div>';
  const first=(s.media||[]).map(m=>p.assets.find(a=>a.id===m.assetId)).find(a=>a?.type==='image');
- const support=closing?'':'<img id="review-support-image" class="photo" alt="" '+(first?'src="'+url(p,first.id)+'"':'')+' hidden>'+
+ const support=closing&&!s.media?.length?'':'<img id="review-support-image" class="photo" alt="" '+(first?'src="'+url(p,first.id)+'"':'')+' hidden>'+
   '<video id="review-support-video" class="photo" muted playsinline preload="metadata" hidden></video>';
  return '<div class="stage '+(wide?'wide ':'')+(closing?'closing ':'')+'live-stage style-'+esc(p.style||'historic')+'">'+
   backdrop+support+'<div id="review-photo-transition" class="review-photo-transition"></div>'+
@@ -226,7 +226,7 @@ function liveUpdateSupport(){
    clip.hidden=false;
    const wanted=(segment.mediaStart||0)+(video.currentTime-segment.start)*(segment.speed||1);
    if(Math.abs(clip.currentTime-wanted)>.45)try{clip.currentTime=wanted}catch(_){}
-   clip.playbackRate=(segment.speed||1)*(ch.playbackSpeed||1);
+   clip.playbackRate=Math.max(.0625,Math.min(16,(segment.speed||1)*(ch.playbackSpeed||1)));
    if(!video.paused)clip.play().catch(()=>{});else clip.pause();
   }else{
    clip.hidden=true;

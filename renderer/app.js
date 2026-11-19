@@ -25,11 +25,11 @@ function assetLabel(asset){return asset.type==='video'?'▣':asset.type==='image
 function assetPicker(p,onlyVideo){const as=p.assets.filter(a=>onlyVideo?a.type==='video':a.type==='video'||a.type==='image');return as.map(a=>'<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>').join('')}
 function mediaRows(){
  const p=state.project,s=p.scenes[state.scene];
- if(state.scene==='closing')return '<p class="muted mini">El cierre presenta al narrador en primer plano y no necesita recursos de apoyo.</p>';
+ if(state.scene==='closing'&&!s.media?.length)return '<p class="muted mini">Puedes añadir una imagen desde la línea de tiempo.</p>';
  return '<div class="list">'+(s.media||[]).map((m,i)=>{
   const a=p.assets.find(x=>x.id===m.assetId);if(!a)return '';
   let controls='';
-  if(a.type==='video'){
+  if(a.type==='video'&&!m.fitDuration){
    controls='<div class="row wrap" style="margin-top:9px">'+
     '<label class="mini">Desde (s) <input style="width:76px" type="number" min="0" step=".1" data-media-start="'+i+'" value="'+(m.start||0)+'"></label>'+
     '<label class="mini">Hasta (s, 0 = final) <input style="width:80px" type="number" min="0" step=".1" data-media-end="'+i+'" value="'+(m.end||0)+'"></label>'+
@@ -38,7 +38,7 @@ function mediaRows(){
     '</div>';
   }
   return '<div class="asset" style="display:block"><div class="row between"><div class="row">'+(a.type==='image'?'<img class="asset-thumb" src="'+url(p,a.id)+'" alt="">':'<span class="fileicon">'+assetLabel(a)+'</span>')+'<div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
-   '<div class="row">'+btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
+   '<div class="row">'+(Number.isFinite(m.at)?'':btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"'))+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
  }).join('')+'</div><p class="muted mini">Puedes seleccionar múltiples imágenes o pegar una captura desde Windows o el navegador con Ctrl+V. Los recursos se muestran en secuencia.</p>';
 }
 
@@ -146,12 +146,13 @@ function waveformEditorHTML(scene){
   '<output id="cut-zoom-output" for="cut-wave-zoom">'+zoom+'×</output>'+
   btn('wave-zoom-fit','Ajustar','secondary','title="Mostrar la grabación completa"')+'</div></div>'+
   (!peaks.length&&!state.waveErrors[id]?'<p class="muted mini" role="status">Calculando la onda de voz…</p>':'')+
+  '<div class="row between"><strong>Pista de imágenes</strong>'+btn('photo-add','＋ Añadir otra imagen','secondary')+'</div>'+
   (state.scene==='closing'?ClosingStamp.controls(scene):'')+
   '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px;min-width:100%" data-wave-seek="1">'+
    '<div class="wave-ruler">'+makeWaveTicks(duration,width)+'</div>'+
    '<div class="wave-bars">'+
     '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(peaks,duration,width)+'</svg>'+
-   '</div>'+(state.scene==='closing'?ClosingStamp.track(scene,duration):'')+overlays+
+   '</div>'+PhotoTrack.track(scene,duration)+(state.scene==='closing'?ClosingStamp.track(scene,duration):'')+overlays+
    '<div id="edit-wave-selection" class="wave-current-selection" style="left:'+(100*selection.start/duration)+'%;width:'+(100*(selection.end-selection.start)/duration)+'%"></div>'+
    '<div id="edit-wave-playhead" class="wave-playhead" style="left:0%"></div>'+
    '<button type="button" class="wave-handle" data-trim-drag="a" style="left:'+(100*selection.start/duration)+'%" title="Arrastra el inicio">A</button>'+
@@ -266,7 +267,7 @@ function sceneView(){
  if(currentBackground)bg='<img class="template-back" src="'+templateUrl(currentBackground)+'" alt="Fondo del video">';
  else if(first&&first.type==='image')bg='<img class="back" src="'+url(p,first.id)+'">';
  else bg='<div class="fallback-back"></div>';
- if(state.scene!=='closing'){
+ if(state.scene!=='closing'||s.media?.length){
   bg+='<img class="photo" id="support-image" src="'+(first&&first.type==='image'?url(p,first.id):'')+'" '+(first&&first.type==='image'?'':'hidden')+' alt="Fotografía de apoyo">';
   bg+='<video class="photo" id="support-video" muted playsinline preload="metadata" hidden></video>';
  }
@@ -457,10 +458,10 @@ function reviewPage(){
   btn('transition-preset','✦ Cine','secondary','data-preset="cinema"')+
   btn('transition-preset','◌ Suave','secondary','data-preset="soft"')+'</div>'+
   '<div class="review-settings"><label>Gancho → Desarrollo<select data-transition="hookBody">'+
-  options(project?.transitions?.hookBody||'fade')+'</select></label>'+
-  '<label>Desarrollo → Cierre<select data-transition="bodyClosing">'+options(project?.transitions?.bodyClosing||'fade')+'</select></label>'+
-  '<label>Duración<select data-transition="duration">'+[.2,.35,.5,.7,.9].map(v=>
-   '<option value="'+v+'" '+(Math.abs(Number(project?.transitions?.duration||.3)-v)<.04?'selected':'')+'>'+v.toFixed(2)+' s</option>').join('')+'</select></label></div>'+
+  options(m?.transition?.hookBody||'cut')+'</select></label>'+
+  '<label>Desarrollo → Cierre<select data-transition="bodyClosing">'+options(m?.transition?.bodyClosing||'fade')+'</select></label>'+
+  '<label>Duración<select data-transition="duration">'+[.15,.2,.35,.5,.7,.9].map(v=>
+   '<option value="'+v+'" '+(Math.abs(Number(m?.transition?.duration||.15)-v)<.04?'selected':'')+'>'+v.toFixed(2)+' s</option>').join('')+'</select></label></div>'+
   '<p class="muted mini">En la vista previa se muestra una aproximación animada; FFmpeg aplica la transición completa al exportar.</p>'+
   '</details>':'';
  const warnings=(m?.missing?.length?'<div class="warning">Completa: '+m.missing.map(esc).join(' · ')+'</div>':'')+
@@ -468,6 +469,7 @@ function reviewPage(){
   (!short&&m&&m.duration<480?'<div class="warning">El video largo debe tener al menos 8 minutos antes de exportar.</div>':'')+
   (state.reviewError?'<div class="warning">'+esc(state.reviewError)+'</div>':'');
  const timeline=parts.length?'<div class="review-timeline">'+parts.map((ch,i)=>
+  (short&&i>0&&m.complete?btn('preview-join','▷ Unión','secondary','data-index="'+(i-1)+'" title="Probar '+esc(parts[i-1].label)+' → '+esc(ch.label)+'"'):'')+
   '<button class="review-part review-color-'+i%3+'" style="flex:'+Math.max(1,ch.duration)+'" data-action="review-seek" data-start="'+ch.start+'" title="'+esc(ch.label)+'">'+esc(ch.label)+'</button>').join('')+'</div>':'';
  return titlebar('Revisión y exportación',short?project?.title||'Short':state.week?.title||'Video largo',btn('review-back','← Volver al editor','secondary'))+
  '<div class="review-layout"><section class="panel"><div class="row between"><h2>Montaje completo · '+(short?'9:16':'16:9')+'</h2>'+
@@ -636,7 +638,7 @@ function updateMediaPreview(t){
  const assetId=part?.assetId,kind=part?.type;
  const photo=$('#support-image'),clip=$('#support-video');
  if(!photo&&!clip)return;
- if(state.scene==='closing'||!assetId){
+ if(!assetId){
   if(photo)photo.hidden=true;if(clip){clip.pause();clip.hidden=true}return;
  }
  if(kind==='image'){
@@ -658,6 +660,7 @@ function updateMediaPreview(t){
   const wanted=(Number(part.mediaStart)||0)+(t-part.start)*(Number(part.speed)||1);
   if(Math.abs((clip.currentTime||0)-wanted)>.4)try{clip.currentTime=wanted}catch(_){}
   const presenter=$('#speaker-preview');
+  clip.playbackRate=Math.min(16,Math.max(.0625,(part.speed||1)*(presenter?.playbackRate||1)));
   if(presenter&&!presenter.paused)clip.play().catch(()=>{});
   else clip.pause();
  }
@@ -876,8 +879,8 @@ document.addEventListener('click',async e=>{
   if(action==='guide-resume')return await Guided.open(b.dataset.id);
   if(action==='guide-use-phone'){await Recording.close();return await MobileRecording.open()}
   if(action==='guide-next')return await Guided.next();
-  if(action==='guide-animate')return Guided.animationDialog(b.dataset.scene||state.scene);
-  if(action==='guide-generate')return await Guided.generate(b.dataset.scene);
+  if(action==='guide-animate')return await PhotoTrack.open(b.dataset.scene||state.scene);
+  if(action.startsWith('photo-'))return await PhotoTrack.handle(action,b);
   if(action==='guide-week-record'){
    const entry=state.week.intro;
    return Guided.open(entry.projectId,entry.scene,state.week.id);
@@ -997,6 +1000,19 @@ document.addEventListener('click',async e=>{
     sceneTransitionsAuto:false};
    await saveNow();state.reviewInfo=await api('review:status',{kind:'short',id:state.project.id});
    render();await livePrepare();notice('Transiciones actualizadas');return;
+  }
+  if(action==='preview-join'){
+   livePause();
+   if(state.reviewRendered?.hash!==state.reviewInfo?.hash)await renderReviewPreview();
+   const result=state.reviewRendered;
+   if(!result?.joins || state.page!=='review')return;
+   const time=result.joins[Number(b.dataset.index)];
+   const modal=$('#modal-root');modal.hidden=false;
+   modal.innerHTML='<div class="modalback"><div class="modal"><h2>Transición del montaje</h2><video class="photo-demo" controls></video>'+btn('modal-close','Cerrar','secondary')+'</div></div>';
+   const v=modal.querySelector('video');v.src=result.url;
+   v.onloadedmetadata=()=>{v.currentTime=Math.max(0,time-2);v.play().catch(()=>{});};
+   v.ontimeupdate=()=>{if(v.currentTime>=time+2)v.pause();};
+   return;
   }
   if(action==='review-render-preview')return await renderReviewPreview();
   if(action==='review-open-output'){
@@ -1133,7 +1149,7 @@ document.addEventListener('click',async e=>{
   if(action==='record-retry')return await Recording.retry();
   if(action==='record-save'||action==='record-keep-recovered')return await Recording.keep(b.dataset.id);
   if(action==='record-recovery')return await Recording.recovery();
-  if(action==='modal-close')return await Recording.close();
+  if(action==='modal-close'){PhotoTrack.dismiss();return await Recording.close();}
   if(action==='import-logo'){await api('assets:import-logo');state.settings=await api('settings:get');return render()}
   if(action==='save-settings'){state.settings.defaultStyle=$('#default-style').value;state.settings.silenceThreshold=Number($('#silenceThreshold').value)||.5;state.settings.autoMicrocuts=$('#autoMicrocuts').checked;state.settings=await api('settings:set',state.settings);return notice('Preferencias guardadas')}
   if(action==='edit-week-intro'||action==='edit-week-closing'){
@@ -1180,7 +1196,7 @@ document.addEventListener('change',async e=>{
  }
  if(e.target?.dataset?.transition!==undefined&&state.reviewKind==='short'&&state.project){
   const k=e.target.dataset.transition,p=state.project;
-  p.transitions={hookBody:'fade',bodyClosing:'fade',duration:.3,...p.transitions};
+  p.transitions={...p.transitions,...state.reviewInfo?.transition};
   p.transitions[k]=k==='duration'?Number(e.target.value):e.target.value;
   p.effects={enabled:true,sceneTransitionsAuto:true,revision:0,...p.effects,sceneTransitionsAuto:false};
   order.forEach(key=>p.scenes[key].approved=false);
@@ -1246,7 +1262,7 @@ document.addEventListener('pointerdown',e=>{
 });
 document.addEventListener('click',e=>{
  const area=e.target.closest?.('[data-wave-seek]');
- if(!area||e.target.closest?.('.stamp-track,[data-trim-drag]')||state.page!=='project')return;
+ if(!area||e.target.closest?.('.stamp-track,.photo-track,[data-trim-drag]')||state.page!=='project')return;
  const video=$('#speaker-preview'),duration=editorDuration();
  if(!video||!duration)return;
  const rect=area.getBoundingClientRect();

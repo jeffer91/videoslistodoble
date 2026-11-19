@@ -127,7 +127,7 @@ test('renderiza una revisión real, subtítulos y meme, chequea y crea 3 miniatu
   p = store.getProject(root, p.id);
   for (const scene of Object.values(p.scenes)) scene.video = voice.id;
   p.transitions = { hookBody: 'cut', bodyClosing: 'cut', duration: .2 };
-  p.effects.sceneTransitionsAuto = false;
+  p.effects.sceneTransitionsAuto = true;
   store.saveProject(root, p);
   editing.setTranscript(root, { id: p.id, scene: 'body', assetId: voice.id, words: [
     { start: .22, end: .5, text: 'Récord' }, { start: .52, end: .88, text: 'histórico' }
@@ -142,6 +142,8 @@ test('renderiza una revisión real, subtítulos y meme, chequea y crea 3 miniatu
   assert.equal(initial.canExport, false);
   const preview = await reviews.exportApproved(root, 'short', p.id, initial.hash, undefined, undefined, { preview: true });
   assert.equal((await media.probe(preview.file)).hasAudio, true);
+  assert.equal(preview.joins.length,2);
+  assert.ok(Math.abs(preview.joins[1]-4.6)<.25);
   assert.equal(store.getProject(root, p.id).exports.length, 0);
   for (const scene of Object.values(p.scenes)) scene.approved = true;
   store.saveProject(root, p);

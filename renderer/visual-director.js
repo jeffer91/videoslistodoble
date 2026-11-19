@@ -80,19 +80,8 @@
    items:conf.enabled?items.map(x=>x):items.map(x=>({...x,motion:null,effect:'cut',duration:0})),
    sceneKey,duration,format};
  }
- function transitions({projectId='',revision=0,settings={},chapters=[]}={}){
-  const conf=config(settings);
-  const choices=['smoothleft','zoomin','hblur','diagtl','fade'];
-  let prior='';
-  return ['hookBody','bodyClosing'].reduce((result,key,i)=>{
-   const scene=chapters[i+1]||{};
-   const energetic=(Number(scene.duration)||0)>12;
-   const list=energetic?choices:['fade','smoothleft','zoomin'];
-   const effect=choose(list,projectId+':'+revision+':'+key,prior);
-   prior=effect;
-   result[key]=conf.enabled?effect:'fade';
-   return result;
-  },{duration:.42});
+ function transitions(){
+  return {hookBody:'cut',bodyClosing:'fade',duration:.15};
  }
  function at(plan,time,assetId){
   const items=plan?.items||[];

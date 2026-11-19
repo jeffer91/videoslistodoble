@@ -126,7 +126,7 @@ app.whenReady().then(()=>{
         {name:'Todos los archivos',extensions:['*']}];
     const selection=await dialog.showOpenDialog(win,{
       title:voice?'Importar narración':'Importar imágenes o videos',
-      properties:['openFile','multiSelections'],filters
+      properties:x.single?['openFile']:['openFile','multiSelections'],filters
     });
     const files=[],errors=[];
     if(selection.canceled)return {files,errors};
@@ -145,6 +145,9 @@ app.whenReady().then(()=>{
     }
     return {files,errors};
   });
+  register('scene:photo-clip',x=>runMedia(signal=>require('./backend/photo-clip.cjs').generate(ROOT,x,signal,async()=>app.isPackaged
+    ? {exe:path.join(process.resourcesPath,'animation','records-animation.exe'),args:[]}
+    : require('./backend/source-animation.cjs').sourceAnimation(__dirname,path.join(app.getPath('userData'),'motor-animacion'),signal))));
   register('scene:animate', async x => {
     const pick = await dialog.showOpenDialog(win, {title:'Elegir foto para animar', properties:['openFile'],
       filters:[{name:'Fotografías',extensions:['png','jpg','jpeg','webp','bmp']}]});
@@ -244,7 +247,7 @@ app.whenReady().then(()=>{
   register('review:status',x=>reviews.inspect(ROOT,x.kind,x.id));
   register('review:rendered',x=>runMedia(async signal=>{
     const result=await reviews.exportApproved(ROOT,x.kind,x.id,x.hash,signal,broadcast,{preview:true});
-    return {url:'records://rendered/'+x.kind+'/'+encodeURIComponent(x.id)+'/'+result.hash};
+    return {joins:result.joins,url:'records://rendered/'+x.kind+'/'+encodeURIComponent(x.id)+'/'+result.hash};
   }));
   mobileRecording.install({app,root:ROOT,register,safeStorage,clipboard});
   workflow.installWorkflow({app,shell,dialog,safeStorage,root:ROOT,window:()=>win,register,runMedia,send:broadcast});

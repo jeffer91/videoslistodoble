@@ -59,35 +59,5 @@ const Guided = (() => {
     return true;
   }
 
-  function animationDialog(scene) {
-    const modal = $('#modal-root');
-    modal.hidden = false;
-    modal.innerHTML = '<div class="modalback"><div class="modal"><h2>Animar imagen · ' + names[scene] +
-      '</h2><label>Estilo<select id="animation-style"><option value="lapiz">Lápiz</option><option value="pintura">Pintura</option></select></label>' +
-      '<label>Empezar en el segundo de la toma<input id="animation-at" type="number" step="0.1" min="0" value="' + Number(state.project.scenes[scene].start || 0) + '"></label>' +
-      '<label>Duración en segundos<input id="animation-seconds" type="number" value="5" min="3" max="30"></label>' +
-      '<div class="row wrap">' + btn('guide-generate','Elegir foto y animar','','data-scene="' + scene + '"') +
-      btn('modal-close','Cerrar','secondary') + '</div></div></div>';
-  }
-
-  async function generate(scene) {
-    const style = $('#animation-style').value, seconds = Number($('#animation-seconds').value);
-    if (!Number.isInteger(seconds) || seconds < 3 || seconds > 30) throw Error('Elige entre 3 y 30 segundos');
-    const at = Number($('#animation-at').value), target = state.project.scenes[scene];
-    if (!Number.isFinite(at) || at < Number(target.start||0) || at >= Number(target.end)) throw Error('Elige un segundo dentro de la toma');
-    const modal = $('#modal-root'), projectId = state.project.id;
-    modal.innerHTML = '<div class="modalback"><div class="modal" role="status"><h2>Preparando animación…</h2>' +
-      btn('cancel-render','Cancelar','secondary') + '</div></div>';
-    try {
-      await saveNow();
-      const item = await api('scene:animate',{projectId, scene, style, seconds, at});
-      if (!item) return;
-      state.project = await api('projects:get',{id:projectId});
-      if (state.page === 'review') await openReview('short');
-      else {render(); prepareScenePreview()}
-      notice('Animación añadida a ' + names[scene]);
-    } finally { modal.hidden = true; modal.innerHTML = '' }
-  }
-
-  return {dashboard,open,next,nextLabel,scenePage,afterSave,animationDialog,generate};
+  return {dashboard,open,next,nextLabel,scenePage,afterSave};
 })();

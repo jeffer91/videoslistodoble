@@ -214,8 +214,8 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  const voiceInput=freezeVideo?'[frozen]':voiceRate!==1?'[spedvoice]':'[0:v]';
  const pad=withPresenter?'[1:v]':voiceInput;
  if(freezeVideo)f.push('[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3600[frozen]');
- if(withPresenter&&Math.abs((Number(speed)||1)-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+Math.max(.5,Math.min(2,Number(speed)*voiceRate)).toFixed(3)+'[timed]');
- const bgInput=withPresenter&&Math.abs((Number(speed)||1)-1)>.001?'[timed]':pad;
+ if(withPresenter&&Math.abs((Number(speed)||1)*voiceRate-1)>.001)f.push('[1:v]setpts=(PTS-STARTPTS)/'+(Number(speed)*voiceRate).toFixed(6)+'[timed]');
+ const bgInput=withPresenter&&Math.abs((Number(speed)||1)*voiceRate-1)>.001?'[timed]':pad;
  if(Number.isInteger(templateIndex)){
   // La plantilla sustituye solo el fondo. La fotografía o clip de apoyo permanece delante.
   const pan=motionPan(visual?.background,visual?.piece,W,H);
@@ -328,7 +328,10 @@ function timeline(scene,duration,mediaEntries){
    return edges.slice(0,-1).map((start,index)=>{
     const end = edges[index+1];
     const overlay = fixed.findLast(item => item.at <= start && start < item.at+item.seconds);
-    if (overlay) return {start,end,medium:overlay,mediaStart:start-overlay.at,speed:1};
+    if (overlay) {
+     const speed=overlay.fitDuration ? (overlay.sourceEnd-overlay.sourceStart)/overlay.seconds : 1;
+     return {start,end,medium:overlay,mediaStart:(overlay.sourceStart||0)+(start-overlay.at)*speed,speed};
+    }
     return {...entry,start,end,mediaStart:entry.mediaStart+(start-entry.start)*entry.speed};
    });
   });
@@ -362,7 +365,7 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   if(!asset)throw Error('Recurso ausente');
   const file=store.resolveAsset(root,p.id,asset.id);
   const duration=asset.type==='video'?(await probe(file)).duration:0;
-  return {at:m.at,seconds:m.seconds,assetId:asset.id,file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
+  return {at:m.at,seconds:m.seconds,fitDuration:m.fitDuration,assetId:asset.id,file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
  }));
  const timelineEntries=timeline(scene,voiceInfo.duration,media);
  const plan=visualDirector.sequence({projectId:p.id,sceneKey:key,duration:voiceInfo.duration,
@@ -468,7 +471,7 @@ async function normalizeFinal(input,output,signal){
   '-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart',output],signal);
  return output;
 }
-async function joinWithTransition(root,a,b,effect,duration,signal){
+async function joinWithTransition(root,a,b,effect,duration,signal,keepSpeech=false){
  const tmp=temporary(root),dest=path.join(tmp,'joined.mp4');
  try{
   if(!effect||effect==='cut'){
@@ -477,13 +480,14 @@ async function joinWithTransition(root,a,b,effect,duration,signal){
   const da=(await probe(a)).duration,db=(await probe(b)).duration;
   const overlap=Math.min(duration,da/4,db/4);
   if(overlap<.08){await concat(tmp,[a,b],dest,signal);return {file:dest,temp:tmp,duration:0}}
-  const filter='[0:v]settb=AVTB,fps=30,format=yuv420p[v0];[1:v]settb=AVTB,fps=30,format=yuv420p[v1];'+
-  '[v0][v1]xfade=transition='+effect+':duration='+overlap.toFixed(3)+':offset='+(da-overlap).toFixed(3)+'[v];'+
-  '[0:a][1:a]acrossfade=d='+overlap.toFixed(3)+'[a]';
+  const tail=keepSpeech?',tpad=stop_mode=clone:stop_duration='+overlap.toFixed(3):'';
+  const filter='[0:v]settb=AVTB,fps=30,format=yuv420p'+tail+'[v0];[1:v]settb=AVTB,fps=30,format=yuv420p[v1];'+
+  '[v0][v1]xfade=transition='+effect+':duration='+overlap.toFixed(3)+':offset='+(keepSpeech?da:da-overlap).toFixed(3)+'[v];'+
+  (keepSpeech?'[0:a][1:a]concat=n=2:v=0:a=1[a]':'[0:a][1:a]acrossfade=d='+overlap.toFixed(3)+'[a]');
   await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',a,'-i',b,'-filter_complex',filter,
    '-map','[v]','-map','[a]','-c:v','libx264','-preset','veryfast','-crf','22','-pix_fmt','yuv420p',
    '-c:a','aac','-ar','48000','-b:a','160k','-movflags','+faststart',dest],signal);
-  return {file:dest,temp:tmp,duration:overlap};
+  return {file:dest,temp:tmp,duration:keepSpeech?0:overlap};
  }catch(e){fs.rmSync(tmp,{recursive:true,force:true});throw e}
 }
 

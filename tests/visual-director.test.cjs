@@ -39,7 +39,7 @@ test('interpolación suave y transiciones automáticas no cambian al reproducir'
  assert.equal(start.scale,m.a);assert.equal(end.scale,m.b);
  assert.ok(middle.scale>=Math.min(start.scale,end.scale));
  const x=director.transitions({projectId:'x',revision:2,chapters:[{duration:5},{duration:30},{duration:9}]});
- assert.ok(['smoothleft','zoomin','hblur','diagtl','fade'].includes(x.hookBody));
+ assert.deepEqual(x,{hookBody:'cut',bodyClosing:'fade',duration:.15});
  assert.notEqual(x.hookBody,x.bodyClosing);
  assert.deepEqual(x,director.transitions({projectId:'x',revision:2,chapters:[{duration:5},{duration:30},{duration:9}]}));
 });

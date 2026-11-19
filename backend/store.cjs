@@ -15,7 +15,7 @@ function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});cons
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
 function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
-function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:getSettings(root).defaultStyle||'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'fade',bodyClosing:'fade',duration:.3},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
+function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:getSettings(root).defaultStyle||'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'cut',bodyClosing:'fade',duration:.15},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
   tags:catalog.normalizeTags(x.tags),script:catalog.normalizeScript(x.script),notes:catalog.normalizeNotes(x.notes),
   plannedDate:catalog.normalizeDate(x.plannedDate),withClaude:x.withClaude===true,ideaId:x.ideaId||null};
  p.stage=catalog.STAGES.includes(x.stage)?x.stage:(catalog.hasScript(p)?'guion':'idea');
@@ -150,7 +150,7 @@ function removeAsset(root,projectId,assetId){
  }
  if(p.master?.musicAssetId===assetId)throw Error('La música está asignada al montaje. Retírala antes de eliminar el archivo.');
  for(const scene of Object.values(p.scenes||{})){
-  if(scene.video===assetId||(scene.media||[]).some(m=>m.assetId===assetId)||
+  if(scene.video===assetId||(scene.media||[]).some(m=>m.assetId===assetId||m.photo?.assetId===assetId)||
     Object.values(scene.backgrounds||{}).some(b=>b?.scope==='project'&&b.assetId===assetId))
     throw Error('Este archivo está en uso. Primero retíralo de las escenas.');
  }

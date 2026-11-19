@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const store=require('./store.cjs'),media=require('./media.cjs'),logos=require('./logo.cjs'),templates=require('./templates.cjs');
 const KINDS=['short','week'],UUID=/^[a-f0-9-]{36}$/i,KEYS=['hook','body','closing'];
 const NAMES={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
-const VERSION='montage-v2';
+const VERSION='montage-v3';
 const editing=require('./editing.cjs'),delivery=require('./delivery.cjs'),production=require('./production.cjs');
 const masterAudio=require('./master-audio.cjs');
 const visualDirector=require('../renderer/visual-director.js');
@@ -98,7 +98,7 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
  if(snapshot.hash!==expectedHash)throw Error('El proyecto cambió. Revisa el video actualizado.');
  if(preview?!snapshot.complete:!snapshot.canExport)throw Error('Completa y aprueba las escenas antes de exportar');
  const previewFile=renderedPreview(root,kind,id,snapshot.hash);
- if(preview&&fs.existsSync(previewFile))return {hash:snapshot.hash,file:previewFile};
+ if(preview&&fs.existsSync(previewFile)&&fs.existsSync(previewFile+'.json'))return {hash:snapshot.hash,file:previewFile,joins:JSON.parse(fs.readFileSync(previewFile+'.json','utf8'))};
  const sequence=sequenceFor(root,kind,id),tmp=media.temporary(root),settings=store.getSettings(root),
   logo=await logos.normalize(root,settings.logo),temporaryPairs=[];
  try{
@@ -120,14 +120,18 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
    actualChapters.push({label:entry.title,start:elapsed,duration});
    elapsed+=duration;
   }
-  let combined;
+  let combined;const joins=[];
   if(kind==='short'){
    combined=sceneFiles[0];
+   const keepSpeech=store.getProject(root,id).effects?.sceneTransitionsAuto!==false;
    const effects=[snapshot.transition?.hookBody||'fade',snapshot.transition?.bodyClosing||'fade'];
    for(let i=1;i<sceneFiles.length;i++){
     send({type:'status',message:'Transición '+i+' de '+(sceneFiles.length-1)});
     const joined=await media.joinWithTransition(root,combined,sceneFiles[i],effects[i-1],
-     Number(snapshot.transition?.duration)||.3,signal);
+     Number(snapshot.transition?.duration)||.3,signal,keepSpeech);
+    const offset=actualChapters[i].start-joined.duration;
+    for(let j=i;j<actualChapters.length;j++)actualChapters[j].start-=joined.duration;
+    joins.push(offset/(snapshot.master.speed||1));
     combined=joined.file;temporaryPairs.push(joined.temp);
    }
   }else{
@@ -145,7 +149,8 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
    fs.mkdirSync(path.dirname(previewFile),{recursive:true});
    fs.renameSync(normalized,previewFile);
    send({type:'complete',percent:100});
-   return {file:previewFile,hash:snapshot.hash};
+   store.atomic(previewFile+'.json',joins);
+   return {file:previewFile,hash:snapshot.hash,joins};
   }
   send({type:'status',message:'Verificando imagen, sonido y reproducción',percent:93});
   const quality=await delivery.qualityCheck(normalized,kind,signal);
