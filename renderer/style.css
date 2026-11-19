@@ -472,3 +472,13 @@ details > summary { cursor: pointer; }
 #photo-crop{position:absolute;pointer-events:none;border:2px solid #f9cc67;box-shadow:0 0 0 1200px #0008}
 #photo-focus{position:absolute;pointer-events:none;color:white;text-shadow:0 0 2px black;font-size:22px;transform:translateX(-50%)}
 .photo-demo{display:block;width:100%;max-height:58vh;background:#08140d}
+
+.scene-tool-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.scene-tool-tabs button{flex:1 1 auto}
+.scene-tool-tabs button.active{background:#246440;border-color:#75b78a;color:white}
+.image-timeline .wave-bars{height:35px;padding:3px 0}
+.image-timeline .wave-bars svg{height:29px}
+.image-timeline .wave-content{min-height:0}
+.image-timeline .photo-track{height:60px}
+.image-timeline .photo-block{height:52px}
+.image-timeline .photo-block img{height:44px;width:54px}

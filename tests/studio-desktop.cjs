@@ -44,9 +44,9 @@ async function run() {
     await page.locator('#card-script-hook').fill('El momento que marcó la historia de este estadio.');
     await page.locator('#card-script-hook').press('Tab');
     await page.getByRole('button', { name: 'Grabar y editar' }).click();
-    const recordingPanel = page.locator('details[data-tool="recording"]');
+    const recordingPanel = page.locator('[data-tool-panel="recording"]');
+    await page.getByRole('button',{name:'Grabación',exact:true}).click();
     await recordingPanel.waitFor();
-    if (await recordingPanel.getAttribute('open') === null) await recordingPanel.locator('summary').click();
     await recordingPanel.getByRole('button', { name: 'Grabar ahora' }).click();
     await page.locator('#microphone-meter').waitFor();
     await page.waitForFunction(() => document.querySelector('#camera-preview')?.videoWidth > 0);

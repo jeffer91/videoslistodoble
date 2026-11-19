@@ -33,8 +33,7 @@ const PhotoTrack=(()=>{
  function close(){const m=$('#modal-root');m.hidden=true;m.innerHTML='';}
  function active(){return draft && state.page==='project'&&draft.project===state.project?.id&&draft.scene===state.scene;}
  async function open(scene,index=-1){
-  state.editorPanel='audio';
-  if(state.page!=='project'||state.scene!==scene){state.editorPanel='audio';await openProject(state.project.id,scene,state.orientation);}
+  if(state.page!=='project'||state.scene!==scene)await openProject(state.project.id,scene,state.orientation,'resources');
   if(!current().video)throw Error('Primero graba o importa la toma.');
   const s=current(),end=editorDuration()||s.end;
   const items=blocks(s,end),m=items[index],p=m?.photo;

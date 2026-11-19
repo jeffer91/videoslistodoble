@@ -117,15 +117,15 @@ function setCutZoom(value,centerSelection=true){
  const ruler=content.querySelector('.wave-ruler');
  if(ruler)ruler.innerHTML=makeWaveTicks(duration,width);
  if(centerSelection){
-  const selected=rangeSelection(),focus=(selected.start+selected.end)/2;
+  const selected=rangeSelection(),focus=state.editorPanel==='resources'?Number($('#speaker-preview')?.currentTime)||0:(selected.start+selected.end)/2;
   viewport.scrollLeft=WaveZoom.scrollForTime(focus,duration,width,viewport.clientWidth);
  }
 }
-function waveformEditorHTML(scene){
+function waveformEditorHTML(scene,images=false){
  const id=state.project.id+':'+scene.video,peaks=state.waveforms[id]||[],duration=editorDuration();
  if(!scene.video)return '<p class="muted mini">Importa o graba un video para editarlo.</p>';
- if(!duration)return '<div class="wave-loading"><strong>Preparando editor de recortes…</strong><p class="muted mini">'+esc(state.waveErrors[id]||'Leyendo duración de la grabación. Los marcadores aparecerán automáticamente.')+'</p>'+btn('retry-waveform','↻ Reintentar carga','secondary')+'</div>';
- const selection=rangeSelection(),zoom=Math.max(1,Math.min(8,Number(state.cutZoom)||1));
+ if(!duration)return '<div class="wave-loading"><strong>Preparando línea de tiempo…</strong><p class="muted mini">'+esc(state.waveErrors[id]||'Leyendo la duración de la grabación.')+'</p>'+btn('retry-waveform','↻ Reintentar carga','secondary')+'</div>';
+ const selection=rangeSelection(),zoom=WaveZoom.clampZoom(state.cutZoom);
  const width=WaveZoom.widthFor(duration,590,zoom);
 
  const marked=[
@@ -137,8 +137,8 @@ function waveformEditorHTML(scene){
   const color=c.mode==='audio'?'rgba(218,161,63,.34)':c.mode==='video'?'rgba(130,94,215,.34)':'rgba(207,71,83,.35)';
   return '<div class="wave-edit-range" title="'+esc(editTypeName(c.mode))+'" style="left:'+(100*a/duration)+'%;width:'+(100*(b-a)/duration)+'%;background:'+color+'"></div>';
  }).join('');
- return '<div class="wave-editor">'+(state.waveErrors[id]?'<p class="wave-error">'+esc(state.waveErrors[id])+' '+btn('retry-waveform','Reintentar','secondary')+'</p>':'')+
-  '<div class="row between wave-controls"><strong>Ondas de voz</strong><div class="row mini wave-zoom-tools">'+
+ const wave='<div class="wave-editor'+(images?' image-timeline':'')+'">'+(state.waveErrors[id]?'<p class="wave-error">'+esc(state.waveErrors[id])+' '+btn('retry-waveform','Reintentar','secondary')+'</p>':'')+
+  '<div class="row between wave-controls"><strong>'+(images?'Narración de referencia':'Ondas de voz')+'</strong><div class="row mini wave-zoom-tools">'+
   '<label for="cut-wave-zoom">Zoom</label>'+
   btn('wave-zoom-out','−','secondary','title="Alejar onda" aria-label="Alejar onda"')+
   '<input id="cut-wave-zoom" type="range" data-cut-zoom min="1" max="16" step="1" value="'+zoom+'" aria-label="Ampliación de la onda de voz">'+
@@ -146,15 +146,14 @@ function waveformEditorHTML(scene){
   '<output id="cut-zoom-output" for="cut-wave-zoom">'+zoom+'×</output>'+
   btn('wave-zoom-fit','Ajustar','secondary','title="Mostrar la grabación completa"')+'</div></div>'+
   (!peaks.length&&!state.waveErrors[id]?'<p class="muted mini" role="status">Calculando la onda de voz…</p>':'')+
-  '<div class="row between"><strong>Pista de imágenes</strong>'+btn('photo-add','＋ Añadir otra imagen','secondary')+'</div>'+
-  (state.scene==='closing'?ClosingStamp.controls(scene):'')+
   '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px;min-width:100%" data-wave-seek="1">'+
    '<div class="wave-ruler">'+makeWaveTicks(duration,width)+'</div>'+
    '<div class="wave-bars">'+
     '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(peaks,duration,width)+'</svg>'+
-   '</div>'+PhotoTrack.track(scene,duration)+(state.scene==='closing'?ClosingStamp.track(scene,duration):'')+overlays+
+   '</div><div id="edit-wave-playhead" class="wave-playhead" style="left:'+100*(Number($('#speaker-preview')?.currentTime)||0)/duration+'%"></div>';
+ if(images)return wave+PhotoTrack.track(scene,duration)+(state.scene==='closing'?ClosingStamp.track(scene,duration):'')+'</div></div></div>';
+ return wave+overlays+
    '<div id="edit-wave-selection" class="wave-current-selection" style="left:'+(100*selection.start/duration)+'%;width:'+(100*(selection.end-selection.start)/duration)+'%"></div>'+
-   '<div id="edit-wave-playhead" class="wave-playhead" style="left:0%"></div>'+
    '<button type="button" class="wave-handle" data-trim-drag="a" style="left:'+(100*selection.start/duration)+'%" title="Arrastra el inicio">A</button>'+
    '<button type="button" class="wave-handle" data-trim-drag="b" style="left:'+(100*selection.end/duration)+'%" title="Arrastra el final">B</button>'+
   '</div></div>'+
@@ -247,6 +246,37 @@ async function importTemplate(format,paste=false,assign=false){
  }else if(errors.length)notice(errors[0].name+': '+errors[0].message,true);
  if(assign&&!files.length)backgroundChooser();
 }
+const sceneTools={recording:'Grabación',audio:'Recortar video',resources:'Imágenes y efectos'};
+function scenePanelHTML(){
+ const tabs=Object.entries(sceneTools).map(([id,label])=>btn('scene-tool',label,id===state.editorPanel?'active':'secondary',
+  'data-tool="'+id+'" aria-pressed="'+(id===state.editorPanel)+'"')).join('');
+ return '<nav class="scene-tool-tabs" aria-label="Herramientas de la escena">'+tabs+'</nav><section class="panel" data-tool-panel="'+state.editorPanel+'">'+sceneToolContent()+'</section>';
+}
+function sceneToolContent(){
+ const p=state.project,s=p.scenes[state.scene],wide=state.orientation==='wide',style=p.style,appearance=s.formats?.[state.orientation]||s;
+ const video=p.assets.find(a=>a.id===s.video),currentBackground=selectedTemplate(p,state.orientation);
+ if(state.editorPanel==='recording')return '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+btn('mobile-recorder','Grabar con celular','outline')+btn('record-recovery','Recuperar toma','secondary')+'</div></div>'+
+ '<details class="minor-details"><summary>Ajustes de cámara y composición</summary><div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
+ '<div class="two"><div class="field"><label>Cifra (opcional)</label><input maxlength="18" data-field="number" value="'+esc(s.number||'')+'"></div><div class="field"><label>Protagonista (opcional)</label><input maxlength="50" data-field="name" value="'+esc(s.name||'')+'"></div></div>'+
+ '<div class="field"><label>Fondo de '+names[state.scene]+' ('+(wide?'16:9':'9:16')+')</label><div class="row template-project-choice">'+(currentBackground?'<img src="'+templateUrl(currentBackground)+'" alt="">':'<div class="template-empty">Sin fondo</div>')+'<div class="template-choice-info"><strong>'+esc(currentBackground?.name||'Fondo desenfocado')+'</strong><small>'+(currentBackground?'Biblioteca de fondos':'Fondo automático')+'</small></div>'+btn('choose-template','Cambiar fondo','secondary')+'</div></div>'+
+ '<div class="field"><label>Plantilla visual del proyecto</label><select data-project-field="style"><option value="historic" '+(style==='historic'?'selected':'')+'>Récord histórico</option><option value="numbers" '+(style==='numbers'?'selected':'')+'>Récord en cifras</option><option value="legends" '+(style==='legends'?'selected':'')+'>Leyendas y récords</option></select></div>'+
+ '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label>'+(state.scene==='closing'?'<input value="Centro · primer plano" disabled>':'<select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select>')+'</div></div>'+
+ '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>'+
+ '<div class="field"><label>Marco de cámara</label><select data-format-field="frame">'+
+ [['sport','Transmisión 11 Récords'],['gold','Oro de campeón'],['neon','Neón deportivo'],['minimal','Minimalista'],['none','Sin marco']].map(([v,t])=>'<option value="'+v+'" '+((appearance.frame||'sport')===v?'selected':'')+'>'+t+'</option>').join('')+
+ '</select></div></details>';
+ if(state.editorPanel==='resources'){
+  const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+btn('choose-project-media','Desde biblioteca del proyecto','secondary')+'</div>')+mediaRows();
+  return '<div class="row between"><h3>Pista de imágenes</h3>'+btn('photo-add','＋ Añadir imagen','',video?'':'disabled')+'</div>'+
+   waveformEditorHTML(s,true)+(state.scene==='closing'&&video?ClosingStamp.controls(s):'')+
+   '<details class="minor-details"><summary>Gestionar recursos ('+(s.media||[]).length+')</summary>'+resources+'</details>';
+ }
+ return waveformEditorHTML(s)+'<details class="minor-details"><summary>Velocidad y límites de la toma</summary><div class="field"><label>Velocidad de narración y cámara</label><select data-field="playbackSpeed">'+
+ [.5,.75,1,1.25,1.5,2].map(v=>'<option value="'+v+'" '+(Number(s.playbackSpeed||1)===v?'selected':'')+'>'+v.toFixed(2)+'×</option>').join('')+
+ '</select><small>La voz y el video se aceleran juntos, con corrección de tono.</small></div>'+
+ '<div class="two"><div class="field"><label>Inicio del video (s)</label><input type="number" min="0" step="0.1" data-field="start" value="'+(s.start||0)+'"></div><div class="field"><label>Final del video (s)</label><input type="number" min="0" step="0.1" data-field="end" value="'+(s.end||0)+'"></div></div>'+
+ '</details><details class="minor-details"><summary>Recortes aplicados ('+(s.cuts||[]).length+')</summary>'+recutListHTML(s)+'</details>'+silenceTimeline(s);
+}
 function sceneView(){
  const p=state.project,s=p.scenes[state.scene],video=p.assets.find(a=>a.id===s.video),media=(s.media||[]).map(m=>p.assets.find(a=>a.id===m.assetId)).filter(Boolean),first=media[0];
  const wide=state.orientation==='wide',style=p.style,appearance=(s.formats||{})[state.orientation]||s;
@@ -272,35 +302,13 @@ function sceneView(){
   bg+='<video class="photo" id="support-video" muted playsinline preload="metadata" hidden></video>';
  }
  const previewHTML='<div class="stage '+(wide?'wide ':'')+'style-'+style+' '+(state.scene==='closing'?'closing':'')+'">'+bg+'<div class="headline">'+esc(s.title||p.title)+'</div>'+preview+(state.scene==='closing'?ClosingStamp.stage(s):'')+(state.scene==='closing'?'<div class="follow">SÍGUENOS</div>':'')+(state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="Logo del canal">':'')+'</div>';
- const approved=order.every(k=>p.scenes[k].approved);
- const open=k=>state.editorPanel===k?' open':'';
- const details=(key,summary,content)=>'<details name="scene-tool" data-tool="'+key+'" class="panel panel-fold scene-tool"'+open(key)+'><summary>'+summary+'</summary>'+content+'</details>';
- const recording= '<div class="field"><label>Video principal con tu narración</label><div class="row wrap">'+(video?'<span class="pill">'+esc(video.name)+'</span>':'<span class="muted">Sin grabación</span>')+btn('import-voice','＋ Importar grabación','secondary')+btn('start-recorder','● Grabar ahora','outline')+btn('mobile-recorder','Grabar con celular','outline')+btn('record-recovery','Recuperar toma','secondary')+'</div></div>'+
- '<div class="field"><label>Título del récord</label><input maxlength="120" data-field="title" value="'+esc(s.title||p.title)+'"></div>'+
- '<div class="two"><div class="field"><label>Cifra (opcional)</label><input maxlength="18" data-field="number" value="'+esc(s.number||'')+'"></div><div class="field"><label>Protagonista (opcional)</label><input maxlength="50" data-field="name" value="'+esc(s.name||'')+'"></div></div>'+
- '<div class="field"><label>Fondo de '+names[state.scene]+' ('+(wide?'16:9':'9:16')+')</label><div class="row template-project-choice">'+(currentBackground?'<img src="'+templateUrl(currentBackground)+'" alt="">':'<div class="template-empty">Sin fondo</div>')+'<div class="template-choice-info"><strong>'+esc(currentBackground?.name||'Fondo desenfocado')+'</strong><small>'+(currentBackground?'Biblioteca de fondos':'Fondo automático')+'</small></div>'+btn('choose-template','Cambiar fondo','secondary')+'</div></div>'+
- '<div class="field"><label>Plantilla visual del proyecto</label><select data-project-field="style"><option value="historic" '+(style==='historic'?'selected':'')+'>Récord histórico</option><option value="numbers" '+(style==='numbers'?'selected':'')+'>Récord en cifras</option><option value="legends" '+(style==='legends'?'selected':'')+'>Leyendas y récords</option></select></div>'+
- '<div class="two"><div class="field"><label>Composición</label><select data-format-field="layout"><option value="auto" '+(appearance.layout==='auto'?'selected':'')+'>Automática</option><option value="manual" '+(appearance.layout==='manual'?'selected':'')+'>Manual</option></select></div><div class="field"><label>Posición presentador</label>'+(state.scene==='closing'?'<input value="Centro · primer plano" disabled>':'<select data-format-field="position">'+['left','right','center'].map(k=>'<option value="'+k+'" '+(appearance.position===k?'selected':'')+'>'+({left:'Izquierda',right:'Derecha',center:'Centro'}[k])+'</option>').join('')+'</select>')+'</div></div>'+
- '<div class="field"><label>Tamaño del presentador ('+(appearance.scale||65)+'%)</label><input type="range" min="30" max="100" data-format-field="scale" value="'+(appearance.scale||65)+'"></div>'+
- '<div class="field"><label>Marco de cámara</label><select data-format-field="frame">'+
- [['sport','Transmisión 11 Récords'],['gold','Oro de campeón'],['neon','Neón deportivo'],['minimal','Minimalista'],['none','Sin marco']].map(([v,t])=>'<option value="'+v+'" '+((appearance.frame||'sport')===v?'selected':'')+'>'+t+'</option>').join('')+
- '</select></div>';
- const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+btn('choose-project-media','Desde biblioteca del proyecto','secondary')+'</div>')+mediaRows();
- const audio='<div class="field"><label>Velocidad de narración y cámara</label><select data-field="playbackSpeed">'+
- [.5,.75,1,1.25,1.5,2].map(v=>'<option value="'+v+'" '+(Number(s.playbackSpeed||1)===v?'selected':'')+'>'+v.toFixed(2)+'×</option>').join('')+
- '</select><small>La voz y el video se aceleran juntos, con corrección de tono.</small></div>'+
- '<p class="muted mini">Mueve A y B sobre la onda para seleccionar el suspiro u otra parte. El original nunca se borra.</p>'+
- '<div class="two"><div class="field"><label>Inicio del video (s)</label><input type="number" min="0" step="0.1" data-field="start" value="'+(s.start||0)+'"></div><div class="field"><label>Final del video (s)</label><input type="number" min="0" step="0.1" data-field="end" value="'+(s.end||0)+'"></div></div>'+
- waveformEditorHTML(s)+recutListHTML(s)+silenceTimeline(s);
  return titlebar(p.title,'Proyecto local · se guarda automáticamente',btn('back','← Mis proyectos','secondary')+btn('project-library','Biblioteca del proyecto','secondary')+(state.editingWeekId?btn('return-week','Volver al video semanal','secondary'):'')+btn('open-review','▶ Revisar video completo'))+
  '<div class="steps">'+order.map(k=>'<button data-action="scene" data-id="'+k+'" class="step '+(k===state.scene?'active':'')+'">'+(p.scenes[k].approved?'✓ ':'')+names[k]+'</button>').join('')+'<button data-action="open-review" class="step">▶ Revisar</button></div>'+
  '<div class="stagegrid"><section><div class="panel preview-panel"><div class="row between"><h2>Vista previa</h2><div class="row">'+btn('orientation-short','9:16','secondary')+btn('orientation-wide','16:9','secondary')+'</div></div>'+
  previewHTML+'<div class="preview-status" id="preview-status">'+(video?(previewSrc?'Video listo':'Preparando reproducción compatible…'):'Importa una grabación')+'</div><div class="row wrap playback-controls">'+btn('play-preview','▶ Reproducir')+btn('pause-preview','Ⅱ Pausa','secondary')+btn('stop-preview','■ Detener','secondary')+btn('retry-preview','↻ Reparar video','secondary')+'</div></div></section>'+
  '<section class="scene-tools">'+
- details('recording','Grabación y composición'+(video?' · '+esc(video.name):' · Sin grabación'),recording)+
- details('resources','Recursos visuales · '+(s.media||[]).length,resources)+
- details('audio','Audio y recortes'+((s.cuts||[]).length?' · '+s.cuts.length+' recorte(s)':''),audio)+
- '<div class="panel approval-panel"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+(state.scene!=='closing'?btn('guide-animate','Animar imagen','secondary'):'')+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></section></div>'+
+ '<div id="scene-toolbox">'+scenePanelHTML()+'</div>'+
+ '<div class="panel approval-panel"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></section></div>'+
  (state.status?'<div class="panel"><strong>'+esc(state.status)+'</strong><div class="progressbar"><div style="width:'+state.progress+'%"></div></div>'+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
 }
 
@@ -709,7 +717,7 @@ async function refreshWaveform(){
  })();
  await Promise.allSettled([durationTask,audioTask]);
 }
-async function openProject(id,scene='hook',orientation='short'){state.project=await api('projects:get',{id});state.scene=scene;state.orientation=orientation;state.page='project';state.status='';resetCutEditor();render();refreshWaveform();prepareScenePreview()}
+async function openProject(id,scene='hook',orientation='short',tool=null){state.project=await api('projects:get',{id});state.scene=scene;state.orientation=orientation;state.page='project';state.status='';resetCutEditor();if(tool)state.editorPanel=tool;render();refreshWaveform();prepareScenePreview()}
 function resetCutEditor(){
  state.cutSelection={start:0,end:1};state.cutZoom=1;
  const saved=state.project?.scenes?.[state.scene]?.cutHistory||{};
@@ -879,6 +887,16 @@ document.addEventListener('click',async e=>{
   if(action==='guide-resume')return await Guided.open(b.dataset.id);
   if(action==='guide-use-phone'){await Recording.close();return await MobileRecording.open()}
   if(action==='guide-next')return await Guided.next();
+  if(action==='scene-tool'){
+   if(!Object.hasOwn(sceneTools,b.dataset.tool)||state.editorPanel===b.dataset.tool)return;
+   const scroll=$('#edit-wave-scroll')?.scrollLeft||0;
+   state.editorPanel=b.dataset.tool;
+   $('#scene-toolbox').innerHTML=scenePanelHTML();
+   $('#scene-toolbox button.active')?.focus();
+   const wave=$('#edit-wave-scroll');
+   if(wave){setCutZoom(state.cutZoom,false);wave.scrollLeft=scroll;}
+   return;
+  }
   if(action==='guide-animate')return await PhotoTrack.open(b.dataset.scene||state.scene);
   if(action.startsWith('photo-'))return await PhotoTrack.handle(action,b);
   if(action==='guide-week-record'){
@@ -1117,7 +1135,7 @@ document.addEventListener('click',async e=>{
    if(!Number.isInteger(idx)||idx<0||idx>=(scene.cuts||[]).length)return;
    saveCutUndo();scene.cuts.splice(idx,1);scene.approved=false;queueSave();return render();
   }
-  if(action==='stamp-editor'){state.editorPanel='audio';return openProject(state.project.id,'closing',state.orientation)}
+  if(action==='stamp-editor')return openProject(state.project.id,'closing',state.orientation,'resources');
   if(action==='stamp-place')return ClosingStamp.place($('#speaker-preview')?.currentTime||0);
   if(action==='stamp-remove')return ClosingStamp.place(null);
   if(action==='stamp-test'){
@@ -1239,7 +1257,6 @@ document.addEventListener('paste',async e=>{
  e.preventDefault();
  try{await pasteImage(true)}catch(err){notice(err.message,true)}
 });
-document.addEventListener('toggle',e=>{if(e.target.matches?.('details[data-tool]')&&e.target.open)state.editorPanel=e.target.dataset.tool},true);
 
 document.addEventListener('pointerdown',e=>{
  const handle=e.target.closest?.('[data-trim-drag]');

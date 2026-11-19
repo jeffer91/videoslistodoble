@@ -112,10 +112,10 @@ async function runMobile(desktop, root, projectId) {
     const errors = [];
     phone.on('pageerror', error => errors.push(error.message));
 
-    const controls = desktop.locator('details[data-tool="recording"]');
+    const controls = desktop.locator('[data-tool-panel="recording"]');
     const open = async scene => {
       await desktop.locator('button[data-action="scene"][data-id="' + scene + '"]').click();
-      if (await controls.getAttribute('open') === null) await controls.locator('summary').click();
+      await desktop.getByRole('button',{name:'Grabación',exact:true}).click();
       await controls.getByRole('button', { name: 'Grabar con celular' }).click();
     };
     await open('body');
