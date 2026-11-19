@@ -3,8 +3,7 @@
 const fs=require('node:fs');
 const media=require('./media.cjs');
 function settings(master={}){
- const speed=Number(master.speed??1),musicLevel=Number(master.musicLevel??18);
- if(![.5,.75,1,1.25,1.5,2].includes(speed))throw Error('Velocidad global inválida');
+ const speed=require('./store.cjs').exportSpeed(master.speed),musicLevel=Number(master.musicLevel??18);
  if(!Number.isFinite(musicLevel)||musicLevel<0||musicLevel>40)throw Error('Volumen musical inválido');
  return {speed,musicLevel};
 }

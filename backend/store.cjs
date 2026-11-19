@@ -3,6 +3,11 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const catalog=require('./catalog.cjs');
 const TYPES={'.mp4':'video','.mov':'video','.mkv':'video','.webm':'video','.avi':'video','.jpg':'image','.jpeg':'image','.png':'image','.webp':'image','.gif':'image','.wav':'audio','.mp3':'audio','.m4a':'audio','.aac':'audio','.flac':'audio','.ogg':'audio'};
 const safeId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{5,90}$/.test(s);
+function exportSpeed(value){
+ const speed=Number(value??1);
+ if(!Number.isFinite(speed)||speed<.5||speed>2)throw Error('Velocidad global inválida: elige entre 0,5× y 2×');
+ return speed;
+}
 const uid=()=>crypto.randomUUID();
 const makeScenes=()=>({
  hook:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65,media:[]},
@@ -53,7 +58,7 @@ function saveProject(root,x){const original=getProject(root,x.id);
  if(next.master!==undefined){
   const m=next.master;
   if(!m||typeof m!=='object'||Array.isArray(m))throw Error('Ajustes del montaje inválidos');
-  if(![.5,.75,1,1.25,1.5,2].includes(Number(m.speed??1)))throw Error('Velocidad global inválida');
+  m.speed=exportSpeed(m.speed);
   if(!Number.isFinite(Number(m.musicLevel??18))||Number(m.musicLevel)<0||Number(m.musicLevel)>40)
    throw Error('Volumen musical fuera de rango');
   if(m.musicAssetId){
@@ -205,7 +210,7 @@ function createWeek(root,x){
  const w={schema:1,id,kind,filter,title,createdAt:now,updatedAt:now,projectIds:eligible.map(p=>p.id),intro:{projectId:helper.id,scene:'hook'},closing:{projectId:helper.id,scene:'closing'},supportProjectId:helper.id,assets:[],minSeconds:480,exportedAt:null,outputs:[]};
  atomic(weekFile(root,id),w);return w}
 function getWeek(root,id){return readJSON(weekFile(root,id))}
-function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};for(const k of ['title','projectIds','intro','closing','transition'])if(x[k]!==undefined)w[k]=x[k];if(w.transition!==undefined&&!['title','cut'].includes(w.transition))throw Error('Transición inválida');if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
+function saveWeek(root,x){const old=getWeek(root,x.id);const w={...old};if(x.exportSpeed!==undefined)w.exportSpeed=exportSpeed(x.exportSpeed);for(const k of ['title','projectIds','intro','closing','transition'])if(x[k]!==undefined)w[k]=x[k];if(w.transition!==undefined&&!['title','cut'].includes(w.transition))throw Error('Transición inválida');if(!Array.isArray(w.projectIds)||w.projectIds.some(id=>!safeId(id)))throw Error('Lista de récords inválida');if(new Set(w.projectIds).size!==w.projectIds.length)throw Error('Hay récords duplicados');w.projectIds.forEach(id=>getProject(root,id));w.updatedAt=new Date().toISOString();atomic(weekFile(root,w.id),w);return w}
 function listWeeks(root){return fs.readdirSync(path.join(root,'Compilaciones'),{withFileTypes:true}).filter(e=>e.isDirectory()&&safeId(e.name)).flatMap(e=>{try{return [getWeek(root,e.name)]}catch(_){return []}}).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))}
 function resolveManagedPath(root,filename){const file=path.resolve(filename),base=path.resolve(root);if(!file.startsWith(base+path.sep))throw Error('Solo se pueden abrir rutas dentro de la biblioteca');return file}
-module.exports={ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,importGlobalAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic,readJSON,safeId};
+module.exports={exportSpeed,ensureRoot,createProject,getProject,saveProject,listProjects,deleteProject,importAsset,importGlobalAsset,renameAsset,removeAsset,saveImageBuffer,saveRecording,resolveAsset,projectFile,weekFile,createWeek,getWeek,saveWeek,listWeeks,importLogo,getSettings,saveSettings,resolveManagedPath,atomic,readJSON,safeId};

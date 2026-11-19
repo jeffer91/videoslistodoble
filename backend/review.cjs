@@ -36,10 +36,10 @@ async function inspect(root,kind,id){
  const chapters=[],missing=[],files=[];let elapsed=0,approved=true;
  const first=kind==='short'?store.getProject(root,id):null;
  const transitions=first?.transitions||{hookBody:'fade',bodyClosing:'fade',duration:.3};
- const master=kind==='short'?{speed:1,musicLevel:18,...first.master}:{speed:1,musicLevel:0,musicAssetId:null};
+ const master=kind==='short'?{speed:1,musicLevel:18,...first.master}:{speed:store.exportSpeed(store.getWeek(root,id).exportSpeed),musicLevel:0,musicAssetId:null};
  masterAudio.settings(master);
  for(const entry of sequence){
-  if(entry.transition){chapters.push({transition:true,label:'Transición',start:elapsed,duration:1});elapsed+=1;continue}
+  if(entry.transition){chapters.push({transition:true,label:'Transición',start:elapsed,duration:1/master.speed});elapsed+=1/master.speed;continue}
   let p=projects.get(entry.projectId);
   if(!p){p=store.getProject(root,entry.projectId);projects.set(entry.projectId,p)}
   const scene=editing.effectiveScene(p,entry.scene);
@@ -56,7 +56,7 @@ async function inspect(root,kind,id){
   const rate=Math.max(.5,Math.min(2,Number(scene.playbackSpeed)||1))*master.speed;
   const ranges=media.retainedRanges(scene,info.duration).map(r=>({...r,duration:(r.end-r.start)/rate}));
   const duration=ranges.reduce((sum,r)=>sum+r.duration,0)+editing.plannedMemes(scene,ranges,rate).reduce((sum,meme)=>sum+meme.duration/rate*(Number(scene.playbackSpeed)||1),0);
-  if(duration<.5)missing.push(entry.title+': duración insuficiente');
+  if(duration*master.speed<.5)missing.push(entry.title+': duración insuficiente');
   chapters.push({label:entry.title,scene:entry.scene,projectId:p.id,assetId:scene.video,
    start:elapsed,duration,playbackSpeed:rate,ranges,transition:false,motion});
   elapsed+=duration;
@@ -76,7 +76,7 @@ async function inspect(root,kind,id){
  if(settings.logo&&fs.existsSync(settings.logo))files.push(stamp(settings.logo));
  const models=[...projects.values()].map(p=>({title:p.title,style:p.style,backgrounds:p.backgrounds,transitions:p.transitions,effects:p.effects,master:p.master,editingPlan:p.editingPlan,transcripts:p.transcripts,
   scenes:Object.fromEntries(Object.entries(p.scenes).map(([k,s])=>[k,{...s,approved:undefined,cutHistory:undefined}]))}));
- const hash=crypto.createHash('sha256').update(JSON.stringify({v:VERSION,kind,id,chapters,models,files,
+ const hash=crypto.createHash('sha256').update(JSON.stringify({v:VERSION,kind,id,master,chapters,models,files,
   week:kind==='week'?weekPlan(root,id):null,autoMicrocuts:settings.autoMicrocuts,logo:settings.logo}))
   .digest('hex').slice(0,32);
  return {kind,id,hash,ready:true,live:true,complete:missing.length===0,approved:kind==='short'?approved:true,
@@ -141,7 +141,13 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
   const normalized=path.join(tmp,'final-normalizado.mp4');
   const source=kind==='short'?store.getProject(root,id):null;
   const musicFile=source?.master?.musicAssetId?store.resolveAsset(root,id,source.master.musicAssetId):null;
-  await masterAudio.render(combined,normalized,source?.master||{},musicFile,signal);
+  const finalMaster={...snapshot.master};
+  if(kind==='short'&&finalMaster.targetSeconds===60){
+   const assembled=await media.probe(combined);
+   finalMaster.speed=Math.min(2,Math.max(.5,assembled.duration/60));
+   for(let i=0;i<joins.length;i++)joins[i]*=snapshot.master.speed/finalMaster.speed;
+  }
+  await masterAudio.render(combined,normalized,finalMaster,musicFile,signal);
   if(signal?.aborted)throw Error('Cancelado');
   const current=await inspect(root,kind,id);
   if(current.hash!==snapshot.hash)throw Error('El proyecto cambió durante la exportación');
@@ -157,7 +163,7 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
   if(signal.aborted)throw Error('Cancelado');
   const destDir=path.join(root,'Exportaciones',kind==='short'?'Shorts':'Videos-Largos');
   fs.mkdirSync(destDir,{recursive:true});
-  const output=path.join(destDir,id+'-'+Date.now()+'.mp4');
+  const output=path.join(destDir,id+'-'+String(Number(finalMaster.speed.toFixed(4))).replace('.','_')+'x-'+Date.now()+'.mp4');
   fs.renameSync(normalized,output);
   if(kind==='short'){
    const p=store.getProject(root,id);p.status='exported';p.exports=p.exports||[];
@@ -166,7 +172,7 @@ async function exportApproved(root,kind,id,expectedHash,signal=new AbortControll
   }else{
    const week=store.getWeek(root,id);week.outputs=week.outputs||[];
    week.outputs.push(output);week.exportedAt=new Date().toISOString();
-   fs.writeFileSync(output.replace(/\.mp4$/,'.capitulos.txt'),production.chapterText(actualChapters),'utf8');
+   fs.writeFileSync(output.replace(/\.mp4$/,'.capitulos.txt'),production.chapterText(actualChapters.map(c=>({...c,start:c.start/finalMaster.speed,duration:c.duration/finalMaster.speed}))),'utf8');
    store.atomic(store.weekFile(root,id),week);
    for(const pid of week.projectIds){
     const p=store.getProject(root,pid);p.usedBy=p.usedBy||[];

@@ -418,6 +418,40 @@ function deleteResourceModal(scope,id,name){
 }
 
 
+function exportClock(seconds){
+ const tenths=Math.round(seconds*10);
+ return Math.floor(tenths/600)+':'+String(Math.floor(tenths/10)%60).padStart(2,'0')+','+tenths%10;
+}
+let savingExportSpeed=null;
+async function applyExportSpeed(value,targetMinute=false){
+ const info=state.reviewInfo;
+ if(!info||state.reviewBusy||savingExportSpeed)return;
+ const speed=Number(Number(value).toFixed(4));
+ if(!Number.isFinite(speed)||speed<.5||speed>2){
+  notice('Elige una velocidad entre 0,5× y 2×.',true);
+  $('#export-speed-value').value=info.master.speed;
+  return;
+ }
+ const controls=$('#export-speed-controls');
+ controls.disabled=true;
+ livePause();
+ savingExportSpeed=(async()=>{
+  if(info.kind==='short'){
+   const project=state.project;
+   const master={...project.master,speed};
+   if(targetMinute)master.targetSeconds=60;else delete master.targetSeconds;
+   await api('projects:save',{id:project.id,master});
+   project.master=master;
+  }else{
+   await api('weekly:save',{id:info.id,exportSpeed:speed});
+  }
+  const updated=await api('review:status',{kind:info.kind,id:info.id});
+  if(state.page==='review'&&state.reviewInfo===info){
+   state.reviewInfo=updated;render();await livePrepare();
+  }
+ })();
+ try{await savingExportSpeed}finally{savingExportSpeed=null;controls.disabled=false}
+}
 function reviewPage(){
  const short=state.reviewKind==='short',m=state.reviewInfo,busy=state.reviewBusy;
  const project=state.project;
@@ -434,12 +468,14 @@ function reviewPage(){
  const songs=(project?.assets||[]).filter(a=>a.type==='audio');
  const selectMusic='<select data-master="musicAssetId" aria-label="Pista musical">'+
   '<option value="">Sin música</option>'+songs.map(a=>'<option value="'+esc(a.id)+'" '+(master.musicAssetId===a.id?'selected':'')+'>'+esc(a.name)+'</option>').join('')+'</select>';
- const speedItems=[.5,.75,1,1.25,1.5,2];
- const masterControls=short?'<div class="review-master"><h3>Ajustes del video completo</h3>'+
-  '<label class="review-control-label" for="master-speed">Velocidad global · Gancho + Desarrollo + Cierre</label>'+
-  '<select id="master-speed" data-master="speed">'+speedItems.map(v=>
-   '<option value="'+v+'" '+(Number(master.speed)===v?'selected':'')+'>'+v.toFixed(2)+'×'+(v===1?' · Normal':'')+'</option>').join('')+'</select>'+
-  '<p class="muted mini">Modifica la duración de todo el Short, incluida la narración. No altera tus originales.</p>'+
+ const speed=m?.master?.speed||1,baseDuration=duration*speed;
+ const minuteSpeed=baseDuration/60;
+ const speedControls=m?.complete?'<fieldset id="export-speed-controls" class="field" '+(busy?'disabled':'')+'><legend>Velocidad de exportación</legend>'+
+  '<div class="row wrap"><input id="master-speed" type="range" min="0.5" max="2" step="0.0001" value="'+speed+'" aria-label="Velocidad del montaje">'+
+  '<label>Velocidad × <input id="export-speed-value" type="number" min="0.5" max="2" step="0.0001" value="'+speed+'"></label>'+
+  (short&&minuteSpeed>=.5&&minuteSpeed<=2?btn('speed-minute','Ajustar a 1:00','secondary'):'')+'</div>'+
+  '<small>Duración estimada · <output id="export-duration">'+exportClock(duration)+'</output></small></fieldset>':'';
+ const masterControls=short?'<div class="review-master">'+
   '<div class="review-master-music"><h3>Música de fondo</h3><label class="review-control-label">Pista musical</label>'+
   selectMusic+'<div class="row wrap">'+btn('music-import','＋ Añadir música','secondary')+
   (master.musicAssetId?btn('music-remove','Quitar música','secondary'):'')+'</div>'+
@@ -492,7 +528,7 @@ function reviewPage(){
  '<div class="row between review-controls"><span id="review-clock">0:00 / '+fmt(duration)+'</span><small>Gancho · Desarrollo · Cierre</small></div>'+
  timeline+warnings+(busy?'<div class="review-working"><span class="review-spinner"></span><div><strong>Exportando MP4</strong>'+
  '<small id="review-progress-msg">Preparando el montaje final…</small><progress id="review-progress" max="100" value="0" aria-label="Avance de render"></progress></div>'+btn('cancel-render','Cancelar','danger')+'</div>':'')+
- '<div class="row wrap review-actions">'+btn('review-export','Exportar MP4',m?.canExport&&!busy?'':'secondary',
+ speedControls+'<div class="row wrap review-actions">'+btn('review-export','Exportar MP4',m?.canExport&&!busy?'':'secondary',
  !m?.canExport||busy?'disabled':'')+btn('review-render-preview','Renderizar vista previa','secondary',m?.complete&&!busy?'':'disabled')+'</div>'+
  (state.reviewRendered&&state.reviewRendered.hash===m?.hash?'<video class="delivery-video" controls src="'+esc(state.reviewRendered.url)+'"></video>':'')+
  (state.reviewOutput?'<div class="review-exported"><strong>MP4 exportado</strong><small>'+esc(state.reviewOutput.file)+'</small>'+
@@ -500,7 +536,7 @@ function reviewPage(){
   btn('delivery-open','Revisar MP4 y preparar publicación','secondary','data-kind="'+state.reviewOutput.target.kind+'" data-id="'+esc(state.reviewOutput.target.id)+'" data-file="'+esc(state.reviewOutput.target.file)+'"'):'')+'</div>':'')+
  '<p class="muted mini">Vista previa sin MP4. La exportación aplica velocidad, transiciones, mezcla y sonido normalizado.</p></section>'+
  '<section class="panel"><h2>Escenas y correcciones</h2><p class="muted mini">Selecciona una escena para verla o regresar a modificarla.</p>'+
- '<div class="review-chapters">'+cards+'</div>'+(short?'<details class="review-extra"><summary>Música, velocidad y efectos</summary>'+visualBar+masterControls+transitionSettings+'</details>':'')+
+ '<div class="review-chapters">'+cards+'</div>'+(short?'<details class="review-extra"><summary>Música y efectos</summary>'+visualBar+masterControls+transitionSettings+'</details>':'')+
  ''+
  '</section></div>';
 }
@@ -524,6 +560,7 @@ async function buildReview(){
  render();await livePrepare();
 }
 async function renderReviewPreview(){
+ await savingExportSpeed;
  if(state.reviewBusy||!state.reviewInfo?.complete)throw Error('Completa las escenas para renderizar la vista previa');
  const {kind,id,hash}=state.reviewInfo;
  livePause();state.reviewBusy=true;state.reviewError='';render();
@@ -532,6 +569,7 @@ async function renderReviewPreview(){
  finally{state.reviewBusy=false;if(state.page==='review'){render();await livePrepare()}}
 }
 async function exportReview(){
+ await savingExportSpeed;
  if(state.reviewBusy||!state.reviewInfo?.canExport)throw Error('Aprueba las escenas antes de exportar');
  const {kind,id,hash}=state.reviewInfo;
  livePause();state.reviewBusy=true;state.reviewError='';render();
@@ -974,9 +1012,10 @@ document.addEventListener('click',async e=>{
    return openProject(b.dataset.id,b.dataset.scene,state.reviewKind==='week'?'wide':'short');
   }
   if(action==='review-build')return await buildReview();
-  if(action==='live-play')return await liveStart();
+  if(action==='live-play'){await savingExportSpeed;return await liveStart()}
   if(action==='live-pause')return livePause();
   if(action==='live-stop')return liveStop();
+  if(action==='speed-minute')return await applyExportSpeed(state.reviewInfo.duration*state.reviewInfo.master.speed/60,true);
   if(action==='review-export')return await exportReview();
   if(action==='effects-regenerate'||action==='effects-toggle'){
    if(!state.project||state.reviewKind!=='short')throw Error('Abre un Short para editar los efectos');
@@ -1188,6 +1227,14 @@ document.addEventListener('click',async e=>{
  }catch(err){notice(err.message,true);console.error(err)}
 });
 document.addEventListener('input',e=>{
+ if(['master-speed','export-speed-value'].includes(e.target.id)&&state.reviewInfo){
+  const speed=e.target.valueAsNumber;
+  if(speed>=.5&&speed<=2){
+   const other=e.target.id==='master-speed'?'#export-speed-value':'#master-speed';
+   $(other).value=speed;
+   $('#export-duration').textContent=exportClock(state.reviewInfo.duration*state.reviewInfo.master.speed/speed);
+  }
+ }
  if(e.target?.dataset?.master==='musicLevel'&&state.page==='review'){
   const label=$('#music-level-label');if(label)label.textContent=e.target.value+'%';
   const track=document.getElementById('review-music');
@@ -1195,6 +1242,10 @@ document.addEventListener('input',e=>{
  }
 });
 document.addEventListener('change',async e=>{
+ if(['master-speed','export-speed-value'].includes(e.target.id)){
+  try{await applyExportSpeed(e.target.valueAsNumber)}catch(error){notice(error.message,true)}
+  return;
+ }
  if(e.target.id==='week-transition'&&state.page==='week'){
   try{await api('weekly:save',{id:state.week.id,transition:e.target.value});await openWeek(state.week.id)}
   catch(error){notice(error.message,true)}

@@ -490,3 +490,8 @@ details > summary { cursor: pointer; }
 .resource-name{min-width:0}.resource-name small{display:block}
 .resource-name strong,.photo-picker button{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .stage video.photo{background:transparent}
+
+#export-speed-controls{margin:14px 0;padding:10px 14px;border:1px solid var(--line);border-radius:10px}
+#export-speed-controls legend{font-weight:700}
+#export-speed-controls input[type=range]{flex:1 1 130px;width:auto}
+#export-speed-value{width:7em}
