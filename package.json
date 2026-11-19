@@ -74,6 +74,18 @@
       {
         "from": "build/animation/records-animation",
         "to": "animation"
+      },
+      {
+        "from": "browser-stats",
+        "to": "browser-stats",
+        "filter": [
+          "*.js",
+          "*.py"
+        ]
+      },
+      {
+        "from": "scripts/source-python.ps1",
+        "to": "scripts/source-python.ps1"
       }
     ]
   }

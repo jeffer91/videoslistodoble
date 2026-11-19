@@ -39,3 +39,24 @@ test('dos sincronizaciones conservan un solo video con dos mediciones y exportac
  assert.equal(data.videos[0].history.length,2);assert.ok(data.videos[0].history[0].at);assert.equal(data.videos[0].publishedAt,'2020-01-01');
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+test('API y navegador comparten el Reel, conservan fecha, ceros e historial por origen',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'browser-stats-'));
+ try {
+   store.ensureRoot(root);
+   const vault={isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()};
+   const reel={externalId:'991',url:'https://www.instagram.com/reel/abc/',title:'Récord',publishedAt:'2024-01-01',metrics:{views:13,reach:null}};
+   const p=createPublishing(root,vault,{verifyAccount:async()=>({id:'p1',label:'Perfil'}),async *catalogPages(){yield {videos:[reel]}}});
+   const visible={externalId:'abc',url:reel.url,metrics:{reach:7,likes:0}};
+   p.browserReading('instagram',visible);
+   await p.connect('instagram',{accessToken:'test'});
+   await p.refreshStats();
+   p.browserReading('instagram',visible);
+   const rows=p.stats();
+   assert.equal(rows.length,1);
+   assert.equal(rows[0].externalId,'991');
+   assert.equal(rows[0].publishedAt,'2024-01-01');
+   assert.deepEqual(rows[0].metrics,{views:13,reach:7,likes:0});
+   assert.deepEqual(rows[0].history.map(h=>h.source),['navegador','red','navegador']);
+   assert.equal(rows[0].metricOrigins.views.source,'red');
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});

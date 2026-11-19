@@ -10,6 +10,7 @@ const store = require('./store.cjs');
 
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
   const publishing = createPublishing(root, safeStorage);
+  let browsing = false;
   let backupTask = null;
   let oauthTask = null;
   const update = { status: 'disponible en una instalación publicada', message: '', installed: app.getVersion(), available: '' };
@@ -149,6 +150,19 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'statistics.status': () => publishing.syncStatus(),
     'statistics.list': () => publishing.stats(),
     'statistics.refresh': () => publishing.refreshStats(),
+    'statistics.browser': async ({network}) => {
+      if (browsing) throw Error('Ya hay una lectura desde el navegador en curso');
+      browsing=true;
+      try {
+        return await require('./browser-statistics.cjs').readBrowser(app,network,async ()=>{
+          const result=await dialog.showMessageBox(window(),{type:'info',title:'Leer '+network,
+            message:'En el navegador, inicia sesión y abre tu listado de videos o Reels.',
+            detail:'Elige la cuenta correcta y el período completo disponible. Cuando veas tus publicaciones, vuelve aquí y pulsa Leer videos.',
+            buttons:['Leer videos','Cancelar'],cancelId:1,defaultId:0});
+          return result.response===0;
+        },video=>publishing.browserReading(network,video));
+      } finally {browsing=false;}
+    },
     'statistics.manual': data => publishing.manualStats(data),
     'statistics.export': () => publishing.exportStats(),
     'updates.status': () => ({ ...update, automatic: production.readState(root, 'actualizaciones', { automatic: true }).automatic }),

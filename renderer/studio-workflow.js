@@ -413,7 +413,7 @@
     const rows = stats.filter(item => (!statsFilters.network || item.network === statsFilters.network) &&
       (!statsFilters.tag || tagList(item).includes(statsFilters.tag)) && (!statsFilters.week || weekOf(item.publishedAt) === statsFilters.week));
     const metrics = ['views', 'likes', 'comments', 'shares'];
-    return titlebar('Estadísticas', '', btn('stats-refresh', 'Sincronizar todos los videos') + btn('settings','Conectar cuentas','secondary') + btn('stats-export', 'Exportar datos para Claude', 'secondary')) +
+    return titlebar('Estadísticas', '', btn('stats-refresh', 'Sincronizar por API') + btn('stats-browser','Leer desde navegador','secondary') + btn('settings','Conectar cuentas','secondary') + btn('stats-export', 'Exportar datos para Claude', 'secondary')) +
       (syncStatus.at?'<p>Última consulta: '+esc(when(syncStatus.at))+'</p>':'') +
       (syncStatus.errors?.length?'<details class="warning"><summary>Consulta incompleta</summary>'+syncStatus.errors.map(esc).join('<br>')+'</details>':'') +
       panel('Rendimiento por video', '<div class="workflow-filters">' +
@@ -422,11 +422,11 @@
         field('Semana del', select('stats-week', [['', 'Todas'], ...weeks.map(week => [week, week])], statsFilters.week)) + '</div>' +
         (rows.length ? '<div class="workflow-table"><table><thead><tr><th>Video</th><th>Red</th><th>Publicado</th><th>Vistas</th><th>Me gusta</th>' +
         '<th>Comentarios</th><th>Compartidos</th><th>Datos</th></tr></thead><tbody>' + rows.map(item =>
-          '<tr><th>' + esc(item.title) + '</th><td>' + statsBrands[item.network] + '</td><td>' + esc(item.publishedAt?when(item.publishedAt):'—')+'</td>' +
+          '<tr><th>' + esc(item.title) + '</th><td>' + statsBrands[item.network] + '</td><td>' + esc(item.publishedAt?when(item.publishedAt):item.dateText||'—')+'</td>' +
           metrics.map(key => '<td>' + number(item.metrics?.[key], key === 'retention') + '</td>').join('') +
           '<td>' + action('stats-detail', 'Ver detalle', item.id) + (item.localJob?action('stats-manual-dialog', 'Editar métricas', item.id):'') +
           (item.metricsError ? '<small class="muted">' + esc(item.metricsError) + '</small>' : '') + '</td></tr>').join('') +
-        '</tbody></table></div>' : '<p class="muted">Conecta tus cuentas y pulsa Sincronizar todos los videos.</p>')) +
+        '</tbody></table></div>' : '<p class="muted">Conecta una cuenta para sincronizar por API o elige Leer desde navegador.</p>')) +
       '<div class="workflow-columns">' + rank(rows, row => row.hook ? [row.hook] : [], 'Ganchos con más vistas') +
       rank(rows, row => row.tags.tipos || [], 'Temas con más vistas') +
       rank(rows, row => row.tags.jugadores || [], 'Jugadores con más vistas') + '</div>';
@@ -717,11 +717,27 @@
       const labels={views:'Vistas',likes:'Me gusta',comments:'Comentarios',shares:'Compartidos',followers:'Seguidores de la cuenta',
         retention:'Porcentaje medio visto',saved:'Guardados',reach:'Alcance',averageViewDuration:'Duración media vista (s)',
         estimatedMinutesWatched:'Minutos vistos',ig_reels_avg_watch_time:'Tiempo medio visto (ms)'};
-      const entries=metrics=>Object.entries(metrics||{}).map(([k,v])=>'<div class="asset"><span>'+esc(labels[k]||k)+'</span><strong>'+show(v)+'</strong></div>').join('');
-      modal(row.title,'<p>'+esc(statsBrands[row.network])+' · '+esc(row.identity?.label)+' · Publicado: '+esc(row.publishedAt?when(row.publishedAt):'—')+'</p>'+
-        (row.url?'<p>'+esc(row.url)+'</p>':'')+entries(row.metrics)+
+      const entries=(metrics,origins={})=>Object.entries(metrics||{}).map(([k,v])=>'<div class="asset"><span>'+esc(labels[k]||k)+(origins[k]?' · '+esc(origins[k].source==='red'?'API':'Navegador')+' · '+esc(when(origins[k].at)):'')+'</span><strong>'+show(v)+'</strong></div>').join('');
+      modal(row.title,'<p>'+esc(statsBrands[row.network])+' · '+esc(row.identity?.label)+' · Publicado: '+esc(row.publishedAt?when(row.publishedAt):row.dateText||'—')+'</p>'+
+        (row.url?'<p>'+esc(row.url)+'</p>':'')+entries(row.metrics,row.metricOrigins)+
         (row.manualMetrics?'<details><summary>Cifras manuales</summary>'+entries(row.manualMetrics)+'</details>':'')+
-        '<h3>Historial de mediciones</h3>'+(row.history||[]).slice().reverse().map(h=>'<details><summary>'+esc(when(h.at))+'</summary>'+entries(h.metrics)+'</details>').join(''));
+        '<h3>Historial de mediciones</h3>'+(row.history||[]).slice().reverse().map(h=>'<details><summary>'+esc(when(h.at))+' · '+(h.source==='navegador'?'Navegador':'API')+'</summary>'+entries(h.metrics)+'</details>').join(''));
+      return;
+    }
+    if (name === 'stats-browser') {
+      return modal('Leer desde navegador','<p>Elige una red. Se abrirá un navegador para que selecciones tu cuenta y tu listado de videos.</p>'+
+        Object.entries(statsBrands).map(([key,label])=>action('stats-browser-open',label,key)).join(''));
+    }
+    if (name === 'stats-browser-open') {
+      const buttons=element.parentElement.querySelectorAll('button');
+      buttons.forEach(b=>b.disabled=true);
+      element.textContent='Preparando navegador…';
+      try {
+        const result=await flow('statistics.browser',{network:id});
+        await Recording.close();
+        await navigateTo('statistics');
+        if (!result.canceled) notice(result.count+' videos con métricas · '+result.missing+' identificados sin cifras. La lectura depende del listado visible.', !result.count || result.missing>0);
+      } finally {buttons.forEach(b=>b.disabled=false);element.textContent=statsBrands[id];}
       return;
     }
     if (name === 'stats-refresh') {
@@ -732,7 +748,7 @@
         await navigateTo('statistics');
         notice(result.count + ' publicaciones actualizadas' + (result.errors.length ? ' · ' + result.errors[0] : ''), result.errors.length > 0);
       } finally {
-        element.disabled = false; element.textContent='Sincronizar todos los videos';
+        element.disabled = false; element.textContent='Sincronizar por API';
       }
       return;
     }

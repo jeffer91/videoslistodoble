@@ -314,6 +314,42 @@ function createPublishing(root, vault, platform = clients) {
     return stats();
   }
 
+  function catalogKey(network, video) {
+    const match = network === 'instagram' && video.url?.match(/\/reels?\/([\w-]+)/);
+    return match ? 'reel:'+match[1] : String(video.externalId);
+  }
+
+  function recordReading(inventory, network, identity, video, source, at) {
+    const identifier = catalogKey(network,video);
+    let key = JSON.stringify([network,identity.id,video.externalId]);
+    const previousKey = inventory[key] ? key : Object.keys(inventory).find(k=>{
+      const row=inventory[k];
+      return row.network===network && (String(row.externalId)===String(video.externalId) || catalogKey(network,row)===identifier);
+    });
+    const previous = inventory[previousKey] || {};
+    if (source==='navegador' && previousKey) key=previousKey;
+    if (previousKey && key!==previousKey) delete inventory[previousKey];
+    const values=Object.fromEntries(Object.entries(video.metrics||{}).filter(([,v])=>v!=null));
+    const origins={...Object.fromEntries(Object.keys(previous.metrics||{}).map(k=>[k,{source:previous.metricsSource||'red',at:previous.metricsAt}])),...previous.metricOrigins};
+    for (const k of Object.keys(values)) origins[k]={source,at};
+    const history=[...(previous.history||[]),{at,source,metrics:values,...(video.rawMetrics?{rawMetrics:video.rawMetrics}:{})}];
+    const metadata=Object.fromEntries(Object.entries(video).filter(([,v])=>v!=null && v!==''));
+    const keepOfficial=source==='navegador' && previous.identity?.id && previous.identity.id!=='navegador';
+    inventory[key]={...previous,...metadata,externalId:keepOfficial?previous.externalId:video.externalId,
+      title:(keepOfficial && previous.title)||video.title||previous.title||video.externalId,
+      publishedAt:(keepOfficial && previous.publishedAt)||video.publishedAt||previous.publishedAt||null,
+      url:(keepOfficial && previous.url)||video.url||previous.url,
+      identity:keepOfficial?previous.identity:identity,network,id:key,metricsAt:at,metricsSource:source,
+      metrics:{...previous.metrics,...values},metricOrigins:origins,history};
+    return key;
+  }
+
+  function browserReading(network,video) {
+    const inventory=production.readState(root,INVENTORY,{});
+    recordReading(inventory,network,{id:'navegador',label:'Navegador'},video,'navegador',new Date().toISOString());
+    production.writeState(root,INVENTORY,inventory);
+  }
+
   async function refreshStats() {
     if (refreshing) throw Error('Ya se están actualizando las estadísticas');
     refreshing = true;
@@ -321,7 +357,7 @@ function createPublishing(root, vault, platform = clients) {
     let count = 0;
     try {
       const synced = new Set();
-      const inventory = production.readState(root, INVENTORY, {});
+
       for (const [network,identity] of Object.entries(accounts())) {
         if (!identity || !platform.catalogPages) continue;
         try {
@@ -330,12 +366,9 @@ function createPublishing(root, vault, platform = clients) {
             if (accounts()[network]?.id !== identity.id) throw Error('La cuenta cambió durante la consulta');
             if (page.warning) errors.push(network+' · '+page.warning);
             const metricsAt = new Date().toISOString();
+            const inventory = production.readState(root, INVENTORY, {});
             for (const video of page.videos) {
-              const key = JSON.stringify([network,identity.id,video.externalId]);
-              const history = inventory[key]?.history || [];
-              history.push({at:metricsAt,metrics:video.metrics});
-              inventory[key] = {...video, network, identity, id:key, metricsAt, metricsSource:'red', history};
-              synced.add(key);
+              synced.add(recordReading(inventory,network,identity,video,'red',metricsAt));
               count++;
             }
             if (page.videos.length) production.writeState(root, INVENTORY, inventory);
@@ -373,7 +406,9 @@ function createPublishing(root, vault, platform = clients) {
     for(const job of queue().filter(item => item.status === 'publicado')) {
       const project = projects.get(job.target.id);
       const week = weeks.get(job.target.id);
-      const key = job.externalId ? JSON.stringify([job.network,job.identity.id==='manual' ? identities[job.network]?.id : job.identity.id,job.externalId]) : job.id;
+      let key = job.externalId ? JSON.stringify([job.network,job.identity.id==='manual' ? identities[job.network]?.id : job.identity.id,job.externalId]) : job.id;
+      if (!catalogRows[key]) key=Object.keys(catalogRows).find(k=>catalogRows[k].network===job.network &&
+        (catalogRows[k].externalId===job.externalId || catalogKey(job.network,catalogRows[k])===catalogKey(job.network,job))) || key;
       const remote = catalogRows[key];
       merged.set(key,{...publicJob(job), ...remote, id:job.id, localJob:true,
         ...(job.metricsSource==='manual'?{manualMetrics:job.metrics}:{}),
@@ -391,7 +426,7 @@ function createPublishing(root, vault, platform = clients) {
     return file;
   }
 
-  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, refreshStats, stats, exportStats };
+  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };
