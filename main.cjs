@@ -65,7 +65,7 @@ app.whenReady().then(()=>{
         }else if(u.hostname==='review'&&pieces.length===3&&typeof reviews.resolve==='function'){
           file=reviews.resolve(ROOT,pieces[0],pieces[1],pieces[2]);
         }else if(u.hostname==='preview'&&pieces.length===2){
-          file=media.resolvePreview(ROOT,pieces[0],pieces[1]);
+          file=media.resolvePreview(ROOT,pieces[0],pieces[1],u.searchParams.get('v'));
         }else{throw Error('URL inválida para vista previa')}
         const stat=fs.statSync(file),total=stat.size;
         const range=request.headers.get('range');

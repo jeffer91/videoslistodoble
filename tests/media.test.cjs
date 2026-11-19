@@ -115,6 +115,16 @@ test('normaliza un WebM antiguo a MP4 H.264 y conserva el original',{timeout:800
   assert.match(String(meta.stdout),/codec_name=h264/);
   const cached=await media.preparePreview(dir,project.id,asset.id);
   assert.equal(cached.url,result.url);
+  const version=url=>new URL(url).searchParams.get('v');
+  const reader=fs.openSync(normalized,'r');
+  try{
+   const [repaired,duplicate]=await Promise.all([true,true].map(force=>media.preparePreview(dir,project.id,asset.id,force)));
+   assert.notEqual(repaired.url,result.url);
+   assert.equal(repaired.url,duplicate.url);
+   assert.equal(media.resolvePreview(dir,project.id,asset.id,version(result.url)),normalized);
+   assert.notEqual(media.resolvePreview(dir,project.id,asset.id,version(repaired.url)),normalized);
+   assert.equal((await media.preparePreview(dir,project.id,asset.id)).url,repaired.url);
+  }finally{fs.closeSync(reader)}
  }finally{fs.rmSync(dir,{force:true,recursive:true})}
 });
 test('previsualización distribuye tres imágenes según la narración',{timeout:45000},async()=>{

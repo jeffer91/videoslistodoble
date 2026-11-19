@@ -619,7 +619,7 @@ async function prepareScenePreview(force=false){
  const projectId=state.project.id,sceneKey=state.scene,assetId=state.project.scenes[sceneKey]?.video;
  if(!assetId)return;
  const cacheKey=previewAssetKey(projectId,assetId);
- if(force){delete state.previewUrls[cacheKey];delete state.previewErrors[cacheKey]}
+ if(force)delete state.previewErrors[cacheKey]
  previewMessage('Preparando versión MP4 para reproducción…');
  const tasks=await Promise.allSettled([
   ensurePreview(projectId,assetId,force),

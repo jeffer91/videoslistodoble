@@ -123,20 +123,37 @@ function splitByEdits(entries,cuts=[]){
 
 const crypto=require('node:crypto');
 const previewPromises=new Map();
+function previewBase(root,projectId,assetId,source){
+ const stat=fs.statSync(source);
+ const fingerprint=crypto.createHash('sha256').update(String(stat.size)+':'+String(stat.mtimeMs)).digest('hex').slice(0,12);
+ return path.join(root,'Proyectos',projectId,'Previews',assetId+'-'+fingerprint);
+}
+const previewVersion=/^\d{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function latestPreview(base){
+ const folder=path.dirname(base),prefix=path.basename(base)+'-';
+ if(fs.existsSync(folder)){
+  const versions=fs.readdirSync(folder).filter(name=>name.startsWith(prefix)&&name.endsWith('.ready'))
+   .map(name=>name.slice(prefix.length,-6)).filter(v=>previewVersion.test(v)).sort().reverse();
+  for(const version of versions)if(fs.existsSync(base+'-'+version+'.mp4'))return version;
+ }
+ return fs.existsSync(base+'.mp4')?'legacy':null;
+}
+function previewFile(base,version){return base+(version==='legacy'?'':'-'+version)+'.mp4'}
 async function preparePreview(root,projectId,assetId,force=false){
  const source=store.resolveAsset(root,projectId,assetId);
  const asset=store.getProject(root,projectId).assets.find(a=>a.id===assetId);
  if(!asset||asset.type!=='video')throw Error('El recurso no es un video');
- const stat=fs.statSync(source);
- const fingerprint=crypto.createHash('sha256').update(String(stat.size)+':'+String(stat.mtimeMs)).digest('hex').slice(0,12);
- const folder=path.join(root,'Proyectos',projectId,'Previews');
- const out=path.join(folder,assetId+'-'+fingerprint+'.mp4');
- if(!force&&fs.existsSync(out)&&fs.statSync(out).size>1000)return {url:'records://preview/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId),duration:(await probe(out)).duration};
- const key=projectId+':'+assetId+':'+fingerprint;
- if(!previewPromises.has(key)){
-  previewPromises.set(key,(async()=>{
-   fs.mkdirSync(folder,{recursive:true});
-   const temp=path.join(folder,assetId+'-'+fingerprint+'-'+crypto.randomUUID()+'.tmp.mp4');
+ const base=previewBase(root,projectId,assetId,source);
+ if(!previewPromises.has(base)){
+  previewPromises.set(base,(async()=>{
+   const url='records://preview/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId)+'?v=';
+   const cached=!force&&latestPreview(base);
+   if(cached){
+    const meta=await probe(previewFile(base,cached)).catch(()=>null);
+    if(meta?.width&&meta.duration>0)return {url:url+cached,duration:meta.duration};
+   }
+   fs.mkdirSync(path.dirname(base),{recursive:true});
+   const version=Date.now()+'-'+crypto.randomUUID(),output=previewFile(base,version);
    try{
     await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y',
      '-fflags','+genpts','-i',source,
@@ -144,21 +161,26 @@ async function preparePreview(root,projectId,assetId,force=false){
      '-c:v','libx264','-preset','veryfast','-crf','24',
      '-c:a','aac','-b:a','128k','-ar','48000',
      '-avoid_negative_ts','make_zero','-movflags','+faststart',
-     '-max_muxing_queue_size','1024',temp]);
-    if(!fs.existsSync(temp)||fs.statSync(temp).size<1000)throw Error('No se produjo un video compatible');
-    if(force&&fs.existsSync(out))fs.rmSync(out,{force:true});
-    fs.renameSync(temp,out);
-   }finally{if(fs.existsSync(temp))fs.rmSync(temp,{force:true})}
-  })().finally(()=>previewPromises.delete(key)));
+     '-max_muxing_queue_size','1024',output]);
+    const meta=await probe(output);
+    if(!meta.width||!meta.duration)throw Error('No se produjo un video compatible');
+    fs.writeFileSync(base+'-'+version+'.ready','',{flag:'wx'});
+    return {url:url+version,duration:meta.duration};
+   }catch(error){
+    try{fs.rmSync(output,{force:true})}catch{}
+    throw error;
+   }
+  })().finally(()=>previewPromises.delete(base)));
  }
- await previewPromises.get(key);
- return {url:'records://preview/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(assetId),duration:(await probe(out)).duration};
+ return previewPromises.get(base);
 }
-function resolvePreview(root,projectId,assetId){
- const src=store.resolveAsset(root,projectId,assetId),stat=fs.statSync(src);
- const fingerprint=crypto.createHash('sha256').update(String(stat.size)+':'+String(stat.mtimeMs)).digest('hex').slice(0,12);
- const base=path.join(root,'Proyectos',projectId,'Previews');
- const output=path.join(base,assetId+'-'+fingerprint+'.mp4');
+function resolvePreview(root,projectId,assetId,version){
+ const source=store.resolveAsset(root,projectId,assetId);
+ const base=previewBase(root,projectId,assetId,source);
+ version=version??latestPreview(base);
+ if(version!=='legacy'&&(!previewVersion.test(version)||!fs.existsSync(base+'-'+version+'.ready')))
+  throw Error('Versión de vista previa desconocida');
+ const output=previewFile(base,version);
  if(!fs.existsSync(output))throw Error('El video de vista previa aún no está preparado');
  return output;
 }
