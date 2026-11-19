@@ -6,14 +6,15 @@ const PhotoTrack=(()=>{
  const current=()=>state.project.scenes[state.scene];
  function blocks(scene,duration){
   const start=Number(scene.start)||0,end=Math.min(scene.end||duration,duration);
-  const auto=scene.media.filter(m=>!Number.isFinite(m.at));
+  const media=scene.media??[];
+  const auto=media.filter(m=>!Number.isFinite(m.at));
   const cuts=[...(scene.cuts||[]).filter(c=>c.mode==='both'),...(scene.silences||[]).filter(c=>c.remove)].sort((a,b)=>a.start-b.start);
   let from=start;const ranges=[];
   for(const c of cuts){if(c.start>from)ranges.push([from,Math.min(end,c.start)]);from=Math.max(from,c.end);if(from>=end)break;}
   if(from<end)ranges.push([from,end]);
   const total=ranges.reduce((n,[a,b])=>n+b-a,0);
   function source(t){for(const [a,b] of ranges){if(t<=b-a+.00001)return a+t;t-=b-a;}return end;}
-  return scene.media.map(m=>{
+  return media.map(m=>{
    if(Number.isFinite(m.at))return {...m};
    const i=auto.indexOf(m),at=source(total*i/auto.length);
    return {...m,at,seconds:source(total*(i+1)/auto.length)-at};

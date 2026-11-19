@@ -46,3 +46,27 @@ test('mover un bloque sobre otro permite insertar o reemplazar; cancelar conserv
  scene.media=JSON.parse(original);await drag();await api.handle('photo-replace');
  assert.deepEqual(Array.from(scene.media,m=>[m.assetId,m.at]),[['A',5]]);
 });
+
+test('Animar imagen desde revisión abre el selector en un gancho antiguo sin recursos',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'records-hook-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ store.ensureRoot(root);
+ const project=store.createProject(root,{title:'Gancho de tres segundos'});
+ assert.deepEqual(project.scenes.hook.media,[]);
+ assert.deepEqual(project.scenes.closing.media,[]);
+ const hook=project.scenes.hook;
+ hook.video='toma';hook.end=3;
+ delete hook.media;
+ store.atomic(store.projectFile(root,project.id),project);
+ const modal={},state={page:'review',project};
+ const vm=require('node:vm');
+ const ctx={state,editorDuration:()=>3,$:()=>modal,esc:s=>s,btn:(action,label)=>label,
+  document:{addEventListener(){}},openProject:async(id,scene)=>{
+   state.project=store.getProject(root,id);state.page='project';state.scene=scene;
+  }};
+ const ui=vm.runInNewContext(fs.readFileSync(require.resolve('../renderer/photo-track.js'),'utf8')+'\nPhotoTrack',ctx);
+ assert.doesNotThrow(()=>ui.track(hook,3));
+ await ui.open('hook');
+ assert.deepEqual(state.project.scenes.hook.media,[]);
+ assert.match(modal.innerHTML,/Importar foto/);
+});

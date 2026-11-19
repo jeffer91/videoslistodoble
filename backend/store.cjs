@@ -5,16 +5,21 @@ const TYPES={'.mp4':'video','.mov':'video','.mkv':'video','.webm':'video','.avi'
 const safeId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{5,90}$/.test(s);
 const uid=()=>crypto.randomUUID();
 const makeScenes=()=>({
- hook:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65},
+ hook:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65,media:[]},
  body:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'left',scale:65,media:[]},
- closing:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'center',scale:80}
+ closing:{video:null,start:0,end:0,silences:[],title:'',number:'',name:'',layout:'auto',position:'center',scale:80,media:[]}
 });
 function ensureRoot(root){for(const dir of ['Proyectos','Compilaciones','Exportaciones/Shorts','Exportaciones/Videos-Largos','Recursos','Recursos/Plantillas','Recursos/Medios','Respaldos','Configuracion','Temporales'])fs.mkdirSync(path.join(root,dir),{recursive:true});const logo=path.join(root,'Recursos','logo-11-records.png'),source=path.join(__dirname,'..','assets','logo-11-records.png');if(!fs.existsSync(logo)&&fs.existsSync(source))fs.copyFileSync(source,logo);const settings=getSettings(root);if(!settings.logo&&fs.existsSync(logo))saveSettings(root,{logo})}
 function readJSON(file){return JSON.parse(fs.readFileSync(file,'utf8'))}
 function atomic(file,obj){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+process.pid+'.tmp';fs.writeFileSync(tmp,JSON.stringify(obj,null,2),'utf8');fs.renameSync(tmp,file)}
 function projectFile(root,id){if(!safeId(id))throw Error('Identificador de proyecto inválido');return path.join(root,'Proyectos',id,'proyecto.json')}
 function weekFile(root,id){if(!safeId(id))throw Error('Identificador de compilación inválido');return path.join(root,'Compilaciones',id,'compilacion.json')}
-function getProject(root,id){const p=readJSON(projectFile(root,id));if(p.id!==id)throw Error('Inconsistencia de proyecto');return p}
+function getProject(root,id){
+ const p=readJSON(projectFile(root,id));
+ if(p.id!==id)throw Error('Inconsistencia de proyecto');
+ for(const scene of Object.values(p.scenes||{})) scene.media ??= [];
+ return p;
+}
 function createProject(root,x){const id=uid(),now=new Date().toISOString();const scenes=makeScenes();for(const [key,scene] of Object.entries(scenes)){scene.formats={short:{layout:'auto',position:key==='closing'?'center':'left',scale:key==='closing'?95:65},wide:{layout:'auto',position:key==='closing'?'center':'right',scale:key==='closing'?95:65}};scene.backgrounds={}};const p={schema:1,id,title:String(x.title||'Nuevo récord').slice(0,120),createdAt:now,updatedAt:now,status:'editing',assets:[],style:getSettings(root).defaultStyle||'historic',backgrounds:{short:getSettings(root).templateDefaults?.short||null,wide:getSettings(root).templateDefaults?.wide||null},scenes,transitions:{hookBody:'cut',bodyClosing:'fade',duration:.15},effects:{enabled:true,sceneTransitionsAuto:true,revision:0},master:{speed:1,musicAssetId:null,musicLevel:18},exports:[],usedBy:[],
   tags:catalog.normalizeTags(x.tags),script:catalog.normalizeScript(x.script),notes:catalog.normalizeNotes(x.notes),
   plannedDate:catalog.normalizeDate(x.plannedDate),withClaude:x.withClaude===true,ideaId:x.ideaId||null};
