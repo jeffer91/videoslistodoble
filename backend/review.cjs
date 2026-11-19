@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const store=require('./store.cjs'),media=require('./media.cjs'),logos=require('./logo.cjs'),templates=require('./templates.cjs');
 const KINDS=['short','week'],UUID=/^[a-f0-9-]{36}$/i,KEYS=['hook','body','closing'];
 const NAMES={hook:'Gancho',body:'Desarrollo',closing:'Cierre'};
-const VERSION='montage-v3';
+const VERSION='montage-v4';
 const editing=require('./editing.cjs'),delivery=require('./delivery.cjs'),production=require('./production.cjs');
 const masterAudio=require('./master-audio.cjs');
 const visualDirector=require('../renderer/visual-director.js');

@@ -192,8 +192,15 @@ async function overlayScene(library, root, project, scene, segments, ranges, rat
   const graphics = values('graphics');
   const memes = plannedMemes(scene, ranges, rate);
   const at=scene.closingStamp?.at;
-  const stampRanges=Number.isFinite(at) && ranges.some(r=>r.start<=at && at<r.end)
-    ? clipsOnOutput([{start:at,end:at+1}],ranges,rate) : [];
+  const stampRanges=[];
+  if(Number.isFinite(at)&&ranges.some(r=>r.start<=at&&at<r.end)){
+    let position=0;
+    for(const range of ranges){
+      const from=Math.max(at,range.start),to=Math.min(at+1,range.end);
+      if(to>from)stampRanges.push({start:position+(from-range.start)/rate,end:position+(to-range.start)/rate,elapsed:from-at});
+      position+=(range.end-range.start)/rate;
+    }
+  }
   if (!stampRanges.length && !words.length && !texts.length && !graphics.length && !memes.length) return { segments, added: 0 };
   const input = path.join(root, 'scene.mp4');
   await media.concat(root, segments, input, signal);
@@ -228,19 +235,22 @@ async function overlayScene(library, root, project, scene, segments, ranges, rat
     signal, null, root);
   }
   if (stampRanges.length) {
-    const start=stampRanges[0].start, end=stampRanges.at(-1).end;
-    for(const name of ['sello.png','sello.wav'])
+    const start=stampRanges[0].start;
+    const plate=info.width>info.height?'sello-horizontal.png':'sello-vertical.png';
+    for(const name of [plate,'sello.wav'])
       fs.copyFileSync(path.join(__dirname,'..','assets',name),path.join(root,name));
     const output=path.join(root,'sellado.mp4');
-    const width=2*Math.round(info.width*.6/2);
+    const active=stampRanges.map(r=>'gte(t,'+r.start+')*lt(t,'+r.end+')').join('+');
+    const elapsed=stampRanges.reduceRight((rest,r)=>'if(lt(t,'+r.end+'),'+r.elapsed+'+(t-'+r.start+')*'+rate+','+rest+')','1');
+    const lift='if(lt(ld(0),0.16),0.025*sin(PI*ld(0)/0.16),max(0,(ld(0)-0.86)/0.14))';
     const graph=[
-      '[1:v]scale='+width+':-1,format=rgba[stamp]',
-      "[0:v][stamp]overlay=x=(W-w)/2:y=H*0.24:enable='gte(t,"+start.toFixed(6)+")*lt(t,"+end.toFixed(6)+")'[v]",
+      '[1:v]scale='+info.width+':'+info.height+',format=rgba[stamp]',
+      "[0:v][stamp]overlay=x=0:y='st(0,"+elapsed+");-H*"+lift+"':enable='"+active+"'[v]",
       '[2:a]adelay='+Math.round(start*1000)+':all=1[hit]',
       '[0:a][hit]amix=inputs=2:duration=first:normalize=0[a]'
     ];
     await media.command(media.toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',last,
-      '-i','sello.png','-i','sello.wav','-filter_complex',graph.join(';'),'-map','[v]','-map','[a]',
+      '-i',plate,'-i','sello.wav','-filter_complex',graph.join(';'),'-map','[v]','-map','[a]',
       '-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2',output],signal,null,root);
     last=output;
   }

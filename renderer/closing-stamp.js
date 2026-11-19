@@ -8,7 +8,7 @@ const ClosingStamp = (() => {
     const at=timing(scene);
     if(at===null || at<(scene.start||0) || (scene.end>0 && at>=scene.end) ||
       [...(scene.silences||[]).filter(x=>x.remove),...(scene.cuts||[]).filter(x=>x.mode==='both')].some(x=>at>=x.start&&at<x.end))return '';
-    return '<img class="closing-stamp" data-stamp-at="'+at+'" src="../assets/sello.png" alt="Récord confirmado" hidden><audio class="stamp-hit" preload="auto" src="../assets/sello.wav"></audio>';
+    return '<div class="closing-stamp" data-stamp-at="'+at+'" role="img" aria-label="Récord confirmado" hidden></div><audio class="stamp-hit" preload="auto" src="../assets/sello.wav"></audio>';
   }
   function track(scene,duration) {
     const at=timing(scene);
@@ -56,6 +56,10 @@ const ClosingStamp = (() => {
     if(!img)return;
     const elapsed=video.currentTime-Number(img.dataset.stampAt);
     img.hidden=elapsed<0 || elapsed>=1;
+    if(!img.hidden){
+      const lift=elapsed<.16?.025*Math.sin(Math.PI*elapsed/.16):Math.max(0,(elapsed-.86)/.14);
+      img.style.transform='translateY('+(-100*lift)+'%)';
+    }
     if(!img.hidden && !video.paused && !video.seeking && img.dataset.hit!=='yes'){
       img.dataset.hit='yes';
       const audio=box.querySelector('.stamp-hit');

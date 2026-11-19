@@ -459,8 +459,9 @@ details > summary { cursor: pointer; }
 .stamp-track:has(.stamp-cursor:not([hidden])){overflow:visible}
 .stamp-cursor:not([hidden]):before{content:"";position:absolute;left:-2px;bottom:100%;height:79px;border-left:2px solid gold}
 .stamp-cursor{position:absolute;top:0;height:100%;z-index:2;border-left:2px solid gold;color:white;font-size:12px;pointer-events:none}
-.stage img.closing-stamp{position:absolute;top:24%;left:20%;width:60%;height:auto;z-index:8;pointer-events:none}
-.stage img.closing-stamp[hidden]{display:none}
+.stage .closing-stamp{position:absolute;inset:0;z-index:15;pointer-events:none;background:url("../assets/sello-vertical.png") center/100% 100% no-repeat}
+.stage.wide .closing-stamp{background-image:url("../assets/sello-horizontal.png")}
+.stage .closing-stamp[hidden]{display:none}
 
 .photo-track{position:relative;height:44px;border-block:1px solid #426152;background:#132a23;overflow:hidden}
 .photo-track:empty::after{content:'Imágenes';padding:10px;color:#a6c4b4;font-size:12px;display:block}
