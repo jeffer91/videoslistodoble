@@ -7,6 +7,7 @@ const production = require('./production.cjs');
 const delivery = require('./delivery.cjs');
 const clients = require('./network-clients.cjs');
 const catalog = require('./catalog.cjs');
+const { classify } = require('./video-statistics.cjs');
 
 const QUEUE = 'cola-publicacion';
 const VAULT = 'cuentas-cifradas';
@@ -14,6 +15,10 @@ const NETWORKS = delivery.NETWORKS;
 const ACCOUNT_NETWORKS = [...NETWORKS, 'facebook'];
 const INVENTORY = 'catalogo-estadistico';
 const WAIT = 45000;
+const PROVIDERS = new Set(['direct', 'ayrshare', 'instagram-login']);
+// Instagram no permite renovar un token ya vencido: se renueva con una semana de margen.
+const INSTAGRAM_MARGIN = 7 * 86400000;
+const INSTAGRAM_LIFETIME = 55 * 86400000;
 
 function dateString(value) {
   if (!value) return '';
@@ -29,7 +34,7 @@ function normalizeSecrets(data) {
     if (value.length > 5000 || /[\u0000-\u001f]/.test(value)) throw Error('Dato de acceso inválido');
     secrets[key] = value;
   }
-  secrets.provider = data?.provider === 'ayrshare' ? 'ayrshare' : 'direct';
+  secrets.provider = PROVIDERS.has(data?.provider) ? data.provider : 'direct';
   secrets.expiresAt = secrets.provider === 'ayrshare' ? '' : dateString(data?.expiresAt);
   if (!secrets.accessToken) throw Error('Falta el token de acceso');
   return secrets;
@@ -105,6 +110,10 @@ function createPublishing(root, vault, platform = clients) {
     accountName(network);
     const account = normalizeSecrets(data);
     if (network !== 'tiktok' && account.provider === 'ayrshare') throw Error('Ayrshare está disponible para TikTok');
+    if (network !== 'instagram' && account.provider === 'instagram-login') throw Error('El inicio de sesión de Instagram solo sirve para Instagram');
+    if (account.provider === 'instagram-login' && !account.expiresAt) {
+      account.expiresAt = new Date(Date.now() + INSTAGRAM_LIFETIME).toISOString();
+    }
     account.identity = await platform.verifyAccount(network, account);
     return saveSecret(network, account);
   }
@@ -121,15 +130,31 @@ function createPublishing(root, vault, platform = clients) {
     return Object.fromEntries(ACCOUNT_NETWORKS.map(network => [network, saved[network]?.identity || null]));
   }
 
+  function accountDetails() {
+    const saved = credentials();
+    return Object.fromEntries(ACCOUNT_NETWORKS.map(network => {
+      if (!saved[network]) return [network, null];
+      let expiresAt = null, provider = null;
+      try { ({ expiresAt = null, provider = null } = loadSecret(network)); } catch { /* Cifrado de otro equipo. */ }
+      return [network, { ...saved[network].identity, expiresAt, provider }];
+    }));
+  }
+
   async function accountFor(network) {
     const account = loadSecret(network);
-    if (account.expiresAt && Date.parse(account.expiresAt) - Date.now() < 60000) {
+    const instagram = account.provider === 'instagram-login';
+    const left = account.expiresAt ? Date.parse(account.expiresAt) - Date.now() : Infinity;
+    if (left < (instagram ? INSTAGRAM_MARGIN : 60000)) {
       if (!refreshes.has(network)) {
         refreshes.set(network, platform.refresh(network, account).then(updated => {
           const current = loadSecret(network);
           if (current.identity.id !== account.identity.id) throw Error('La cuenta fue cambiada');
           saveSecret(network, updated);
           return updated;
+        }).catch(error => {
+          // Mientras el token de Instagram siga vigente, se usa y se reintenta la renovación más tarde.
+          if (instagram && left > 60000) return account;
+          throw error;
         }).finally(() => refreshes.delete(network)));
       }
       return refreshes.get(network);
@@ -350,6 +375,23 @@ function createPublishing(root, vault, platform = clients) {
     production.writeState(root,INVENTORY,inventory);
   }
 
+  async function testAccount(network) {
+    accountName(network);
+    const account = await accountFor(network);
+    const identity = await platform.verifyAccount(network, account);
+    if (identity.id !== account.identity.id) throw Error('El acceso ahora pertenece a otra cuenta. Conéctala de nuevo.');
+    let videos = 0, warning = '';
+    if (platform.catalogPages) {
+      for await (const page of platform.catalogPages(network, account)) {
+        videos += page.videos.length;
+        warning = page.warning || '';
+        if (videos || warning) break;
+      }
+    }
+    return { label: identity.label, followers: identity.followers ?? null, videos, warning,
+      expiresAt: account.expiresAt || null, provider: account.provider };
+  }
+
   async function refreshStats() {
     if (refreshing) throw Error('Ya se están actualizando las estadísticas');
     refreshing = true;
@@ -416,6 +458,7 @@ function createPublishing(root, vault, platform = clients) {
         hook:project?.hook || '', tags:project?.tags || (week?.filter ? {[week.filter.field]:[week.filter.value]} : catalog.emptyTags())});
 
     }
+    for (const row of merged.values()) row.format = classify(row);
     return [...merged.values()].sort((a,b)=>String(b.publishedAt||'').localeCompare(String(a.publishedAt||'')));
   }
 
@@ -426,7 +469,7 @@ function createPublishing(root, vault, platform = clients) {
     return file;
   }
 
-  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, refreshStats, stats, exportStats };
+  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };

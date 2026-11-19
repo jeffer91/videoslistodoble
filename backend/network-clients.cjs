@@ -6,6 +6,8 @@ const http = require('node:http');
 const GOOGLE = 'https://www.googleapis.com';
 const TIKTOK = 'https://open.tiktokapis.com';
 const META = 'https://graph.facebook.com/v24.0';
+// Instagram API con inicio de sesión de Instagram: no necesita una página de Facebook.
+const IG_LOGIN = 'https://graph.instagram.com/v24.0';
 const AYR = 'https://api.ayrshare.com/api';
 const AUTH_TIMEOUT = 5 * 60 * 1000;
 const REQUEST_TIMEOUT = 25 * 1000;
@@ -73,6 +75,18 @@ async function request(base, { query, method, token, json, form, headers, upload
 function numericId(value) {
   if (typeof value === 'number' && !Number.isSafeInteger(value) || !/^\d{1,40}$/.test(String(value))) throw new NetworkError('Identificador de la plataforma inválido');
   return String(value);
+}
+
+function instagramLogin(account) {
+  return account?.provider === 'instagram-login';
+}
+
+function metaBase(account) {
+  return instagramLogin(account) ? IG_LOGIN : META;
+}
+
+function instagramOwner(account) {
+  return numericId(account.profileId || account.identity?.id);
 }
 
 function videoId(value) {
@@ -147,7 +161,15 @@ async function googleOAuth({ clientId, clientSecret }, open) {
 }
 
 async function refresh(name, account) {
-  if (!account.refreshToken || !account.clientId) throw Error('Renueva la conexión de ' + name + ' en Ajustes');
+  if (name === 'instagram' && instagramLogin(account)) {
+    // Los tokens de larga duración de Instagram duran 60 días y se renuevan con el propio token.
+    const result = await request('https://graph.instagram.com/refresh_access_token', {
+      query: { grant_type: 'ig_refresh_token', access_token: account.accessToken }
+    });
+    if (!result.access_token) throw Error('Instagram no renovó el acceso');
+    return { ...account, accessToken: result.access_token, expiresAt: tokenExpiration(result.expires_in || 60 * 86400) };
+  }
+  if (!account.refreshToken || !account.clientId) throw Error('Renueva la conexión de ' + name + ' en Estadísticas → Conexiones');
   const google = name === 'youtube';
   if (!google && name !== 'tiktok') throw Error('Renueva el token de Instagram en Ajustes');
   const result = await request(google ? 'https://oauth2.googleapis.com/token' : TIKTOK + '/v2/oauth/token/', {
@@ -190,6 +212,15 @@ async function verifyAccount(name, account) {
     const page = await request(META + '/me', {token,query:{fields:'id,name'}});
     if (String(page.id)!==numericId(account.profileId)) throw Error('El token debe pertenecer a la página indicada');
     return {id:String(page.id),label:page.name};
+  }
+  if (name === 'instagram' && instagramLogin(account)) {
+    const result = await request(IG_LOGIN + '/me', { token, query: { fields: 'user_id,username,followers_count,account_type' } });
+    const id = String(result.user_id || result.id || '');
+    if (!result.username || !/^\d{1,40}$/.test(id)) throw Error('El token no corresponde a una cuenta profesional de Instagram');
+    if (result.account_type && !['BUSINESS', 'MEDIA_CREATOR', 'CREATOR'].includes(String(result.account_type).toUpperCase())) {
+      throw Error('Cambia tu Instagram a cuenta profesional (Creador o Empresa)');
+    }
+    return { id, label: '@' + result.username, followers: valueNumber(result.followers_count), provider: 'instagram-login' };
   }
   if (name === 'instagram') {
     const result = await request(META + '/' + numericId(account.profileId), { token, query: { fields: 'id,username,followers_count' } });
@@ -374,13 +405,14 @@ async function uploadAyrTikTok({ account, file, thumbnail, metadata, remote, che
 
 async function uploadInstagram(context) {
   const { account, token, file, metadata, quality, remote, checkpoint } = context;
-  const owner = numericId(account.profileId);
+  const owner = instagramOwner(account);
+  const base = metaBase(account);
   if (!remote.container) {
     const size = fs.statSync(file).size;
     if (quality.duration < 3 || quality.duration > 900 || size > 1024 ** 3) {
       throw new NetworkError('Instagram admite Reels entre 3 segundos y 15 minutos, de hasta 1 GB');
     }
-    const created = await request(META + '/' + owner + '/media', { method: 'POST', token, form: {
+    const created = await request(base + '/' + owner + '/media', { method: 'POST', token, form: {
       media_type: 'REELS', upload_type: 'resumable', caption: caption(metadata, 2200),
       ...(metadata.coverUrl ? { cover_url: metadata.coverUrl } :
         { thumb_offset: String(Math.round(Math.min(metadata.coverTime, Math.max(0, quality.duration - .1)) * 1000)) })
@@ -396,17 +428,17 @@ async function uploadInstagram(context) {
     return { processing: true };
   }
   if (!remote.id) {
-    const status = await request(META + '/' + numericId(remote.container), { token, query: { fields: 'status_code' } });
+    const status = await request(base + '/' + numericId(remote.container), { token, query: { fields: 'status_code' } });
     if (['EXPIRED', 'ERROR'].includes(status.status_code)) throw new NetworkError('Instagram no pudo preparar el Reel');
     if (status.status_code === 'PUBLISHED') throw new NetworkError('Confirma en Instagram el enlace del Reel ya publicado');
     if (status.status_code !== 'FINISHED') return { processing: true };
-    const result = await request(META + '/' + owner + '/media_publish', {
+    const result = await request(base + '/' + owner + '/media_publish', {
       token, method: 'POST', form: { creation_id: numericId(remote.container) }
     });
     checkpoint({ id: numericId(result.id) });
   }
   const id = numericId(remote.id);
-  const post = await request(META + '/' + id, { token, query: { fields: 'permalink' } });
+  const post = await request(base + '/' + id, { token, query: { fields: 'permalink' } });
   return { id, url: post.permalink || null };
 }
 
@@ -453,10 +485,11 @@ async function metrics(name, account, job, quality) {
     return { views: valueNumber(data.view_count), likes: valueNumber(data.like_count), comments: valueNumber(data.comment_count),
       followers: valueNumber(profile.data?.user?.follower_count), retention: null };
   }
-  const data = await request(META + '/' + numericId(id), { token, query: { fields: 'like_count,comments_count' } });
+  const base = metaBase(account);
+  const data = await request(base + '/' + numericId(id), { token, query: { fields: 'like_count,comments_count' } });
   const profile = await verifyAccount(name, account);
   const insight = async metric => {
-    const result = await request(META + '/' + id + '/insights', { token, query: { metric } }).catch(() => null);
+    const result = await request(base + '/' + id + '/insights', { token, query: { metric } }).catch(() => null);
     return valueNumber(result?.data?.[0]?.values?.[0]?.value ?? result?.data?.[0]?.total_value?.value);
   };
   const [views, watch] = await Promise.all([insight('views'), insight('ig_reels_avg_watch_time')]);
@@ -466,5 +499,5 @@ async function metrics(name, account, job, quality) {
 
 const publish = { youtube: uploadYouTube, tiktok: uploadTikTok, instagram: uploadInstagram };
 
-const catalogPages = (network,account) => require('./video-statistics.cjs').catalog(request,META,network,account);
+const catalogPages = (network,account) => require('./video-statistics.cjs').catalog(request,network === 'instagram' ? metaBase(account) : META,network,account);
 module.exports = { catalogPages, NetworkError, request, googleOAuth, refresh, verifyAccount, tiktokCreator, publish, metrics };

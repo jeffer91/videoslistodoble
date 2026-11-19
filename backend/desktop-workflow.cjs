@@ -8,6 +8,20 @@ const { createPublishing, safeLink } = require('./publishing.cjs');
 const clients = require('./network-clients.cjs');
 const store = require('./store.cjs');
 
+// Páginas oficiales que abre el asistente de conexión de Estadísticas.
+const GUIDES = Object.freeze({
+  'google-project': 'https://console.cloud.google.com/projectcreate',
+  'google-data-api': 'https://console.cloud.google.com/apis/library/youtube.googleapis.com',
+  'google-analytics-api': 'https://console.cloud.google.com/apis/library/youtubeanalytics.googleapis.com',
+  'google-consent': 'https://console.cloud.google.com/auth/overview',
+  'google-credentials': 'https://console.cloud.google.com/apis/credentials',
+  'meta-apps': 'https://developers.facebook.com/apps/',
+  'meta-explorer': 'https://developers.facebook.com/tools/explorer/',
+  'meta-debugger': 'https://developers.facebook.com/tools/debug/accesstoken/',
+  'tiktok-apps': 'https://developers.tiktok.com/apps/',
+  'tiktok-display': 'https://developers.tiktok.com/doc/display-api-get-started'
+});
+
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
   const publishing = createPublishing(root, safeStorage);
   let browsing = false;
@@ -148,6 +162,12 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'publish.link': data => publishing.addLink(data),
     'publish.open': ({ network, url }) => shell.openExternal(safeLink(network, url)),
     'statistics.status': () => publishing.syncStatus(),
+    'statistics.accounts': () => publishing.accountDetails(),
+    'statistics.test': ({ network }) => publishing.testAccount(network),
+    'statistics.guide': ({ key }) => {
+      if (!Object.hasOwn(GUIDES, key)) throw Error('Guía desconocida');
+      return shell.openExternal(GUIDES[key]);
+    },
     'statistics.list': () => publishing.stats(),
     'statistics.refresh': () => publishing.refreshStats(),
     'statistics.browser': async ({network}) => {

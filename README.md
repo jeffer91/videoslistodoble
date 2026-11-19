@@ -57,31 +57,49 @@ La compilación semanal propone los récords con Short exportado que aún no se 
 
 La línea de tiempo permite reordenar los récords y grabar introducción y cierre. El render recompone el material original en 1920 × 1080 y vuelve a leer los cambios de las escenas. Desde la exportación puedes consultar los capítulos con sus tiempos. También se guardan en un TXT junto al MP4.
 
-## Conectar redes
+## Estadísticas
 
-**Configuración → Cuentas de publicación** guarda los accesos con el cifrado del equipo. Al mover la biblioteca a otro equipo se vuelven a conectar las cuentas.
+**Estadísticas** es una sección propia, separada de la producción, con cuatro pestañas:
+
+| Pestaña | Para qué sirve |
+| --- | --- |
+| **Resumen** | Vistas, publicaciones, promedio por video, interacción y seguidores. Compara **Shorts y Reels** con **videos largos**, muestra las vistas por semana, una tarjeta por red, los videos con más vistas y qué temas y jugadores funcionan mejor. |
+| **Videos** | Tabla de todas las publicaciones con búsqueda, orden por cualquier columna y detalle con el historial de cada medición. |
+| **Conexiones** | Asistente paso a paso para conectar cada red por su API oficial, con enlaces a cada página, prueba de conexión y estado del acceso. |
+| **Lector de navegador** | Lectura supervisada de YouTube Studio, TikTok Studio, Instagram y Meta Business Suite para completar lo que la API no entrega. |
+
+Todos los filtros (formato, red, período y categoría) se aplican a la vez. Se considera Short o Reel todo video de hasta 3 minutos; los publicados desde Studio usan su tipo real.
+
+### Conectar cada red
+
+Cada red se configura una sola vez desde **Estadísticas → Conexiones → Conectar paso a paso**. Los accesos se guardan con el cifrado del equipo y sirven también para publicar. Al mover la biblioteca a otro equipo hay que volver a conectarlas.
+
+| Red | Qué entrega | Qué necesitas |
+| --- | --- | --- |
+| YouTube | Vistas, me gusta, comentarios, compartidos, minutos vistos, retención y suscriptores | Proyecto de Google Cloud con YouTube Data API v3 y YouTube Analytics API, y un cliente OAuth de escritorio. Publica la pantalla de consentimiento para que Google no pida autorizar cada 7 días. |
+| Instagram | Vistas, alcance, me gusta, comentarios, guardados, compartidos y tiempo medio visto | Cuenta profesional y un token de la **API de Instagram con inicio de sesión de Instagram** (no necesita página de Facebook). Studio renueva el token de 60 días automáticamente. El método anterior con página de Facebook sigue disponible. |
+| Facebook | Vistas, reacciones, comentarios, compartidos y tiempo medio visto de videos y Reels de la página | Token de página con pages_read_engagement y read_insights, ampliado en el Depurador de tokens para que no venza. |
+| TikTok | Vistas, me gusta, comentarios y compartidos | App en TikTok for Developers con Login Kit y Display API (video.list) en modo Sandbox, o Ayrshare. El tiempo visto se completa con el lector de navegador. |
+
+**Sincronizar ahora** recorre todas las páginas de resultados de cada cuenta, incluidos los videos publicados fuera de Studio. Con la app abierta se sincroniza sola una vez por semana. Cada lectura añade una medición fechada: un cero válido se conserva y un campo ausente no borra el último valor conocido. **Exportar para Claude** genera un JSON con las fechas, las métricas y su procedencia.
+
+El **lector de navegador** abre Edge o Chrome con un perfil propio por red y prepara Python y Playwright la primera vez. Inicia sesión, abre el listado indicado y pulsa **Leer videos**. Si un video ya llegó por API, la lectura se suma a la misma ficha. Los cambios de diseño de cada red pueden afectar a la lectura y las cifras abreviadas («1,2 K») se guardan con su texto original.
+
+El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
+
+### Publicar en las redes
+
+Las mismas conexiones permiten publicar desde Studio.
 
 | Red | Configuración | Portada |
 | --- | --- | --- |
 | YouTube | Activa YouTube Data API v3 y YouTube Analytics API en Google Cloud. Crea un cliente OAuth de escritorio y autoriza el canal desde la app. | Miniatura generada o la predeterminada del video. |
 | TikTok | Vincula TikTok en un perfil de Ayrshare con acceso a su API e introduce su clave. Un cliente propio requiere los permisos de TikTok para publicar y consultar videos. | Variante generada vía Ayrshare o fotograma por tiempo. |
-| Instagram | Usa una cuenta profesional conectada a una página de Facebook y un token de Meta para su ID de Instagram. Los permisos incluyen instagram_basic e instagram_content_publish. Para métricas añade instagram_manage_insights. | Fotograma o URL HTTPS de una imagen para la portada. |
+| Instagram | Con el token de inicio de sesión de Instagram añade instagram_business_content_publish. Con el método anterior (página de Facebook) usa instagram_basic, instagram_content_publish e instagram_manage_insights. | Fotograma o URL HTTPS de una imagen para la portada. |
 
 TikTok reserva la publicación directa pública a clientes que cumplen sus condiciones. Los proyectos de uso interno pueden recurrir a un servicio aprobado o registrar el enlace después de publicar desde TikTok. [TikTok Content Sharing Guidelines](https://developers.tiktok.com/docs/en/content-sharing-guidelines) · [Ayrshare para TikTok](https://www.ayrshare.com/tiktok-api/)
 
 La cola respeta la hora local del equipo y procesa publicaciones cuando la aplicación está abierta. El archivo y la cuenta autorizados se verifican antes de cada envío. Si hay un corte durante una entrega, verifica lo que recibió la red antes de reintentar. La ficha conserva los enlaces devueltos por la red o registrados por ti.
-
-El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
-
-En **Estadísticas → Conectar cuentas**, conecta el canal de YouTube, TikTok, el perfil profesional de Instagram o una página de Facebook. **Sincronizar por API** recorre las páginas de resultados de cada cuenta, incluso para videos publicados fuera de Studio. Facebook se conecta solo para lectura. Con TikTok directo se consultan los videos públicos con video.list. Para Facebook necesitas el token de la página con acceso de análisis y los permisos de lectura/Insights.
-
-Cada fila tiene fecha de publicación cuando la red la proporciona. **Ver detalle** abre las métricas de la plataforma y las mediciones fechadas desde la primera consulta. Los datos privados, retirados o fuera de la ventana histórica de la red pueden faltar. Una consulta incompleta queda indicada en el panel. El JSON exportado incluye el historial.
-
-**Leer desde navegador** funciona también sin conectar una API. Elige la red, inicia sesión en el navegador que abre Python y abre Contenido en YouTube Studio o TikTok Studio, la pestaña Reels de tu perfil de Instagram o Contenido publicado en Meta Business Suite. Selecciona todo el período disponible y vuelve a Studio para pulsar **Leer videos**. Repite por cuenta, red y pestaña (por ejemplo, Videos y Shorts en YouTube). En Windows usa Edge o Chrome y prepara Python y Playwright automáticamente la primera vez con conexión a Internet. La sesión queda en un perfil local por red.
-
-El lector recorre el listado visible y sus páginas y consulta las fichas que reconoce. El recuento indica cuántas publicaciones identificadas tienen cifras legibles. Los cambios de interfaz, permisos, filtros y cifras abreviadas de la plataforma afectan la cobertura y la precisión. En Ver detalle y en el JSON se conserva la procedencia de cada medición. Una nueva lectura conserva las métricas anteriores que no aparecen en la consulta.
-
-**Estadísticas** filtra por red, categoría y semana. Las cifras pueden sincronizarse con las cuentas conectadas o registrarse manualmente si la plataforma no las devuelve. El panel muestra vistas, me gusta, comentarios, seguidores y porcentaje medio visto cuando la cuenta lo ofrece. Exporta el JSON para que Claude prepare las siguientes ideas.
 
 ## Trabajo con Claude Code
 

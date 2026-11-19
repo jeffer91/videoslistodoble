@@ -83,7 +83,9 @@ async function run() {
     await page.getByRole('button', { name: 'Publicación', exact: true }).click();
     await page.getByRole('heading', { name: 'Cola' }).waitFor();
     await page.getByRole('button', { name: 'Estadísticas', exact: true }).click();
-    await page.getByRole('heading', { name: 'Rendimiento por video' }).waitFor();
+    await page.getByRole('heading', { name: 'Estadísticas', level: 1 }).waitFor();
+    await page.getByRole('tab', { name: /Conexiones/ }).click();
+    await page.getByRole('button', { name: 'Conectar paso a paso' }).first().waitFor();
     assert.deepEqual(errors, []);
     console.log('Electron verificado: inicio, ideas, ficha, grabación 1080² con audio, pausa, recuperación, edición y pantallas de publicación.');
   } catch (error) {

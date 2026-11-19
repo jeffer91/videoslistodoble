@@ -10,12 +10,10 @@
     PUBLIC_TO_EVERYONE: 'Todo el mundo', MUTUAL_FOLLOW_FRIENDS: 'Amigos', FOLLOWER_OF_CREATOR: 'Seguidores'
   };
   const statsBrands = {...brands,facebook:"Facebook"};
-  let syncStatus = {};
-  let ideas = [], jobs = [], stats = [], accountData = {};
+  let ideas = [], jobs = [], accountData = {};
   let backup, editConfig, updateConfig, delivery, creator, loading;
   let projectLinks = [], linksProjectId, logTarget;
   let currentNetwork = 'youtube', currentScene = 'hook', month = '', activeTask = '';
-  const statsFilters = { network: '', tag: '', week: '' };
 
   function flow(action, data = {}) {
     return api('studio:flow', { action, data });
@@ -192,10 +190,10 @@
   }
 
   function accountsPanel() {
-    return panel('Cuentas conectadas', Object.entries(statsBrands).map(([network, name]) =>
+    return panel('Cuentas conectadas', '<p class="muted mini">Las mismas conexiones sirven para publicar y para medir. Se gestionan en Estadísticas → Conexiones.</p>' +
+      Object.entries(statsBrands).map(([network, name]) =>
       '<div class="asset"><div><strong>' + name + '</strong><small>' + esc(accountData[network]?.label || 'Sin conectar') +
-      '</small></div><div class="row wrap">' + action('account-open', accountData[network] ? 'Cambiar' : 'Conectar', network) +
-      (accountData[network] ? action('account-disconnect', 'Desconectar', network) : '') + '</div></div>').join(''));
+      '</small></div><div class="row wrap">' + action('account-open', accountData[network] ? 'Gestionar' : 'Conectar', network) + '</div></div>').join(''));
   }
 
   function settingsExtension() {
@@ -210,29 +208,6 @@
         '<div class="row wrap">' + btn('updates-check', 'Buscar actualización', 'secondary') +
         (updateConfig?.status === 'actualización disponible' ? btn('updates-download', 'Descargar', 'secondary') : '') +
         (updateConfig?.status === 'lista para instalar' ? btn('updates-install', 'Reiniciar e instalar') : '') + '</div>') + '</div>';
-  }
-
-  function accountModal(network) {
-    const youtube = network === 'youtube';
-    const meta = network === 'instagram' || network === 'facebook';
-    const intro = youtube ? 'Usa un cliente OAuth de escritorio con YouTube Data API y YouTube Analytics activos. Tu navegador solicitará elegir el canal.' :
-      network === 'facebook' ? 'Introduce el ID y el token de tu página con pages_read_engagement, pages_manage_engagement y read_insights para consultar sus videos.' :
-      meta ? 'Usa el ID de tu perfil profesional enlazado y un token de Meta con permisos de publicación y estadísticas.' :
-        'Para estadísticas, autoriza video.list en tu cliente de TikTok. Para publicar, añade video.publish. La visibilidad depende de la aprobación que otorgue TikTok.';
-    modal('Conectar ' + statsBrands[network], '<p>' + esc(intro) + '</p>' +
-      (!meta ? field(youtube ? 'Client ID de Google' : 'Client key de TikTok', input('auth-client', '', 'autocomplete="off"')) +
-        field('Client secret', input('auth-secret', '', 'type="password" autocomplete="new-password"')) :
-        field(network==='facebook'?'ID de la página':'ID del perfil profesional', input('auth-profile', '', 'inputmode="numeric"'))) +
-      (youtube ? action('account-google', 'Autorizar canal en Google', network, '') : '') +
-      (network === 'tiktok' ? field('Servicio', select('auth-provider', [
-        ['ayrshare', 'Ayrshare · cuenta ya vinculada'], ['direct', 'TikTok Direct Post · cliente propio']
-      ], 'direct')) + '<p class="muted mini">Para Ayrshare introduce la clave del servicio en el campo de acceso y el Profile-Key (si usas un perfil secundario).</p>' +
-        field('Profile-Key de Ayrshare (opcional)', input('auth-profile', '', 'type="password" autocomplete="new-password"')) : '') +
-      '<details ' + (youtube ? '' : 'open') + '><summary>Conectar con token existente</summary>' +
-      field('Token de acceso', input('auth-token', '', 'type="password" autocomplete="new-password"')) +
-      (!meta ? field('Token de renovación', input('auth-refresh', '', 'type="password" autocomplete="new-password"')) : '') +
-      field('Vence el (opcional)', input('auth-expires', '', 'type="datetime-local"')) +
-      action('account-connect', 'Verificar y conectar', network, '') + '</details>');
   }
 
   function workingPlan() {
@@ -336,7 +311,7 @@
           '<figure><img src="records://thumbnail/' + base + '/' + (index + 1) + '" alt="Miniatura ' + (index + 1) +
           '"><figcaption>Variante ' + (index + 1) + '</figcaption></figure>').join('') + '</div>' : '')) +
       panel('Publicación por red', field('Red', select('delivery-network', Object.entries(brands), currentNetwork)) +
-        '<p class="mini">' + esc(accountData[currentNetwork]?.label || 'Conecta la cuenta en Configuración.') + '</p>' +
+        '<p class="mini">' + esc(accountData[currentNetwork]?.label || 'Conecta la cuenta en Estadísticas → Conexiones.') + '</p>' +
         field('Título', input('post-title', chosen.title, 'maxlength="100"')) +
         field('Descripción', textarea('post-description', chosen.description, 'rows="6" maxlength="' + (isYouTube ? 4700 : 1950) + '"')) +
         field('Etiquetas', input('post-tags', (chosen.tags || []).join(', '), 'maxlength="440"')) +
@@ -370,77 +345,6 @@
       btn('publish-save-link', 'Guardar enlace'));
   }
 
-  function weekOf(value) {
-    if(!value || !Number.isFinite(Date.parse(value)))return '';
-    const date = new Date(value);
-    date.setDate(date.getDate() - (date.getDay() + 6) % 7);
-    return localDay(date);
-  }
-
-  function tagList(item) {
-    return Object.values(item.tags || {}).flat();
-  }
-
-  function rank(rows, keys, title) {
-    const groups = new Map();
-    for (const row of rows.filter(item => item.metrics)) {
-      for (const key of keys(row)) {
-        const value = groups.get(key) || { label: key, views: 0, posts: 0, retention: 0, samples: 0 };
-        value.posts++;
-        value.views += row.metrics.views || 0;
-        if (row.metrics.retention !== null && row.metrics.retention !== undefined) {
-          value.samples++;
-          value.retention += row.metrics.retention;
-        }
-        groups.set(key, value);
-      }
-    }
-    const items = [...groups.values()].sort((a, b) => b.views - a.views).slice(0, 8);
-    return panel(title, items.length ? items.map(item => '<div class="asset"><span>' + esc(item.label) +
-      '<small> · ' + item.posts + ' publicaciones</small></span><strong>' + number(item.views) + ' vistas' +
-      (item.samples ? ' · ' + number(item.retention / item.samples, true) : '') + '</strong></div>').join('') :
-      '<p class="muted mini">Sin métricas para esos filtros.</p>');
-  }
-
-  function number(value, percent = false) {
-    const digits = percent ? 1 : 0;
-    return value == null ? '—' : new Intl.NumberFormat('es-EC', { maximumFractionDigits: digits }).format(value) + (percent ? ' %' : '');
-  }
-
-  function statsPage() {
-    const tags = [...new Set(stats.flatMap(tagList))].sort((a, b) => a.localeCompare(b, 'es'));
-    const weeks = [...new Set(stats.map(item => weekOf(item.publishedAt)).filter(Boolean))].sort().reverse();
-    const rows = stats.filter(item => (!statsFilters.network || item.network === statsFilters.network) &&
-      (!statsFilters.tag || tagList(item).includes(statsFilters.tag)) && (!statsFilters.week || weekOf(item.publishedAt) === statsFilters.week));
-    const metrics = ['views', 'likes', 'comments', 'shares'];
-    return titlebar('Estadísticas', '', btn('stats-refresh', 'Sincronizar por API') + btn('stats-browser','Leer desde navegador','secondary') + btn('settings','Conectar cuentas','secondary') + btn('stats-export', 'Exportar datos para Claude', 'secondary')) +
-      (syncStatus.at?'<p>Última consulta: '+esc(when(syncStatus.at))+'</p>':'') +
-      (syncStatus.errors?.length?'<details class="warning"><summary>Consulta incompleta</summary>'+syncStatus.errors.map(esc).join('<br>')+'</details>':'') +
-      panel('Rendimiento por video', '<div class="workflow-filters">' +
-        field('Red', select('stats-network', [['', 'Todas'], ...Object.entries(statsBrands)], statsFilters.network)) +
-        field('Categoría', select('stats-tag', [['', 'Todas'], ...tags.map(tag => [tag, tag])], statsFilters.tag)) +
-        field('Semana del', select('stats-week', [['', 'Todas'], ...weeks.map(week => [week, week])], statsFilters.week)) + '</div>' +
-        (rows.length ? '<div class="workflow-table"><table><thead><tr><th>Video</th><th>Red</th><th>Publicado</th><th>Vistas</th><th>Me gusta</th>' +
-        '<th>Comentarios</th><th>Compartidos</th><th>Datos</th></tr></thead><tbody>' + rows.map(item =>
-          '<tr><th>' + esc(item.title) + '</th><td>' + statsBrands[item.network] + '</td><td>' + esc(item.publishedAt?when(item.publishedAt):item.dateText||'—')+'</td>' +
-          metrics.map(key => '<td>' + number(item.metrics?.[key], key === 'retention') + '</td>').join('') +
-          '<td>' + action('stats-detail', 'Ver detalle', item.id) + (item.localJob?action('stats-manual-dialog', 'Editar métricas', item.id):'') +
-          (item.metricsError ? '<small class="muted">' + esc(item.metricsError) + '</small>' : '') + '</td></tr>').join('') +
-        '</tbody></table></div>' : '<p class="muted">Conecta una cuenta para sincronizar por API o elige Leer desde navegador.</p>')) +
-      '<div class="workflow-columns">' + rank(rows, row => row.hook ? [row.hook] : [], 'Ganchos con más vistas') +
-      rank(rows, row => row.tags.tipos || [], 'Temas con más vistas') +
-      rank(rows, row => row.tags.jugadores || [], 'Jugadores con más vistas') + '</div>';
-  }
-
-  function statsModal(id) {
-    const job = stats.find(item => item.id === id);
-    const labels = { views: 'Vistas', likes: 'Me gusta', comments: 'Comentarios', retention: 'Retención (%)', followers: 'Seguidores' };
-    modal('Métricas registradas por ti', '<p>' + esc(job.title) + ' · ' + esc(brands[job.network]) + '</p>' +
-      Object.entries(labels).map(([key, label]) => field(label, input('metric-' + key, job.metrics?.[key] ?? '',
-        'type="number" min="0" step="' + (key === 'retention' ? '.01' : '1') + '"'))).join('') +
-      action('stats-manual-save', 'Guardar cifras', id, ''));
-  }
-
   async function navigateTo(page) {
     state.page = page;
     loading = page;
@@ -449,7 +353,7 @@
       state.status = '';
       if (page === 'ideas') ideas = await flow('idea.list');
       if (page === 'publication') jobs = await flow('publish.list');
-      if (page === 'statistics') [stats,syncStatus] = await Promise.all([flow('statistics.list'),flow('statistics.status')]);
+      if (page === 'statistics') await Statistics.load();
       if (page === 'settings') {
         [backup, editConfig, updateConfig, accountData] = await Promise.all([
           flow('backup.status'), flow('edit.settings'), flow('updates.status'), flow('accounts.list')
@@ -537,28 +441,9 @@
       }
       return;
     }
-    if (name === 'account-open') return accountModal(id);
-    if (name === 'account-connect' || name === 'account-google') {
-      const data = { clientId: valueOf('auth-client'), clientSecret: valueOf('auth-secret'),
-        provider: valueOf('auth-provider'), profileId: valueOf('auth-profile'), accessToken: valueOf('auth-token'),
-        refreshToken: valueOf('auth-refresh'), expiresAt: valueOf('auth-expires') };
-      element.disabled = true;
-      try {
-        if (name === 'account-google') {
-          notice('Elige tu canal en el navegador');
-          await flow('accounts.google', data);
-        } else await flow('accounts.connect', { network: id, data });
-        await Recording.close();
-        await navigateTo('settings');
-        notice('Cuenta verificada y guardada con cifrado del equipo');
-      } finally {
-        element.disabled = false;
-      }
-      return;
-    }
-    if (name === 'account-disconnect') {
-      await flow('accounts.disconnect', { network: id });
-      return navigateTo('settings');
+    if (name === 'account-open') {
+      Statistics.openConnections(id);
+      return navigateTo('statistics');
     }
     if (name.startsWith('updates-')) {
       if (name === 'updates-install') return flow('updates.install');
@@ -607,8 +492,8 @@
       if (await flow('edit.week', { id: state.week.id })) await openWeek(state.week.id);
       return;
     }
-    if (name === 'studio-handoff' || name === 'stats-export') {
-      const file = await flow(name === 'stats-export' ? 'statistics.export' : 'edit.handoff', { id: state.project?.id });
+    if (name === 'studio-handoff') {
+      const file = await flow('edit.handoff', { id: state.project?.id });
       return modal('Archivo listo', '<p>' + esc(file) + '</p>' +
         btn('system-open-data', 'Abrir archivo', 'secondary', 'data-path="' + esc(file) + '"'));
     }
@@ -710,61 +595,11 @@
       await Recording.close();
       return navigateTo('publication');
     }
-    if (name === 'stats-detail') {
-      const row=stats.find(v=>v.id===id);
-      if(!row)return;
-      const show=value=>esc(value==null?'No disponible':typeof value==='object'?JSON.stringify(value):String(value));
-      const labels={views:'Vistas',likes:'Me gusta',comments:'Comentarios',shares:'Compartidos',followers:'Seguidores de la cuenta',
-        retention:'Porcentaje medio visto',saved:'Guardados',reach:'Alcance',averageViewDuration:'Duración media vista (s)',
-        estimatedMinutesWatched:'Minutos vistos',ig_reels_avg_watch_time:'Tiempo medio visto (ms)'};
-      const entries=(metrics,origins={})=>Object.entries(metrics||{}).map(([k,v])=>'<div class="asset"><span>'+esc(labels[k]||k)+(origins[k]?' · '+esc(origins[k].source==='red'?'API':'Navegador')+' · '+esc(when(origins[k].at)):'')+'</span><strong>'+show(v)+'</strong></div>').join('');
-      modal(row.title,'<p>'+esc(statsBrands[row.network])+' · '+esc(row.identity?.label)+' · Publicado: '+esc(row.publishedAt?when(row.publishedAt):row.dateText||'—')+'</p>'+
-        (row.url?'<p>'+esc(row.url)+'</p>':'')+entries(row.metrics,row.metricOrigins)+
-        (row.manualMetrics?'<details><summary>Cifras manuales</summary>'+entries(row.manualMetrics)+'</details>':'')+
-        '<h3>Historial de mediciones</h3>'+(row.history||[]).slice().reverse().map(h=>'<details><summary>'+esc(when(h.at))+' · '+(h.source==='navegador'?'Navegador':'API')+'</summary>'+entries(h.metrics)+'</details>').join(''));
-      return;
-    }
-    if (name === 'stats-browser') {
-      return modal('Leer desde navegador','<p>Elige una red. Se abrirá un navegador para que selecciones tu cuenta y tu listado de videos.</p>'+
-        Object.entries(statsBrands).map(([key,label])=>action('stats-browser-open',label,key)).join(''));
-    }
-    if (name === 'stats-browser-open') {
-      const buttons=element.parentElement.querySelectorAll('button');
-      buttons.forEach(b=>b.disabled=true);
-      element.textContent='Preparando navegador…';
-      try {
-        const result=await flow('statistics.browser',{network:id});
-        await Recording.close();
-        await navigateTo('statistics');
-        if (!result.canceled) notice(result.count+' videos con métricas · '+result.missing+' identificados sin cifras. La lectura depende del listado visible.', !result.count || result.missing>0);
-      } finally {buttons.forEach(b=>b.disabled=false);element.textContent=statsBrands[id];}
-      return;
-    }
-    if (name === 'stats-refresh') {
-      element.disabled = true;
-      element.textContent = 'Consultando cuentas y videos…';
-      try {
-        const result = await flow('statistics.refresh');
-        await navigateTo('statistics');
-        notice(result.count + ' publicaciones actualizadas' + (result.errors.length ? ' · ' + result.errors[0] : ''), result.errors.length > 0);
-      } finally {
-        element.disabled = false; element.textContent='Sincronizar por API';
-      }
-      return;
-    }
-    if (name === 'stats-manual-dialog') return statsModal(id);
-    if (name === 'stats-manual-save') {
-      stats = await flow('statistics.manual', { id, values: Object.fromEntries(
-        ['views', 'likes', 'comments', 'retention', 'followers'].map(key => [key, valueOf('metric-' + key)])
-      ) });
-      await Recording.close();
-      return render();
-    }
   }
 
   const recognized = new Set(['dashboard', 'ideas', 'publication', 'statistics', 'settings', 'idea-add', 'idea-import', 'idea-approve',
     'idea-discard', 'idea-reactivate', 'project-square', 'system-open-data', 'whisper-choose', 'whisper-install']);
-  const prefixes = ['backup-', 'account-', 'updates-', 'studio-', 'plan-', 'transcript-', 'delivery-', 'publish-', 'stats-'];
+  const prefixes = ['backup-', 'account-', 'updates-', 'studio-', 'plan-', 'transcript-', 'delivery-', 'publish-'];
   document.addEventListener('click', event => {
     const element = event.target.closest('[data-action]');
     const name = element?.dataset.action;
@@ -779,14 +614,10 @@
     if (id === 'plan-scene') { currentScene = current; render(); }
     if (id === 'delivery-network') setNetwork(current).catch(error => notice(error.message, true));
     if (id === 'update-auto') flow('updates.enable', { automatic: event.target.checked }).catch(error => notice(error.message, true));
-    if (id.startsWith('stats-') && Object.hasOwn(statsFilters, id.slice(6))) {
-      statsFilters[id.slice(6)] = current;
-      render();
-    }
   });
 
   function page(name) {
-    const pages = { dashboard, ideas: ideasPage, 'studio-editing': planPage, publication: queuePage, statistics: statsPage, delivery: deliveryPage };
+    const pages = { dashboard, ideas: ideasPage, 'studio-editing': planPage, publication: queuePage, statistics: () => Statistics.page(), delivery: deliveryPage };
     if (loading === name) return titlebar('Cargando…', '');
     return pages[name]?.() || '';
   }

@@ -166,4 +166,32 @@ function catalog(request,base,network,account){
   if(network==='tiktok')return tiktok(request,account);
   return meta(request,base,network,account);
 }
-module.exports={catalog};
+
+// Límite de YouTube Shorts y Reels: hasta 3 minutos se considera formato corto.
+const SHORT_LIMIT = 180;
+
+function seconds(duration) {
+  if (typeof duration === 'number') return Number.isFinite(duration) && duration > 0 ? duration : null;
+  if (typeof duration !== 'string' || !duration) return null;
+  if (/^\d+(\.\d+)?$/.test(duration)) return Number(duration) || null;
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(duration);
+  if (!match) return null;
+  const [, d = 0, h = 0, m = 0, s = 0] = match;
+  const total = Number(d) * 86400 + Number(h) * 3600 + Number(m) * 60 + Number(s);
+  return total > 0 ? total : null;
+}
+
+/** Clasifica una publicación como 'short' (Shorts, Reels, TikTok corto) o 'long' (video largo). */
+function classify(row) {
+  if (row?.target?.kind === 'short') return 'short';
+  if (row?.target?.kind === 'week') return 'long';
+  if (/\/(shorts|reels?)\//.test(String(row?.url || ''))) return 'short';
+  const format = String(row?.format || '').toLowerCase();
+  if (format === 'reels' || format === 'video_reels') return 'short';
+  const length = seconds(row?.duration);
+  if (length != null) return length <= SHORT_LIMIT ? 'short' : 'long';
+  if (format === 'feed' || format === 'videos') return 'long';
+  return null;
+}
+
+module.exports={catalog,classify,seconds,SHORT_LIMIT};
