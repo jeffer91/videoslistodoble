@@ -63,17 +63,19 @@ async function detectSilences(file,threshold,signal){
 }
 async function waveform(file){
  return new Promise((resolve,reject)=>{
-  const child=spawn(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-i',file,'-vn','-ac','1','-ar','100','-t','180','-c:a','pcm_s16le','-f','s16le','pipe:1'],{windowsHide:true});
-  let parts=[],errors='',size=0;
-  child.stdout.on('data',d=>{size+=d.length;if(size<=1000000)parts.push(d)});
-  child.stderr.on('data',d=>errors+=d.toString().slice(-2000));
+  const sampleRate=16000,samplesPerBar=sampleRate/10;
+  const child=spawn(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-i',file,'-map','0:a:0','-vn','-ac','1','-ar',String(sampleRate),'-t','180','-c:a','pcm_s16le','-f','s16le','pipe:1'],{windowsHide:true});
+  const parts=[];
+  let errors='';
+  child.stdout.on('data',chunk=>parts.push(chunk));
+  child.stderr.on('data',chunk=>{errors=(errors+chunk.toString()).slice(-2000)});
   child.on('error',reject);
   child.on('close',code=>{
    if(code!==0)return reject(Error('No se pudo leer la forma de onda: '+errors.slice(-180)));
    const bytes=Buffer.concat(parts),out=[];
-   for(let k=0;k+1<bytes.length;k+=20){
+   for(let k=0;k+1<bytes.length;k+=samplesPerBar*2){
     let n=0,sum=0;
-    for(let j=k;j<Math.min(bytes.length-1,k+20);j+=2){const v=bytes.readInt16LE(j)/32768;sum+=v*v;n++}
+    for(let j=k;j<Math.min(bytes.length-1,k+samplesPerBar*2);j+=2){const v=bytes.readInt16LE(j)/32768;sum+=v*v;n++}
     out.push(Math.min(1,Math.sqrt(Math.sqrt(sum/Math.max(1,n)))*1.3));
    }
    resolve(out.slice(0,1800));

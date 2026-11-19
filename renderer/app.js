@@ -86,12 +86,14 @@ function makeWaveTicks(duration,width){
  return labels.join('');
 }
 function makeWaveBars(peaks,duration,width){
- const values=peaks.length?peaks:[0];
+ if(!peaks.length)return '';
+ const values=peaks;
  const count=Math.max(1,Math.min(values.length,Math.ceil(width/2.6)));
  const barWidth=width/count,rendered=[];
  for(let i=0;i<count;i++){
   const index=Math.min(values.length-1,Math.floor(i*values.length/count));
-  const peak=Math.min(1,Math.max(0,Number(values[index])||0));
+  const end=Math.floor((i+1)*values.length/count);
+  const peak=Math.min(1,Math.max(0,...values.slice(index,end)));
   const height=Math.max(2,peak*56);
   rendered.push('<rect x="'+(i*barWidth).toFixed(2)+'" y="'+((66-height)/2).toFixed(2)+
    '" width="'+Math.max(1,barWidth-.8).toFixed(2)+'" height="'+height.toFixed(2)+'" fill="#76bce8" rx=".6"/>');
@@ -125,7 +127,7 @@ function waveformEditorHTML(scene){
  if(!duration)return '<div class="wave-loading"><strong>Preparando editor de recortes…</strong><p class="muted mini">'+esc(state.waveErrors[id]||'Leyendo duración de la grabación. Los marcadores aparecerán automáticamente.')+'</p>'+btn('retry-waveform','↻ Reintentar carga','secondary')+'</div>';
  const selection=rangeSelection(),zoom=Math.max(1,Math.min(8,Number(state.cutZoom)||1));
  const width=WaveZoom.widthFor(duration,590,zoom);
- const viewPeaks=peaks.length?peaks:Array.from({length:Math.min(1800,Math.ceil(duration*10))},()=>0);
+
  const marked=[
   ...(scene.silences||[]).filter(c=>c.remove).map(c=>({...c,mode:'both'})),
   ...(scene.cuts||[])
@@ -143,10 +145,11 @@ function waveformEditorHTML(scene){
   btn('wave-zoom-in','+','secondary','title="Acercar onda" aria-label="Acercar onda"')+
   '<output id="cut-zoom-output" for="cut-wave-zoom">'+zoom+'×</output>'+
   btn('wave-zoom-fit','Ajustar','secondary','title="Mostrar la grabación completa"')+'</div></div>'+
+  (!peaks.length&&!state.waveErrors[id]?'<p class="muted mini" role="status">Calculando la onda de voz…</p>':'')+
   '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px;min-width:100%" data-wave-seek="1">'+
    '<div class="wave-ruler">'+makeWaveTicks(duration,width)+'</div>'+
    '<div class="wave-bars">'+
-    '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(viewPeaks,duration,width)+'</svg>'+
+    '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(peaks,duration,width)+'</svg>'+
    '</div>'+overlays+
    '<div id="edit-wave-selection" class="wave-current-selection" style="left:'+(100*selection.start/duration)+'%;width:'+(100*(selection.end-selection.start)/duration)+'%"></div>'+
    '<div id="edit-wave-playhead" class="wave-playhead" style="left:0%"></div>'+
@@ -671,7 +674,7 @@ async function refreshWaveform(){
    const seconds=Number(info.duration);
    if(!Number.isFinite(seconds)||seconds<=0)throw Error('No se pudo medir la duración de la grabación');
    state.videoDurations[id]=seconds;
-   delete state.waveErrors[id];
+   if(state.waveErrors[id]?.startsWith('No se pudo leer la duración'))delete state.waveErrors[id];
    if(!(Number(s.end)>Number(s.start))){s.start=0;s.end=Math.min(180,seconds);queueSave()}
    state.cutSelection.end=Math.min(editorDuration(),Math.max(.08,Number(state.cutSelection.end)||1));
    draw();

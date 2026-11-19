@@ -53,7 +53,7 @@ test('WebM de MediaRecorder sin duración en cabecera recupera duración y ondas
   const args=['-hide_banner','-loglevel','error',
    '-f','lavfi','-i','color=c=black:s=64x64:r=12:d=1.5',
    '-f','lavfi','-i','sine=frequency=600:sample_rate=48000:duration=1.5',
-   '-t','1.5','-c:v','libvpx','-b:v','160k','-c:a','libopus',
+   '-af',"volume=0:enable='between(t,0.4,1.0)'",'-t','1.5','-c:v' ,'libvpx','-b:v','160k','-c:a','libopus',
    '-live','1','-f','webm','pipe:1'];
   const generated=spawnSync(toolPath('ffmpeg'),args,{timeout:25000,maxBuffer:10*1024*1024});
   assert.equal(generated.status,0,String(generated.stderr));
@@ -62,7 +62,9 @@ test('WebM de MediaRecorder sin duración en cabecera recupera duración y ondas
   assert.ok(info.duration>1.3&&info.duration<1.7,'duración recuperada: '+info.duration);
   assert.equal(info.hasAudio,true);
   const peaks=await waveform(file);
-  assert.ok(peaks.length>10,'onda ausente');
+  assert.ok(peaks.length>=14 && peaks.length<=16,'se esperan 10 barras por segundo');
+  assert.ok(peaks[2]>.15 && peaks[12]>.15,'el tono debe verse antes y después de la pausa');
+  assert.ok(peaks[7]<.025,'el centro de la pausa debe verse plano');
  }finally{fs.rmSync(dir,{force:true,recursive:true})}
 });
 
