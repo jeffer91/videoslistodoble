@@ -9,6 +9,8 @@
     private: 'Privado', unlisted: 'No listado', public: 'Público', SELF_ONLY: 'Solo yo',
     PUBLIC_TO_EVERYONE: 'Todo el mundo', MUTUAL_FOLLOW_FRIENDS: 'Amigos', FOLLOWER_OF_CREATOR: 'Seguidores'
   };
+  const statsBrands = {...brands,facebook:"Facebook"};
+  let syncStatus = {};
   let ideas = [], jobs = [], stats = [], accountData = {};
   let backup, editConfig, updateConfig, delivery, creator, loading;
   let projectLinks = [], linksProjectId, logTarget;
@@ -190,7 +192,7 @@
   }
 
   function accountsPanel() {
-    return panel('Cuentas de publicación', Object.entries(brands).map(([network, name]) =>
+    return panel('Cuentas conectadas', Object.entries(statsBrands).map(([network, name]) =>
       '<div class="asset"><div><strong>' + name + '</strong><small>' + esc(accountData[network]?.label || 'Sin conectar') +
       '</small></div><div class="row wrap">' + action('account-open', accountData[network] ? 'Cambiar' : 'Conectar', network) +
       (accountData[network] ? action('account-disconnect', 'Desconectar', network) : '') + '</div></div>').join(''));
@@ -212,18 +214,19 @@
 
   function accountModal(network) {
     const youtube = network === 'youtube';
-    const meta = network === 'instagram';
+    const meta = network === 'instagram' || network === 'facebook';
     const intro = youtube ? 'Usa un cliente OAuth de escritorio con YouTube Data API y YouTube Analytics activos. Tu navegador solicitará elegir el canal.' :
+      network === 'facebook' ? 'Introduce el ID y el token de tu página con pages_read_engagement, pages_manage_engagement y read_insights para consultar sus videos.' :
       meta ? 'Usa el ID de tu perfil profesional enlazado y un token de Meta con permisos de publicación y estadísticas.' :
-        'Conecta un cliente de TikTok autorizado para video.publish y video.list. La visibilidad depende de la aprobación que otorgue TikTok.';
-    modal('Conectar ' + brands[network], '<p>' + esc(intro) + '</p>' +
+        'Para estadísticas, autoriza video.list en tu cliente de TikTok. Para publicar, añade video.publish. La visibilidad depende de la aprobación que otorgue TikTok.';
+    modal('Conectar ' + statsBrands[network], '<p>' + esc(intro) + '</p>' +
       (!meta ? field(youtube ? 'Client ID de Google' : 'Client key de TikTok', input('auth-client', '', 'autocomplete="off"')) +
         field('Client secret', input('auth-secret', '', 'type="password" autocomplete="new-password"')) :
-        field('ID del perfil profesional', input('auth-profile', '', 'inputmode="numeric"'))) +
+        field(network==='facebook'?'ID de la página':'ID del perfil profesional', input('auth-profile', '', 'inputmode="numeric"'))) +
       (youtube ? action('account-google', 'Autorizar canal en Google', network, '') : '') +
       (network === 'tiktok' ? field('Servicio', select('auth-provider', [
         ['ayrshare', 'Ayrshare · cuenta ya vinculada'], ['direct', 'TikTok Direct Post · cliente propio']
-      ], 'ayrshare')) + '<p class="muted mini">Para Ayrshare introduce la clave del servicio en el campo de acceso y el Profile-Key (si usas un perfil secundario).</p>' +
+      ], 'direct')) + '<p class="muted mini">Para Ayrshare introduce la clave del servicio en el campo de acceso y el Profile-Key (si usas un perfil secundario).</p>' +
         field('Profile-Key de Ayrshare (opcional)', input('auth-profile', '', 'type="password" autocomplete="new-password"')) : '') +
       '<details ' + (youtube ? '' : 'open') + '><summary>Conectar con token existente</summary>' +
       field('Token de acceso', input('auth-token', '', 'type="password" autocomplete="new-password"')) +
@@ -368,6 +371,7 @@
   }
 
   function weekOf(value) {
+    if(!value || !Number.isFinite(Date.parse(value)))return '';
     const date = new Date(value);
     date.setDate(date.getDate() - (date.getDay() + 6) % 7);
     return localDay(date);
@@ -405,22 +409,24 @@
 
   function statsPage() {
     const tags = [...new Set(stats.flatMap(tagList))].sort((a, b) => a.localeCompare(b, 'es'));
-    const weeks = [...new Set(stats.map(item => weekOf(item.publishedAt)))].sort().reverse();
+    const weeks = [...new Set(stats.map(item => weekOf(item.publishedAt)).filter(Boolean))].sort().reverse();
     const rows = stats.filter(item => (!statsFilters.network || item.network === statsFilters.network) &&
       (!statsFilters.tag || tagList(item).includes(statsFilters.tag)) && (!statsFilters.week || weekOf(item.publishedAt) === statsFilters.week));
-    const metrics = ['views', 'likes', 'comments', 'retention', 'followers'];
-    return titlebar('Estadísticas', '', btn('stats-refresh', 'Traer métricas') + btn('stats-export', 'Exportar datos para Claude', 'secondary')) +
+    const metrics = ['views', 'likes', 'comments', 'shares'];
+    return titlebar('Estadísticas', '', btn('stats-refresh', 'Sincronizar todos los videos') + btn('settings','Conectar cuentas','secondary') + btn('stats-export', 'Exportar datos para Claude', 'secondary')) +
+      (syncStatus.at?'<p>Última consulta: '+esc(when(syncStatus.at))+'</p>':'') +
+      (syncStatus.errors?.length?'<details class="warning"><summary>Consulta incompleta</summary>'+syncStatus.errors.map(esc).join('<br>')+'</details>':'') +
       panel('Rendimiento por video', '<div class="workflow-filters">' +
-        field('Red', select('stats-network', [['', 'Todas'], ...Object.entries(brands)], statsFilters.network)) +
+        field('Red', select('stats-network', [['', 'Todas'], ...Object.entries(statsBrands)], statsFilters.network)) +
         field('Categoría', select('stats-tag', [['', 'Todas'], ...tags.map(tag => [tag, tag])], statsFilters.tag)) +
         field('Semana del', select('stats-week', [['', 'Todas'], ...weeks.map(week => [week, week])], statsFilters.week)) + '</div>' +
-        (rows.length ? '<div class="workflow-table"><table><thead><tr><th>Video</th><th>Red</th><th>Vistas</th><th>Me gusta</th>' +
-        '<th>Comentarios</th><th>Retención</th><th>Seguidores</th><th>Datos</th></tr></thead><tbody>' + rows.map(item =>
-          '<tr><th>' + esc(item.title) + '</th><td>' + brands[item.network] + '</td>' +
+        (rows.length ? '<div class="workflow-table"><table><thead><tr><th>Video</th><th>Red</th><th>Publicado</th><th>Vistas</th><th>Me gusta</th>' +
+        '<th>Comentarios</th><th>Compartidos</th><th>Datos</th></tr></thead><tbody>' + rows.map(item =>
+          '<tr><th>' + esc(item.title) + '</th><td>' + statsBrands[item.network] + '</td><td>' + esc(item.publishedAt?when(item.publishedAt):'—')+'</td>' +
           metrics.map(key => '<td>' + number(item.metrics?.[key], key === 'retention') + '</td>').join('') +
-          '<td>' + action('stats-manual-dialog', 'Editar métricas', item.id) +
+          '<td>' + action('stats-detail', 'Ver detalle', item.id) + (item.localJob?action('stats-manual-dialog', 'Editar métricas', item.id):'') +
           (item.metricsError ? '<small class="muted">' + esc(item.metricsError) + '</small>' : '') + '</td></tr>').join('') +
-        '</tbody></table></div>' : '<p class="muted">Registra una publicación para ver su rendimiento.</p>')) +
+        '</tbody></table></div>' : '<p class="muted">Conecta tus cuentas y pulsa Sincronizar todos los videos.</p>')) +
       '<div class="workflow-columns">' + rank(rows, row => row.hook ? [row.hook] : [], 'Ganchos con más vistas') +
       rank(rows, row => row.tags.tipos || [], 'Temas con más vistas') +
       rank(rows, row => row.tags.jugadores || [], 'Jugadores con más vistas') + '</div>';
@@ -443,7 +449,7 @@
       state.status = '';
       if (page === 'ideas') ideas = await flow('idea.list');
       if (page === 'publication') jobs = await flow('publish.list');
-      if (page === 'statistics') stats = await flow('statistics.list');
+      if (page === 'statistics') [stats,syncStatus] = await Promise.all([flow('statistics.list'),flow('statistics.status')]);
       if (page === 'settings') {
         [backup, editConfig, updateConfig, accountData] = await Promise.all([
           flow('backup.status'), flow('edit.settings'), flow('updates.status'), flow('accounts.list')
@@ -704,14 +710,29 @@
       await Recording.close();
       return navigateTo('publication');
     }
+    if (name === 'stats-detail') {
+      const row=stats.find(v=>v.id===id);
+      if(!row)return;
+      const show=value=>esc(value==null?'No disponible':typeof value==='object'?JSON.stringify(value):String(value));
+      const labels={views:'Vistas',likes:'Me gusta',comments:'Comentarios',shares:'Compartidos',followers:'Seguidores de la cuenta',
+        retention:'Porcentaje medio visto',saved:'Guardados',reach:'Alcance',averageViewDuration:'Duración media vista (s)',
+        estimatedMinutesWatched:'Minutos vistos',ig_reels_avg_watch_time:'Tiempo medio visto (ms)'};
+      const entries=metrics=>Object.entries(metrics||{}).map(([k,v])=>'<div class="asset"><span>'+esc(labels[k]||k)+'</span><strong>'+show(v)+'</strong></div>').join('');
+      modal(row.title,'<p>'+esc(statsBrands[row.network])+' · '+esc(row.identity?.label)+' · Publicado: '+esc(row.publishedAt?when(row.publishedAt):'—')+'</p>'+
+        (row.url?'<p>'+esc(row.url)+'</p>':'')+entries(row.metrics)+
+        (row.manualMetrics?'<details><summary>Cifras manuales</summary>'+entries(row.manualMetrics)+'</details>':'')+
+        '<h3>Historial de mediciones</h3>'+(row.history||[]).slice().reverse().map(h=>'<details><summary>'+esc(when(h.at))+'</summary>'+entries(h.metrics)+'</details>').join(''));
+      return;
+    }
     if (name === 'stats-refresh') {
       element.disabled = true;
+      element.textContent = 'Consultando cuentas y videos…';
       try {
         const result = await flow('statistics.refresh');
         await navigateTo('statistics');
         notice(result.count + ' publicaciones actualizadas' + (result.errors.length ? ' · ' + result.errors[0] : ''), result.errors.length > 0);
       } finally {
-        element.disabled = false;
+        element.disabled = false; element.textContent='Sincronizar todos los videos';
       }
       return;
     }

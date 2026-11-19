@@ -146,6 +146,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'publish.change': data => publishing.changeJob(data),
     'publish.link': data => publishing.addLink(data),
     'publish.open': ({ network, url }) => shell.openExternal(safeLink(network, url)),
+    'statistics.status': () => publishing.syncStatus(),
     'statistics.list': () => publishing.stats(),
     'statistics.refresh': () => publishing.refreshStats(),
     'statistics.manual': data => publishing.manualStats(data),

@@ -11,6 +11,8 @@ const catalog = require('./catalog.cjs');
 const QUEUE = 'cola-publicacion';
 const VAULT = 'cuentas-cifradas';
 const NETWORKS = delivery.NETWORKS;
+const ACCOUNT_NETWORKS = [...NETWORKS, 'facebook'];
+const INVENTORY = 'catalogo-estadistico';
 const WAIT = 45000;
 
 function dateString(value) {
@@ -84,8 +86,13 @@ function createPublishing(root, vault, platform = clients) {
     return account.identity;
   }
 
+  function accountName(network) {
+    if (!ACCOUNT_NETWORKS.includes(network)) throw Error('Red desconocida');
+    return network;
+  }
+
   function loadSecret(network) {
-    const entry = credentials()[validNetwork(network)];
+    const entry = credentials()[accountName(network)];
     if (!entry) throw Error('Conecta ' + network + ' en Ajustes');
     try {
       return JSON.parse(vault.decryptString(Buffer.from(entry.cipher, 'base64')));
@@ -95,7 +102,7 @@ function createPublishing(root, vault, platform = clients) {
   }
 
   async function connect(network, data) {
-    validNetwork(network);
+    accountName(network);
     const account = normalizeSecrets(data);
     if (network !== 'tiktok' && account.provider === 'ayrshare') throw Error('Ayrshare está disponible para TikTok');
     account.identity = await platform.verifyAccount(network, account);
@@ -104,14 +111,14 @@ function createPublishing(root, vault, platform = clients) {
 
   function disconnect(network) {
     const saved = credentials();
-    delete saved[validNetwork(network)];
+    delete saved[accountName(network)];
     production.writeState(root, VAULT, saved);
     return true;
   }
 
   function accounts() {
     const saved = credentials();
-    return Object.fromEntries(NETWORKS.map(network => [network, saved[network]?.identity || null]));
+    return Object.fromEntries(ACCOUNT_NETWORKS.map(network => [network, saved[network]?.identity || null]));
   }
 
   async function accountFor(network) {
@@ -313,10 +320,33 @@ function createPublishing(root, vault, platform = clients) {
     const errors = [];
     let count = 0;
     try {
+      const synced = new Set();
+      const inventory = production.readState(root, INVENTORY, {});
+      for (const [network,identity] of Object.entries(accounts())) {
+        if (!identity || !platform.catalogPages) continue;
+        try {
+          const account = await accountFor(network);
+          for await (const page of platform.catalogPages(network,account)) {
+            if (accounts()[network]?.id !== identity.id) throw Error('La cuenta cambió durante la consulta');
+            if (page.warning) errors.push(network+' · '+page.warning);
+            const metricsAt = new Date().toISOString();
+            for (const video of page.videos) {
+              const key = JSON.stringify([network,identity.id,video.externalId]);
+              const history = inventory[key]?.history || [];
+              history.push({at:metricsAt,metrics:video.metrics});
+              inventory[key] = {...video, network, identity, id:key, metricsAt, metricsSource:'red', history};
+              synced.add(key);
+              count++;
+            }
+            if (page.videos.length) production.writeState(root, INVENTORY, inventory);
+          }
+        } catch(error) { errors.push(network+' · '+error.message); }
+      }
       for (const item of queue().filter(job => job.status === 'publicado' && job.externalId && job.metricsSource !== 'manual')) {
         try {
           const account = await accountFor(item.network);
           if (item.identity.id !== 'manual' && account.identity.id !== item.identity.id) throw Error('Conecta la cuenta que publicó el video');
+          if (synced.has(JSON.stringify([item.network,account.identity.id,item.externalId]))) continue;
           const quality = delivery.entryFor(root, item.target).quality;
           const metrics = await platform.metrics(item.network, account, item, quality);
           updateJob(item.id, { metrics, metricsAt: new Date().toISOString(), metricsSource: 'red', metricsError: '' });
@@ -327,7 +357,7 @@ function createPublishing(root, vault, platform = clients) {
           updateJob(item.id, { metricsError: message });
         }
       }
-      production.writeState(root, 'sincronizacion', { at: new Date().toISOString() });
+      production.writeState(root, 'sincronizacion', { at: new Date().toISOString(), count, errors:[...new Set(errors)] });
       return { count, errors };
     } finally {
       refreshing = false;
@@ -337,23 +367,31 @@ function createPublishing(root, vault, platform = clients) {
   function stats() {
     const projects = new Map(store.listProjects(root).map(project => [project.id, project]));
     const weeks = new Map(store.listWeeks(root).map(week => [week.id, week]));
-    return queue().filter(item => item.status === 'publicado').map(job => {
+    const catalogRows = production.readState(root, INVENTORY, {});
+    const merged = new Map(Object.entries(catalogRows).map(([key,item])=>[key,{...item,tags:catalog.emptyTags()}]));
+    const identities=accounts();
+    for(const job of queue().filter(item => item.status === 'publicado')) {
       const project = projects.get(job.target.id);
       const week = weeks.get(job.target.id);
-      return { ...publicJob(job), title: project?.title || week?.title || job.metadata.title,
-        hook: project?.hook || '', tags: project?.tags || (week?.filter ? { [week.filter.field]: [week.filter.value] } : catalog.emptyTags()) };
-    }).reverse();
+      const key = job.externalId ? JSON.stringify([job.network,job.identity.id==='manual' ? identities[job.network]?.id : job.identity.id,job.externalId]) : job.id;
+      const remote = catalogRows[key];
+      merged.set(key,{...publicJob(job), ...remote, id:job.id, localJob:true,
+        ...(job.metricsSource==='manual'?{manualMetrics:job.metrics}:{}),
+        title:remote?.title || project?.title || week?.title || job.metadata.title,
+        hook:project?.hook || '', tags:project?.tags || (week?.filter ? {[week.filter.field]:[week.filter.value]} : catalog.emptyTags())});
+
+    }
+    return [...merged.values()].sort((a,b)=>String(b.publishedAt||'').localeCompare(String(a.publishedAt||'')));
   }
 
   function exportStats() {
     const directory = path.join(root, 'Exportaciones', 'Estadisticas');
     const file = path.join(directory, 'rendimiento.json');
-    store.atomic(file, { exportedAt: new Date().toISOString(), videos: stats().map(
-      ({ title, network, url, metrics, publishedAt, hook, tags }) => ({ title, network, url, metrics, publishedAt, hook, tags })) });
+    store.atomic(file, { exportedAt: new Date().toISOString(), videos: stats().map(({metadata, target, ...video})=>video) });
     return file;
   }
 
-  return { accounts, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, refreshStats, stats, exportStats };
+  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };

@@ -186,6 +186,11 @@ async function verifyAccount(name, account) {
     if (!user?.open_id) throw Error('No se encontró una cuenta de TikTok con este acceso');
     return { id: user.open_id, label: user.display_name };
   }
+  if (name === 'facebook') {
+    const page = await request(META + '/me', {token,query:{fields:'id,name'}});
+    if (String(page.id)!==numericId(account.profileId)) throw Error('El token debe pertenecer a la página indicada');
+    return {id:String(page.id),label:page.name};
+  }
   if (name === 'instagram') {
     const result = await request(META + '/' + numericId(account.profileId), { token, query: { fields: 'id,username,followers_count' } });
     if (!result.username) throw Error('No se encontró el perfil profesional de Instagram indicado');
@@ -461,4 +466,5 @@ async function metrics(name, account, job, quality) {
 
 const publish = { youtube: uploadYouTube, tiktok: uploadTikTok, instagram: uploadInstagram };
 
-module.exports = { NetworkError, request, googleOAuth, refresh, verifyAccount, tiktokCreator, publish, metrics };
+const catalogPages = (network,account) => require('./video-statistics.cjs').catalog(request,META,network,account);
+module.exports = { catalogPages, NetworkError, request, googleOAuth, refresh, verifyAccount, tiktokCreator, publish, metrics };
