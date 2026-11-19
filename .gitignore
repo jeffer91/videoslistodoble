@@ -22,3 +22,5 @@ build/
 /Configuracion/
 /Temporales/
 /Respaldos/
+
+__pycache__/

@@ -132,6 +132,7 @@
           delete state.project.scenes[index].cutHistory;
           if (state.scene === index && state.page === 'project') resetCutEditor();
         }
+        if (state.page === 'guided') render();
         if (state.page === 'project') {
           render();
           if (state.scene === result.scene) {

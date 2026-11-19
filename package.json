@@ -1,6 +1,6 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Estudio local para crear, revisar y publicar videos de 11 Récords",
   "main": "main.cjs",
@@ -13,7 +13,8 @@
     "dist:dir": "electron-builder --dir",
     "prestart": "node scripts/ensure-deps.cjs",
     "studio": "node scripts/studio.cjs",
-    "test:desktop": "node tests/studio-desktop.cjs"
+    "test:desktop": "node tests/studio-desktop.cjs",
+    "predist:win": "python scripts/build-animation.py"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",
@@ -68,6 +69,12 @@
       "owner": "jeffer91",
       "repo": "videoslistodoble",
       "releaseType": "release"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/animation/records-animation",
+        "to": "animation"
+      }
+    ]
   }
 }

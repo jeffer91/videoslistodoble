@@ -142,3 +142,11 @@ test('previsualización distribuye tres imágenes según la narración',{timeout
   assert.ok(parts.at(-1).end>2.9);
  }finally{fs.rmSync(root,{force:true,recursive:true})}
 });
+
+test('la animación respeta el segundo de la toma y deja visibles los apoyos anteriores y posteriores',()=>{
+ const scene={start:0,end:10,cuts:[],silences:[]};
+ const image={assetId:'foto',type:'image'};
+ const drawing={assetId:'dibujo',type:'video',at:3,seconds:4};
+ const parts=require('../backend/media.cjs').timeline(scene,10,[image,drawing]);
+ assert.deepEqual(parts.map(p=>[p.start,p.end,p.medium.assetId]),[[0,3,'foto'],[3,7,'dibujo'],[7,10,'foto']]);
+});

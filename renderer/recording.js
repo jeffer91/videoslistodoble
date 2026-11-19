@@ -84,7 +84,8 @@
     const modal = $('#modal-root');
     modal.hidden = false;
     modal.innerHTML = '<div class="modalback"><div class="modal recorder-modal">' +
-      '<div class="row between"><h2>Grabar ' + esc(names[state.scene]) + '</h2>' + btn('modal-close', 'Cerrar', 'secondary') + '</div>' +
+      '<div class="row between"><h2>Grabar ' + esc(state.page==='guided' && state.editingWeekId && state.scene==='hook'?'Introducción':names[state.scene]) + '</h2>' + btn('modal-close', 'Cerrar', 'secondary') + '</div>' +
+      (state.page==='guided'?btn('guide-use-phone','Usar celular','secondary'):'') +
       '<div class="two"><label class="field">Cámara<select id="camera-choice"></select></label>' +
       '<label class="field">Micrófono<select id="mic-choice"></select></label></div>' +
       '<div class="row between"><label for="microphone-meter">Nivel del micrófono</label>' +
@@ -95,7 +96,7 @@
       '<div class="row wrap recorder-actions" id="record-live-actions">' + btn('record-start', 'Iniciar grabación') +
       btn('record-pause', 'Pausar', 'secondary', 'disabled') + btn('record-stop', 'Detener', 'danger', 'disabled') + '</div>' +
       '<div class="row wrap recorder-actions" id="record-review-actions" hidden>' + btn('record-retry', 'Repetir', 'secondary') +
-      btn('record-save', 'Guardar toma') + '</div></div></div>';
+      btn('record-save', state.page==='guided'?'Guardar · '+Guided.nextLabel():'Guardar toma') + '</div></div></div>';
     Factory.mountPrompter();
     try {
       await openCamera();
@@ -278,6 +279,7 @@
     if (!id) throw Error('No hay una toma pendiente');
     const saved = await flow('take.recover', { id });
     await close();
+    if (await Guided.afterSave(saved)) return;
     await openProject(saved.projectId, saved.scene, state.orientation);
     notice('Toma conservada con su audio y encuadre cuadrado');
   }

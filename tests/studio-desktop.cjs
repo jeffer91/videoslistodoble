@@ -25,7 +25,16 @@ async function run() {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.setDefaultTimeout(15000);
-    await page.getByRole('heading', { name: 'Calendario de producción' }).waitFor();
+    await page.getByRole('heading', { name: 'Estudio de videos' }).waitFor();
+    await page.getByRole('button',{name:'Crear un Short',exact:true}).click();
+    await page.locator('#new-project-title').fill('Short guiado');
+    await page.getByRole('button',{name:'Continuar a grabación'}).click();
+    await page.getByRole('heading',{name:'Grabar Gancho'}).waitFor();
+    await page.getByRole('button',{name:'Cerrar',exact:true}).click();
+    await page.getByRole('button',{name:'Inicio',exact:true}).click();
+    await page.getByRole('button',{name:'Continuar · Grabar gancho'}).click();
+    await page.getByRole('button',{name:'Usar celular',exact:true}).waitFor();
+    await page.getByText('Más herramientas',{exact:true}).click();
     await page.getByRole('button', { name: 'Ideas', exact: true }).click();
     await page.locator('#idea-title').fill('El récord de Quito');
     await page.locator('#idea-source').fill('Fixture de acta oficial');

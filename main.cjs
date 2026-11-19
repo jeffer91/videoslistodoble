@@ -145,6 +145,15 @@ app.whenReady().then(()=>{
     }
     return {files,errors};
   });
+  register('scene:animate', async x => {
+    const pick = await dialog.showOpenDialog(win, {title:'Elegir foto para animar', properties:['openFile'],
+      filters:[{name:'Fotografías',extensions:['png','jpg','jpeg','webp','bmp']}]});
+    if (pick.canceled) return null;
+    const runtime = app.isPackaged
+      ? {exe:path.join(process.resourcesPath,'animation','records-animation.exe'),args:[]}
+      : {exe:process.env.RECORDS_PYTHON || (process.platform==='win32'?'python':'python3'),args:[path.join(__dirname,'animation','worker.py')]};
+    return runMedia(signal => require('./backend/animation.cjs').animate(ROOT, {...x,source:pick.filePaths[0]},runtime,signal));
+  });
   register('music:import',async x=>{
     const selection=await dialog.showOpenDialog(win,{title:'Seleccionar música de fondo',
       properties:['openFile'],

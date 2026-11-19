@@ -2,6 +2,16 @@
 
 Aplicación de Windows para producir Shorts y compilaciones de fútbol. Edita, transcribe y renderiza localmente. Puedes importar investigación, guiones y planes de Claude Code como archivos JSON.
 
+## Producción guiada
+
+Desde **Inicio → Crear un Short**, escribe el título y continúa a la cámara. Guarda el gancho, el desarrollo y el cierre por separado. Puedes usar el celular o importar una toma desde las opciones de grabación. Inicio permite retomar el último Short pendiente.
+
+En **Revisar Short**, reproduce el montaje. En Gancho o Desarrollo pulsa **Animar imagen**, elige lápiz o pintura, indica el segundo de la toma y selecciona la foto. Studio genera el clip localmente con el motor de Animación y lo incorpora a esa escena. Aprueba el montaje y exporta el MP4. La ficha, el editor detallado y el calendario siguen disponibles.
+
+En **Videos largos**, crea una compilación semanal o por categoría. Ordena los desarrollos y continúa a la introducción y al cierre. Al revisar la compilación verás también las animaciones de cada desarrollo. La exportación horizontal conserva el mínimo de ocho minutos.
+
+El instalador de Windows incluye el motor de animación. Para ejecutarlo desde el código fuente, instala las dependencias con `python -m pip install -r animation/requirements.txt`. La variable opcional `RECORDS_PYTHON` selecciona el intérprete de desarrollo.
+
 ## Instalar en Windows
 
 1. Descarga el instalador más reciente desde [Releases](https://github.com/jeffer91/videoslistodoble/releases). Cada versión también queda disponible en [Actions](https://github.com/jeffer91/videoslistodoble/actions/workflows/windows-build.yml).

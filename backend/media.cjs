@@ -277,7 +277,7 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  return f.join(';');
 }
 async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={},templateFile=null,sceneKey='body',narrationSpeed=1,visual=null){
- if(!(length>.06))return;
+ if(!(length>0))throw Error('El fragmento no tiene duración');
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
  const withPresenter=Boolean(mediaAsset),hasLogo=Boolean(logo&&fs.existsSync(logo));
  const titleFile=path.join(ctx,'title-'+path.basename(target)+'.txt');
@@ -312,6 +312,25 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  if(progress)progress();
 }
 function timeline(scene,duration,mediaEntries){
+ const fixed = mediaEntries.filter(item => Number.isFinite(item.at) && item.seconds > 0);
+ if (fixed.length) {
+  const base = timeline(scene,duration,mediaEntries.filter(item => !fixed.includes(item)));
+  return base.flatMap(entry => {
+   const points = new Set([entry.start, entry.end]);
+   for (const item of fixed) {
+    for (const edge of [item.at,item.at+item.seconds]) {
+     if (edge > entry.start && edge < entry.end) points.add(edge);
+    }
+   }
+   const edges = [...points].sort((a,b)=>a-b);
+   return edges.slice(0,-1).map((start,index)=>{
+    const end = edges[index+1];
+    const overlay = fixed.findLast(item => item.at <= start && start < item.at+item.seconds);
+    if (overlay) return {start,end,medium:overlay,mediaStart:start-overlay.at,speed:1};
+    return {...entry,start,end,mediaStart:entry.mediaStart+(start-entry.start)*entry.speed};
+   });
+  });
+ }
  const ranges=retainedRanges(scene,duration);
  const total=ranges.reduce((n,r)=>n+r.end-r.start,0);
  if(!mediaEntries.length)return ranges.map(r=>({...r,medium:null,mediaStart:0,speed:1}));
@@ -341,7 +360,7 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   if(!asset)throw Error('Recurso ausente');
   const file=store.resolveAsset(root,p.id,asset.id);
   const duration=asset.type==='video'?(await probe(file)).duration:0;
-  return {assetId:asset.id,file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
+  return {at:m.at,seconds:m.seconds,assetId:asset.id,file,type:asset.type,sourceStart:Math.max(0,Number(m.start)||0),sourceEnd:Math.min(duration||voiceInfo.duration,Number(m.end)>0?Number(m.end):duration||voiceInfo.duration),speed:Math.max(.5,Math.min(2,Number(m.speed)||1)),microcuts:autoMicrocuts&&m.microcuts!==false}
  }));
  const timelineEntries=timeline(scene,voiceInfo.duration,media);
  const plan=visualDirector.sequence({projectId:p.id,sceneKey:key,duration:voiceInfo.duration,

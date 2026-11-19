@@ -295,7 +295,7 @@ function sceneView(){
  details('recording','Grabación y composición'+(video?' · '+esc(video.name):' · Sin grabación'),recording)+
  details('resources','Recursos visuales · '+(s.media||[]).length,resources)+
  details('audio','Audio y recortes'+((s.cuts||[]).length?' · '+s.cuts.length+' recorte(s)':''),audio)+
- '<div class="panel approval-panel"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></section></div>'+
+ '<div class="panel approval-panel"><span class="pill">'+(s.approved?'Escena aprobada':'Pendiente de aprobación')+'</span>'+(state.scene!=='closing'?btn('guide-animate','Animar imagen','secondary'):'')+btn('approve-scene',s.approved?'Modificar aprobación':'✓ Aprobar escena',s.approved?'secondary':'')+'</div></section></div>'+
  (state.status?'<div class="panel"><strong>'+esc(state.status)+'</strong><div class="progressbar"><div style="width:'+state.progress+'%"></div></div>'+btn('cancel-render','Cancelar exportación','danger')+'</div>':'');
 }
 
@@ -416,7 +416,7 @@ function reviewPage(){
   '<small>'+fmt(c.duration)+' · inicia '+fmt(c.start)+'</small><div class="row wrap">'+
   btn('review-seek','▶ Ver','secondary','data-start="'+c.start+'"')+
   btn('review-edit','✎ Corregir','secondary','data-id="'+esc(c.projectId)+'" data-scene="'+esc(c.scene)+'"')+
-  '</div></article>').join('');
+  (short&&c.scene!=='closing'?btn('guide-animate','Animar imagen','secondary','data-scene="'+c.scene+'"'):'')+'</div></article>').join('');
  const master={speed:1,musicAssetId:null,musicLevel:18,...project?.master};
  const songs=(project?.assets||[]).filter(a=>a.type==='audio');
  const selectMusic='<select data-master="musicAssetId" aria-label="Pista musical">'+
@@ -460,7 +460,7 @@ function reviewPage(){
   '<p class="muted mini">En la vista previa se muestra una aproximación animada; FFmpeg aplica la transición completa al exportar.</p>'+
   '</details>':'';
  const warnings=(m?.missing?.length?'<div class="warning">Completa: '+m.missing.map(esc).join(' · ')+'</div>':'')+
-  (short&&m&&!m.approved?'<div class="warning">Puedes revisar ahora; la exportación exige aprobar las tres escenas.</div>':'')+
+  (short&&m&&!m.approved?'<div class="warning">'+btn('guide-approve','Aprobar montaje','',''+(m.complete?'':'disabled'))+'</div>':'')+
   (!short&&m&&m.duration<480?'<div class="warning">El video largo debe tener al menos 8 minutos antes de exportar.</div>':'')+
   (state.reviewError?'<div class="warning">'+esc(state.reviewError)+'</div>':'');
  const timeline=parts.length?'<div class="review-timeline">'+parts.map((ch,i)=>
@@ -486,7 +486,7 @@ function reviewPage(){
   btn('delivery-open','Revisar MP4 y preparar publicación','secondary','data-kind="'+state.reviewOutput.target.kind+'" data-id="'+esc(state.reviewOutput.target.id)+'" data-file="'+esc(state.reviewOutput.target.file)+'"'):'')+'</div>':'')+
  '<p class="muted mini">Vista previa sin MP4. La exportación aplica velocidad, transiciones, mezcla y sonido normalizado.</p></section>'+
  '<section class="panel"><h2>Escenas y correcciones</h2><p class="muted mini">Selecciona una escena para verla o regresar a modificarla.</p>'+
- '<div class="review-chapters">'+cards+'</div>'+visualBar+masterControls+transitionSettings+
+ '<div class="review-chapters">'+cards+'</div>'+(short?'<details class="review-extra"><summary>Música, velocidad y efectos</summary>'+visualBar+masterControls+transitionSettings+'</details>':'')+
  ''+
  '</section></div>';
 }
@@ -549,13 +549,13 @@ async function weeklyDuration(){
 function weeklyPage(){
  const w=state.week,ids=w.projectIds,all=state.projects.filter(p=>p.status==='exported');
  const mins=state.weekLength||0;
- return titlebar(w.title,(w.kind==='category'?'Video por categoría · '+(w.filter?.value||''):'Compilación semanal')+' · 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('open-week-review','▶ Revisar y exportar MP4')+btn('studio-week-import','Importar plan','secondary'))+
+ return titlebar(w.title,(w.kind==='category'?'Video por categoría · '+(w.filter?.value||''):'Compilación semanal')+' · 16:9 · los desarrollos se obtienen de los originales',btn('weeks','← Compilaciones','secondary')+btn('guide-week-record','Continuar a la introducción','',ids.length?'':'disabled')+btn('open-week-review','Revisar montaje','secondary')+btn('studio-week-import','Importar plan','secondary'))+
  '<div class="stagegrid"><section><div class="panel"><h2>Secuencia del video</h2><div class="list">'+
- '<div class="asset"><span>Introducción exclusiva</span>'+btn('edit-week-intro',w.intro?'Editar / grabar':'Preparar introducción','secondary')+'</div>'+
+ ''+
  ids.map((id,i)=>{const p=state.projects.find(x=>x.id===id);return '<div class="asset"><span><strong>'+esc(p?.title||'Récord')+'</strong> <small>· Desarrollo · título original</small></span><div class="row">'+btn('move-record','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-record','↓','secondary','data-index="'+i+'" data-delta="1"')+btn('remove-record','×','danger','data-id="'+id+'"')+'</div></div>'}).join('')+
- '<div class="asset"><span>Cierre exclusivo</span>'+btn('edit-week-closing',w.closing?'Editar / grabar':'Preparar cierre','secondary')+'</div></div>'+
+ '</div><details><summary>Más opciones del montaje</summary>'+btn('edit-week-intro','Editar introducción','secondary')+btn('edit-week-closing','Editar cierre','secondary')+
  '<div class="field"><label for="week-transition">Transición entre récords</label><select id="week-transition"><option value="title">Cartela con el título</option><option value="cut" '+(w.transition==='cut'?'selected':'')+'>Corte directo</option></select></div>'+
- '<div class="divider"></div><h3>Añadir récord exportado</h3><select id="add-record-select"><option value="">Elige un proyecto…</option>'+all.filter(p=>!ids.includes(p.id)).map(p=>'<option value="'+p.id+'">'+esc(p.title)+'</option>').join('')+'</select> '+btn('add-record','Agregar','secondary')+'</div></section>'+
+ '<div class="divider"></div><h3>Añadir récord exportado</h3><select id="add-record-select"><option value="">Elige un proyecto…</option>'+all.filter(p=>!ids.includes(p.id)).map(p=>'<option value="'+p.id+'">'+esc(p.title)+'</option>').join('')+'</select> '+btn('add-record','Agregar','secondary')+'</details></div></section>'+
  '<section><div class="panel"><h2>Duración estimada</h2><h1>'+fmt(mins)+'</h1><div class="progressbar"><div style="width:'+Math.min(100,mins/480*100)+'%"></div></div>'+(mins<480?'<div class="warning">Faltan aproximadamente '+fmt(480-mins)+' para llegar al objetivo de 8 minutos. Añade desarrollos o contenido antes de exportar.</div>':'<div class="success">La compilación alcanza el mínimo de 8 minutos.</div>')+
  '<p class="muted mini">Incluye cada desarrollo una sola vez, sin sus ganchos ni cierres. Una transición automática breve separa los récords. Las imágenes se recomponen desde originales para 16:9.</p>'+
  '<p class="muted mini">Después de exportar una compilación semanal, sus récords dejan de proponerse para la siguiente semanal, pero siguen disponibles para videos por categoría. Puedes editar sus fuentes y regenerar esta compilación.</p></div></section></div>'+
@@ -566,10 +566,10 @@ function render(){
  const waveLeft=$('#edit-wave-scroll')?.scrollLeft||0;
  const oldVideo=$('#speaker-preview'),oldAsset=oldVideo?.dataset.asset;
  const wasPlaying=Boolean(oldVideo&&!oldVideo.paused&&!oldVideo.ended),oldTime=Number(oldVideo?.currentTime)||0;
- el.innerHTML=page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='record-card'&&window.Factory?Factory.recordCardPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':(StudioWorkflow.page(page)||home());
+ el.innerHTML=page==='guided'?Guided.scenePage():page==='dashboard'?Guided.dashboard():page==='calendar'?StudioWorkflow.page('dashboard'):page==='home'?home():page==='weeks'?weeksPage():page==='global-library'?globalLibraryPage():page==='project-library'?projectLibraryPage():page==='record-card'&&window.Factory?Factory.recordCardPage():page==='project'?sceneView():page==='review'?reviewPage():page==='week'?weeklyPage():page==='settings'?settingsPage():page==='legacy'?titlebar('Editor web original','Copia exacta de Videoshort v20; disponible para referencia sin persistencia de proyectos.')+'<iframe title="Editor original" src="../legacy/index.html" style="width:100%;height:75vh;border:1px solid #31543b;background:white;border-radius:13px"></iframe>':(StudioWorkflow.page(page)||home());
  document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n.dataset.action===(page==='project'?'home':page==='week'?'weeks':page)));
  const sidebar=$('#sidebar-project'),title=$('#sidebar-project-title');
- if(sidebar)sidebar.hidden=!state.project;
+ if(sidebar)sidebar.hidden=!state.project||['dashboard','guided','review','week'].includes(page);
  if(title&&state.project)title.textContent=state.project.title;
  const wave=$('#edit-wave-scroll');if(wave){setCutZoom(state.cutZoom,false);wave.scrollLeft=waveLeft}
  const current=$('#speaker-preview');
@@ -868,6 +868,21 @@ document.addEventListener('error',e=>{
 document.addEventListener('click',async e=>{
  const b=e.target.closest('[data-action]');if(!b)return;
  const action=b.dataset.action;try{
+  if(action==='calendar')return navigate('calendar');
+  if(action==='guide-resume')return await Guided.open(b.dataset.id);
+  if(action==='guide-use-phone'){await Recording.close();return await MobileRecording.open()}
+  if(action==='guide-next')return await Guided.next();
+  if(action==='guide-animate')return Guided.animationDialog(b.dataset.scene||state.scene);
+  if(action==='guide-generate')return await Guided.generate(b.dataset.scene);
+  if(action==='guide-week-record'){
+   const entry=state.week.intro;
+   return Guided.open(entry.projectId,entry.scene,state.week.id);
+  }
+  if(action==='guide-approve'){
+   if(!state.reviewInfo?.complete)throw Error('Completa las grabaciones primero');
+   for(const key of order)state.project.scenes[key].approved=true;
+   await saveNow();return openReview('short');
+  }
   if(['home','weeks','legacy','global-library','project-library'].includes(action))return await navigate(action);
   if(action==='open-current-project'){if(!state.project)throw Error('Abre un proyecto');return openProject(state.project.id,state.scene)}
   if(action==='global-tab'){state.globalTab=b.dataset.tab;return render()}
@@ -903,19 +918,27 @@ document.addEventListener('click',async e=>{
   if(action==='back')return await navigate('home');
   if(action==='new'){
    const modal=$('#modal-root');modal.hidden=false;
-   modal.innerHTML='<div class="modalback"><div class="modal"><h2>Crear nuevo récord</h2><div class="field"><label>Título del récord</label><input id="new-project-title" maxlength="120" placeholder="Escribe el récord que vas a producir"></div><div class="row">'+btn('confirm-new','Crear proyecto')+btn('modal-close','Cancelar','secondary')+'</div></div></div>';
+   modal.innerHTML='<div class="modalback"><div class="modal"><h2>Crear nuevo récord</h2><div class="field"><label>Título del récord</label><input id="new-project-title" maxlength="120" placeholder="Escribe el récord que vas a producir"></div><div class="row">'+btn('confirm-new','Continuar a grabación')+btn('modal-close','Cancelar','secondary')+'</div></div></div>';
    $('#new-project-title').focus();return;
   }
   if(action==='confirm-new'){
    const title=$('#new-project-title')?.value.trim();
    if(!title)throw Error('Escribe un título antes de crear el proyecto');
    $('#modal-root').hidden=true;
-   const p=await api('projects:create',{title});await loadLibrary();return window.Factory?await Factory.openRecordCard(p.id):await openProject(p.id);
+   const p=await api('projects:create',{title});await loadLibrary();await Guided.open(p.id,'hook');return Recording.open();
   }
   if(action==='open-project'){state.editingWeekId=null;return await openProject(b.dataset.id)}
   if(action==='open-week')return await openWeek(b.dataset.id);
   if(action==='new-week'){
-   const w=await api('weekly:create',{title:'Récords de la semana'});await loadLibrary();return await openWeek(w.id)
+   const modal=$('#modal-root');modal.hidden=false;
+   modal.innerHTML='<div class="modalback"><div class="modal"><h2>Título del video semanal</h2><input id="guided-week-title" maxlength="120" value="Récords de la semana"><div class="row">'+btn('guide-create-week','Elegir y ordenar récords')+btn('modal-close','Cancelar','secondary')+'</div></div></div>';
+   $('#guided-week-title').select();return;
+  }
+  if(action==='guide-create-week'){
+   const title=$('#guided-week-title').value.trim();if(!title)throw Error('Escribe un título');
+   b.disabled=true;let w;
+   try{w=await api('weekly:create',{title})}finally{b.disabled=false}
+   $('#modal-root').hidden=true;await loadLibrary();return await openWeek(w.id)
   }
   if(action==='scene'){await saveNow();state.scene=b.dataset.id;resetCutEditor();render();refreshWaveform();return prepareScenePreview()}
   if(action==='open-review')return await openReview('short');
@@ -1082,7 +1105,7 @@ document.addEventListener('click',async e=>{
    if(action==='remove-media')s.media.splice(i,1);else if(j>=0&&j<s.media.length)[s.media[i],s.media[j]]=[s.media[j],s.media[i]];
    s.approved=false;await saveNow();render();return prepareScenePreview();
   }
-  if(action==='approve-scene'){const s=state.project.scenes[state.scene];if(!s.video)throw Error('Primero sube o graba el video principal');if(state.scene!=='closing'&&!(s.media||[]).length)throw Error('Añade al menos una fotografía o video de apoyo');if(Number(s.end)<=Number(s.start))throw Error('El fragmento debe tener una duración positiva');
+  if(action==='approve-scene'){const s=state.project.scenes[state.scene];if(!s.video)throw Error('Primero sube o graba el video principal');if(Number(s.end)<=Number(s.start))throw Error('El fragmento debe tener una duración positiva');
    s.approved=!s.approved;await saveNow();return render()}
   if(action==='orientation-short'||action==='orientation-wide'){state.orientation=action==='orientation-wide'?'wide':'short';return render()}
   if(action==='play-preview')return await playback(false);
