@@ -45,6 +45,7 @@ const Guided = (() => {
       '<section class="panel guide-take">' + (scene.video ? '<video controls preload="metadata" src="' +
         esc(url(project,scene.video)) + '"></video>' : '') + '<div class="row wrap">' +
       (scene.video ? btn('guide-next', nextLabel()) : '') +
+      (scene.video && state.scene==='closing'?btn('stamp-editor','Colocar sello en el cierre','secondary'):'') +
       btn('start-recorder', scene.video ? 'Repetir toma' : 'Grabar ' + label.toLowerCase(), scene.video ? 'secondary' : '') +
       btn('mobile-recorder','Usar celular','secondary') + '</div><details><summary>Más opciones de grabación</summary>' +
       btn('import-voice','Importar toma','secondary') + btn('record-recovery','Recuperar toma','secondary') +

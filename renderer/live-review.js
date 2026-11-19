@@ -140,7 +140,7 @@ function liveStageHTML(chapter){
   '<span class="corner-ball corner-bottom-left" aria-hidden="true"></span>'+
   '<span class="corner-ball corner-bottom-right" aria-hidden="true"></span>'+
   '</div>'+
-  (closing?'<div class="follow">SÍGUENOS</div>':'')+
+  (closing?ClosingStamp.stage(s)+'<div class="follow">SÍGUENOS</div>':'')+
   (state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="">':'')+
   '<div id="review-fx-overlay" class="review-fx-overlay"></div>'+
   '</div>';

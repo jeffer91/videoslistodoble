@@ -191,7 +191,10 @@ async function overlayScene(library, root, project, scene, segments, ranges, rat
   const texts = values('texts');
   const graphics = values('graphics');
   const memes = plannedMemes(scene, ranges, rate);
-  if (!words.length && !texts.length && !graphics.length && !memes.length) return { segments, added: 0 };
+  const at=scene.closingStamp?.at;
+  const stampRanges=Number.isFinite(at) && ranges.some(r=>r.start<=at && at<r.end)
+    ? clipsOnOutput([{start:at,end:at+1}],ranges,rate) : [];
+  if (!stampRanges.length && !words.length && !texts.length && !graphics.length && !memes.length) return { segments, added: 0 };
   const input = path.join(root, 'scene.mp4');
   await media.concat(root, segments, input, signal);
   let last = input;
@@ -223,6 +226,23 @@ async function overlayScene(library, root, project, scene, segments, ranges, rat
     await media.command(media.toolPath('ffmpeg'), [...args, '-filter_complex', filter.join(';'), '-map', '[' + video + ']',
       '-map', '0:a', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'copy', last],
     signal, null, root);
+  }
+  if (stampRanges.length) {
+    const start=stampRanges[0].start, end=stampRanges.at(-1).end;
+    for(const name of ['sello.png','sello.wav'])
+      fs.copyFileSync(path.join(__dirname,'..','assets',name),path.join(root,name));
+    const output=path.join(root,'sellado.mp4');
+    const width=2*Math.round(info.width*.6/2);
+    const graph=[
+      '[1:v]scale='+width+':-1,format=rgba[stamp]',
+      "[0:v][stamp]overlay=x=(W-w)/2:y=H*0.24:enable='gte(t,"+start.toFixed(6)+")*lt(t,"+end.toFixed(6)+")'[v]",
+      '[2:a]adelay='+Math.round(start*1000)+':all=1[hit]',
+      '[0:a][hit]amix=inputs=2:duration=first:normalize=0[a]'
+    ];
+    await media.command(media.toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',last,
+      '-i','sello.png','-i','sello.wav','-filter_complex',graph.join(';'),'-map','[v]','-map','[a]',
+      '-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2',output],signal,null,root);
+    last=output;
   }
   let added = 0;
   for (const [index, meme] of memes.entries()) {

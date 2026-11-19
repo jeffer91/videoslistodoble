@@ -394,7 +394,8 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   segments.push(output);
  }
  const rate=Number(scene.playbackSpeed)||1;
- const hasOverlays=scene.captions?.length||['texts','graphics','memes'].some(name=>scene.editing?.[name]?.length);
+ if(key!=='closing'||scene.closingStamp?.assetId!==scene.video)delete scene.closingStamp;
+ const hasOverlays=scene.closingStamp||scene.captions?.length||['texts','graphics','memes'].some(name=>scene.editing?.[name]?.length);
  if(!hasOverlays)return {segments,duration:length/rate};
  const directory=fs.mkdtempSync(path.join(tmp,'scene-overlay-'));
  const composite=await editing.overlayScene(root,directory,p,scene,segments,entries,rate,signal);

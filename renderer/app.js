@@ -146,11 +146,12 @@ function waveformEditorHTML(scene){
   '<output id="cut-zoom-output" for="cut-wave-zoom">'+zoom+'×</output>'+
   btn('wave-zoom-fit','Ajustar','secondary','title="Mostrar la grabación completa"')+'</div></div>'+
   (!peaks.length&&!state.waveErrors[id]?'<p class="muted mini" role="status">Calculando la onda de voz…</p>':'')+
+  (state.scene==='closing'?ClosingStamp.controls(scene):'')+
   '<div class="wave-scroll" id="edit-wave-scroll"><div class="wave-content" id="edit-wave-content" style="width:'+width+'px;min-width:100%" data-wave-seek="1">'+
    '<div class="wave-ruler">'+makeWaveTicks(duration,width)+'</div>'+
    '<div class="wave-bars">'+
     '<svg viewBox="0 0 '+width+' 66" preserveAspectRatio="none" aria-label="Forma de onda del audio">'+makeWaveBars(peaks,duration,width)+'</svg>'+
-   '</div>'+overlays+
+   '</div>'+(state.scene==='closing'?ClosingStamp.track(scene,duration):'')+overlays+
    '<div id="edit-wave-selection" class="wave-current-selection" style="left:'+(100*selection.start/duration)+'%;width:'+(100*(selection.end-selection.start)/duration)+'%"></div>'+
    '<div id="edit-wave-playhead" class="wave-playhead" style="left:0%"></div>'+
    '<button type="button" class="wave-handle" data-trim-drag="a" style="left:'+(100*selection.start/duration)+'%" title="Arrastra el inicio">A</button>'+
@@ -269,7 +270,7 @@ function sceneView(){
   bg+='<img class="photo" id="support-image" src="'+(first&&first.type==='image'?url(p,first.id):'')+'" '+(first&&first.type==='image'?'':'hidden')+' alt="Fotografía de apoyo">';
   bg+='<video class="photo" id="support-video" muted playsinline preload="metadata" hidden></video>';
  }
- const previewHTML='<div class="stage '+(wide?'wide ':'')+'style-'+style+' '+(state.scene==='closing'?'closing':'')+'">'+bg+'<div class="headline">'+esc(s.title||p.title)+'</div>'+preview+(state.scene==='closing'?'<div class="follow">SÍGUENOS</div>':'')+(state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="Logo del canal">':'')+'</div>';
+ const previewHTML='<div class="stage '+(wide?'wide ':'')+'style-'+style+' '+(state.scene==='closing'?'closing':'')+'">'+bg+'<div class="headline">'+esc(s.title||p.title)+'</div>'+preview+(state.scene==='closing'?ClosingStamp.stage(s):'')+(state.scene==='closing'?'<div class="follow">SÍGUENOS</div>':'')+(state.settings.logo?'<img class="logo-moving" src="records://settings/logo" alt="Logo del canal">':'')+'</div>';
  const approved=order.every(k=>p.scenes[k].approved);
  const open=k=>state.editorPanel===k?' open':'';
  const details=(key,summary,content)=>'<details name="scene-tool" data-tool="'+key+'" class="panel panel-fold scene-tool"'+open(key)+'><summary>'+summary+'</summary>'+content+'</details>';
@@ -1100,6 +1101,13 @@ document.addEventListener('click',async e=>{
    if(!Number.isInteger(idx)||idx<0||idx>=(scene.cuts||[]).length)return;
    saveCutUndo();scene.cuts.splice(idx,1);scene.approved=false;queueSave();return render();
   }
+  if(action==='stamp-editor'){state.editorPanel='audio';return openProject(state.project.id,'closing',state.orientation)}
+  if(action==='stamp-place')return ClosingStamp.place($('#speaker-preview')?.currentTime||0);
+  if(action==='stamp-remove')return ClosingStamp.place(null);
+  if(action==='stamp-test'){
+   const s=state.project.scenes.closing,v=$('#speaker-preview');
+   if(v){v.currentTime=Math.max(s.start||0,ClosingStamp.timing(s)-2);return playback(false)}
+  }
   if(action==='play-cut')return await playback(true);
   if(action==='toggle-silence'){const s=state.project.scenes[state.scene];s.silences[Number(b.dataset.index)].remove=!s.silences[Number(b.dataset.index)].remove;s.approved=false;queueSave();return render()}
   if(action==='mark-all'||action==='unmark-all'){const s=state.project.scenes[state.scene];s.silences.forEach(q=>q.remove=action==='mark-all');s.approved=false;queueSave();return render()}
@@ -1238,7 +1246,7 @@ document.addEventListener('pointerdown',e=>{
 });
 document.addEventListener('click',e=>{
  const area=e.target.closest?.('[data-wave-seek]');
- if(!area||e.target.closest?.('[data-trim-drag]')||state.page!=='project')return;
+ if(!area||e.target.closest?.('.stamp-track,[data-trim-drag]')||state.page!=='project')return;
  const video=$('#speaker-preview'),duration=editorDuration();
  if(!video||!duration)return;
  const rect=area.getBoundingClientRect();
