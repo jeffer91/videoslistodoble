@@ -71,6 +71,8 @@ TikTok reserva la publicación directa pública a clientes que cumplen sus condi
 
 La cola respeta la hora local del equipo y procesa publicaciones cuando la aplicación está abierta. El archivo y la cuenta autorizados se verifican antes de cada envío. Si hay un corte durante una entrega, verifica lo que recibió la red antes de reintentar. La ficha conserva los enlaces devueltos por la red o registrados por ti.
 
+El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
+
 En **Estadísticas → Conectar cuentas**, conecta el canal de YouTube, TikTok, el perfil profesional de Instagram o una página de Facebook. **Sincronizar por API** recorre las páginas de resultados de cada cuenta, incluso para videos publicados fuera de Studio. Facebook se conecta solo para lectura. Con TikTok directo se consultan los videos públicos con video.list. Para Facebook necesitas el token de la página con acceso de análisis y los permisos de lectura/Insights.
 
 Cada fila tiene fecha de publicación cuando la red la proporciona. **Ver detalle** abre las métricas de la plataforma y las mediciones fechadas desde la primera consulta. Los datos privados, retirados o fuera de la ventana histórica de la red pueden faltar. Una consulta incompleta queda indicada en el panel. El JSON exportado incluye el historial.
