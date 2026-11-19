@@ -2,7 +2,7 @@
 const {contextBridge,ipcRenderer} = require('electron');
 const allowed = new Set([
   'projects:list','projects:create','projects:get','projects:save','projects:delete',
-  'scene:photo-clip','scene:animate','assets:import','assets:paste-image','assets:rename','assets:delete','assets:record','assets:import-logo','settings:get','settings:set',
+  'scene:remove-border','scene:photo-clip','scene:animate','assets:import','assets:paste-image','assets:rename','assets:delete','assets:record','assets:import-logo','settings:get','settings:set',
   'global:list','global:import','global:paste','global:rename','global:delete','global:from-project','global:to-project',
   'templates:list','templates:import','templates:paste','templates:set-default','templates:rename','templates:delete',
   'music:import','media:analyze','media:metadata','media:waveform','media:preview','media:timeline','review:status','review:rendered','review:export','render:short','render:weekly','render:cancel',

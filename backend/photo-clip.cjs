@@ -19,11 +19,14 @@ async function generate(root,options,signal,drawingRuntime){
   const x=Math.floor(crop[0]*info.width),y=Math.floor(crop[1]*info.height);
   const file=path.join(tmp,'encuadre.png');
   const rect={left:x,top:y,width:Math.max(1,Math.round(crop[2]*info.width)-x),height:Math.max(1,Math.round(crop[3]*info.height)-y)};
-  await sharp(data).extract(rect).resize({width:1440,height:1440,fit:'inside'}).png().toFile(file);
-  const output=path.join(tmp,path.parse(asset.name).name+'-'+style+'.mp4');
+  const cropped=await sharp(data).extract(rect).resize({width:1440,height:1440,fit:'inside'}).png().toFile(file);
+  const output=path.join(tmp,'clip.mp4');
   if(['lapiz','pintura'].includes(style)){
    const runtime=await drawingRuntime();
-   await media.command(runtime.exe,[...runtime.args,file,output,style,String(Math.max(3,seconds)),media.toolPath('ffmpeg')],signal);
+   const paper=path.join(tmp,'papel.mp4');
+   await media.command(runtime.exe,[...runtime.args,file,paper,style,String(Math.max(3,seconds)),media.toolPath('ffmpeg')],signal);
+   const border=require('./drawing-border.cjs');
+   await border.cropClip(paper,output,border.drawingRect(await media.probe(paper),cropped.width,cropped.height),signal);
   }else{
    const frames=Math.ceil(seconds*30),progress='min(1,on/'+Math.max(1,frames-1)+')';
    const z={in:'1+0.18*'+progress,out:'1.18-0.18*'+progress,pan:'1.15',still:'1'}[style];
@@ -35,7 +38,7 @@ async function generate(root,options,signal,drawingRuntime){
    await media.command(media.toolPath('ffmpeg'),['-loglevel','error','-y','-i',file,'-vf',filter,'-frames:v',String(frames),'-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart',output],signal);
   }
   const duration=(await media.probe(output)).duration;
-  return {asset:store.importAsset(root,projectId,output),duration};
+  return {asset:store.importAsset(root,projectId,output,path.parse(asset.name).name+'-'+style+'.mp4'),duration};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
 module.exports={generate};

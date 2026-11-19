@@ -70,3 +70,18 @@ test('Animar imagen desde revisión abre el selector en un gancho antiguo sin re
  assert.deepEqual(state.project.scenes.hook.media,[]);
  assert.match(modal.innerHTML,/Importar foto/);
 });
+
+test('un bloque antiguo con nombre largo se puede quitar sin borrar su archivo ni otra aparición',async()=>{
+ const vm=require('node:vm'),handlers={},modal={};
+ const asset={id:'antiguo',type:'video',name:'x'.repeat(220)+'-pintura.mp4'};
+ const scene={media:[{assetId:asset.id,at:0,seconds:2},{assetId:asset.id,at:2,seconds:3}]};
+ const project={id:'p',assets:[asset],scenes:{body:scene}};
+ const ctx={document:{addEventListener(k,f){handlers[k]=f;}},state:{page:'project',scene:'body',project},
+  $:()=>modal,btn:(a,l)=>l,esc:String,saveNow:async()=>{},render(){},prepareScenePreview(){}};
+ const ui=vm.runInNewContext(fs.readFileSync(require.resolve('../renderer/photo-track.js'),'utf8')+'\nPhotoTrack',ctx);
+ handlers.keydown({key:'Enter',target:{closest:()=>({dataset:{photoBlock:'1'}})},preventDefault(){}});
+ assert.match(modal.innerHTML,/Pintura 2/);assert.match(modal.innerHTML,/Quitar marco de papel/);
+ assert.match(modal.innerHTML,/Quitar de la escena/);assert.ok(!modal.innerHTML.includes(asset.name));
+ await ui.handle('photo-remove');
+ assert.equal(scene.media.length,1);assert.equal(scene.media[0].at,0);assert.equal(project.assets[0],asset);
+});

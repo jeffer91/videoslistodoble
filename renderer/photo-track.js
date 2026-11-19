@@ -20,11 +20,23 @@ const PhotoTrack=(()=>{
    return {...m,at,seconds:source(total*(i+1)/auto.length)-at};
   });
  }
+ function label(asset,item,index){
+  const style=item.photo?.style||asset?.name?.match(/[-_](pintura|lapiz)\.mp4$/i)?.[1]?.toLowerCase();
+  const kind=({pintura:'Pintura',lapiz:'Lápiz',in:'Acercamiento',out:'Alejamiento',pan:'Panorámica',still:'Foto'})[style] || (asset?.type==='video'?'Clip':'Imagen');
+  return kind+' '+(index+1);
+ }
+ function selectBlock(index){
+  const item=current().media[index],asset=state.project.assets.find(a=>a.id===item.assetId);
+  draft={scene:state.scene,project:state.project.id,index};
+  const edit=(item.photo||asset?.type==='image')?btn('photo-edit','Editar imagen'):'';
+  const border=asset?.type==='video'&&!item.borderRemoved&&(item.photo?.style==='lapiz'||item.photo?.style==='pintura'||/[-_](pintura|lapiz)\.mp4$/i.test(asset.name));
+  modal(label(asset,item,index),edit+(border?btn('photo-border','Quitar marco de papel','secondary'):'')+btn('photo-remove','Quitar de la escena','danger'));
+ }
  function track(scene,duration){
   return '<div class="photo-track">'+blocks(scene,duration).map((m,i)=>{
    const a=state.project.assets.find(x=>x.id===m.assetId),thumb=m.photo?.assetId||(a?.type==='image'?a.id:null);
    return '<button type="button" data-photo-block="'+i+'" class="photo-block" style="left:'+100*m.at/duration+'%;width:'+100*m.seconds/duration+'%" title="'+esc(a?.name||'Imagen')+' · '+round(m.at)+' s">'+
-    (thumb?'<img draggable="false" src="'+url(state.project,thumb)+'" alt="">':'')+'<span>'+esc(a?.name||'Clip')+'</span><b data-photo-edge aria-label="Cambiar duración">↔</b></button>';
+    (thumb?'<img draggable="false" src="'+url(state.project,thumb)+'" alt="">':'')+'<span>'+esc(label(a,m,i))+'</span><b data-photo-edge aria-label="Cambiar duración">↔</b></button>';
   }).join('')+'</div>';
  }
  function modal(title,body){
@@ -87,6 +99,18 @@ const PhotoTrack=(()=>{
  async function handle(action,b){
   if(action==='photo-add')return open(state.scene);
   if(!active())throw Error('Vuelve a elegir la imagen en la escena.');
+  if(action==='photo-edit')return open(state.scene,draft.index);
+  if(action==='photo-remove')return changed(current(),current().media.filter((_,i)=>i!==draft.index));
+  if(action==='photo-border'){
+   const d=draft,s=current(),item=s.media[d.index];
+   b.disabled=true;b.textContent='Quitando marco…';
+   try{
+    const asset=await api('scene:remove-border',{projectId:d.project,assetId:item.assetId});
+    if(draft!==d||!active())return;
+    state.project.assets.push(asset);
+    return await changed(s,s.media.map((m,i)=>i===d.index?{...m,assetId:asset.id,borderRemoved:true}:m));
+   }finally{b.disabled=false;b.textContent='Quitar marco de papel';}
+  }
   if(action==='photo-import'){
    const result=await api('assets:import',{projectId:draft.project,kind:'image',single:true});
    if(!result.files?.length){if(result.errors?.length)throw Error(result.errors[0].message);return;}
@@ -106,7 +130,7 @@ const PhotoTrack=(()=>{
     const result=await api('scene:photo-clip',{projectId:project,assetId,style,seconds,glow,focus,crop});
     if(!active()||draft!==d)return;
     state.project.assets.push(result.asset);
-    d.pending={index:d.index,item:{assetId:result.asset.id,at:d.at,seconds,start:0,end:result.duration,fitDuration:true,microcuts:false,photo:{assetId,style,glow,focus,crop}}};
+    d.pending={index:d.index,item:{assetId:result.asset.id,at:d.at,seconds,start:0,end:result.duration,fitDuration:true,borderRemoved:['pintura','lapiz'].includes(style),microcuts:false,photo:{assetId,style,glow,focus,crop}}};
     modal('Vista previa del bloque','<video class="photo-demo" controls autoplay muted src="'+url(state.project,result.asset.id)+'"></video>'+btn('photo-apply','Colocar en la pista')+btn('photo-back','Ajustar','secondary'));
     $('.photo-demo').playbackRate=clamp(result.duration/d.seconds,.0625,16);
    }catch(e){if(active())form();throw e;}
@@ -115,6 +139,10 @@ const PhotoTrack=(()=>{
    const {item,index}=draft.pending;return place(item,index,action==='photo-insert'?'insert':action==='photo-replace'?'replace':null);
   }
  }
+ document.addEventListener('keydown',e=>{
+  const block=e.target.closest('[data-photo-block]');
+  if(block && ['Enter',' '].includes(e.key)){e.preventDefault();selectBlock(Number(block.dataset.photoBlock));}
+ });
  document.addEventListener('pointerdown',e=>{
   const img=e.target.closest('#photo-original');
   if(img){
@@ -142,11 +170,11 @@ const PhotoTrack=(()=>{
   block.onpointerup=async ev=>{
    block.onpointermove=null;block.onpointerup=null;
    try{
-    if(Math.abs(ev.clientX-start)<3){if(!resize && (item.photo||state.project.assets.find(a=>a.id===item.assetId)?.type==='image'))await open(state.scene,index);return;}
+    if(Math.abs(ev.clientX-start)<3){if(!resize)selectBlock(index);return;}
     move(ev);render();draft={project:state.project.id,scene:state.scene};await place(item,index);
    }catch(err){render();notice(err.message,true);}
   };
  });
  function dismiss(){draft=null;}
- return {track,open,handle,dismiss};
+ return {track,open,handle,dismiss,label};
 })();

@@ -145,6 +145,7 @@ app.whenReady().then(()=>{
     }
     return {files,errors};
   });
+  register('scene:remove-border',x=>runMedia(signal=>require('./backend/drawing-border.cjs').repair(ROOT,x,signal)));
   register('scene:photo-clip',x=>runMedia(signal=>require('./backend/photo-clip.cjs').generate(ROOT,x,signal,async()=>app.isPackaged
     ? {exe:path.join(process.resourcesPath,'animation','records-animation.exe'),args:[]}
     : require('./backend/source-animation.cjs').sourceAnimation(__dirname,path.join(app.getPath('userData'),'motor-animacion'),signal))));

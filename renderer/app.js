@@ -37,8 +37,8 @@ function mediaRows(){
     '<label class="mini"><input type="checkbox" data-media-micro="'+i+'" '+(m.microcuts!==false?'checked':'')+'> Microcortes</label>'+
     '</div>';
   }
-  return '<div class="asset" style="display:block"><div class="row between"><div class="row">'+(a.type==='image'?'<img class="asset-thumb" src="'+url(p,a.id)+'" alt="">':'<span class="fileicon">'+assetLabel(a)+'</span>')+'<div><strong>'+esc(a.name)+'</strong><small style="display:block">'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
-   '<div class="row">'+(Number.isFinite(m.at)?'':btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"'))+btn('remove-media','×','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
+  return '<div class="asset scene-resource"><div class="resource-head"><div class="resource-info">'+(a.type==='image'?'<img class="asset-thumb" src="'+url(p,a.id)+'" alt="">':'<span class="fileicon">'+assetLabel(a)+'</span>')+'<div class="resource-name" title="'+esc(a.name)+'"><strong>'+esc(PhotoTrack.label(a,m,i))+'</strong><small>'+(a.type==='video'?'Clip de apoyo · audio silenciado':'Fotografía original')+'</small></div></div>'+
+   '<div class="row">'+(Number.isFinite(m.at)?'':btn('move-media','↑','secondary','data-index="'+i+'" data-delta="-1"')+btn('move-media','↓','secondary','data-index="'+i+'" data-delta="1"'))+btn('remove-media','Quitar','danger','data-index="'+i+'"')+'</div></div>'+controls+'</div>';
  }).join('')+'</div><p class="muted mini">Puedes seleccionar múltiples imágenes o pegar una captura desde Windows o el navegador con Ctrl+V. Los recursos se muestran en secuencia.</p>';
 }
 
@@ -268,7 +268,7 @@ function sceneToolContent(){
  if(state.editorPanel==='resources'){
   const resources=(state.scene==='closing'?'':'<div class="row wrap">'+btn('import-media','＋ Importar imágenes y videos','secondary')+btn('paste-image','▣ Pegar imagen','outline')+btn('choose-project-media','Desde biblioteca del proyecto','secondary')+'</div>')+mediaRows();
   return '<div class="row between"><h3>Pista de imágenes</h3>'+btn('photo-add','＋ Añadir imagen','',video?'':'disabled')+'</div>'+
-   waveformEditorHTML(s,true)+(state.scene==='closing'&&video?ClosingStamp.controls(s):'')+
+   waveformEditorHTML(s,true)+(s.media?.length?'<small>Selecciona un bloque para editarlo o quitarlo.</small>':'')+(state.scene==='closing'&&video?ClosingStamp.controls(s):'')+
    '<details class="minor-details"><summary>Gestionar recursos ('+(s.media||[]).length+')</summary>'+resources+'</details>';
  }
  return waveformEditorHTML(s)+'<details class="minor-details"><summary>Velocidad y límites de la toma</summary><div class="field"><label>Velocidad de narración y cámara</label><select data-field="playbackSpeed">'+
