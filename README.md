@@ -10,7 +10,17 @@ En **Revisar Short**, reproduce el montaje. En Gancho o Desarrollo pulsa **Anima
 
 En **Videos largos**, crea una compilación semanal o por categoría. Ordena los desarrollos y continúa a la introducción y al cierre. Al revisar la compilación verás también las animaciones de cada desarrollo. La exportación horizontal conserva el mínimo de ocho minutos.
 
-El instalador de Windows incluye el motor de animación. Para ejecutarlo desde el código fuente, instala las dependencias con `python -m pip install -r animation/requirements.txt`. La variable opcional `RECORDS_PYTHON` selecciona el intérprete de desarrollo.
+### Actualizar la copia de trabajo en Windows
+
+Cierra Studio. En PowerShell, desde la carpeta del repositorio, ejecuta:
+
+~~~powershell
+cd D:\videoslistodoble
+git pull --ff-only origin main
+npm start
+~~~
+
+La primera vez que pulses **Animar imagen**, Studio descarga y prepara el motor local si hace falta. Los siguientes arranques reutilizan esa copia. Si usas un intérprete propio, puedes seleccionarlo con `RECORDS_PYTHON`. El instalador de Windows ya incluye el motor.
 
 ## Instalar en Windows
 
