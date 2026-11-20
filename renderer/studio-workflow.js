@@ -1,6 +1,6 @@
 'use strict';
 (function () {
-  const brands = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram' };
+  const brands = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook' };
   const statuses = {
     pendiente: 'Pendiente', programado: 'Programado', enviando: 'Enviando', procesando: 'Procesando en la red',
     publicado: 'Publicado', fallo: 'Falló', revisar: 'Revisar en la red', cancelado: 'Cancelado'
@@ -617,7 +617,7 @@
   });
 
   function page(name) {
-    const pages = { dashboard, ideas: ideasPage, 'studio-editing': planPage, publication: queuePage, statistics: () => Statistics.page(), delivery: deliveryPage };
+    const pages = { dashboard, ideas: ideasPage, 'studio-editing': planPage, publication: queuePage, statistics: () => Statistics.page(), autopublish: () => AutoPublish.page(), delivery: deliveryPage };
     if (loading === name) return titlebar('Cargando…', '');
     return pages[name]?.() || '';
   }

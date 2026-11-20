@@ -584,7 +584,7 @@
       steps: [
         ['Ten a mano tu página de Facebook', 'Las estadísticas se leen de la página donde publicas los videos y Reels. Debes ser administrador.'],
         ['Usa una app de Meta', 'Puedes reutilizar la app creada para Instagram o crear otra con el caso de uso «Administrar todo lo de tu página».', 'meta-apps'],
-        ['Obtén el token de la página', 'En el Explorador de la API Graph elige tu app, añade pages_show_list, pages_read_engagement y read_insights, pulsa Generate Access Token y después elige tu página en «Token de página». Copia el token y el ID de la página.', 'meta-explorer'],
+        ['Obtén el token de la página', 'En el Explorador de la API Graph elige tu app, añade pages_show_list, pages_read_engagement, read_insights y, para publicar, pages_manage_posts. Pulsa Generate Access Token y después elige tu página en «Token de página». Copia el token y el ID de la página.', 'meta-explorer'],
         ['Haz que no caduque', 'Pega el token en el Depurador de tokens y pulsa Ampliar token de acceso. El token de página obtenido desde un token ampliado no vence.', 'meta-debugger']
       ]
     },
@@ -592,7 +592,7 @@
       gives: 'Vistas, me gusta, comentarios y compartidos. TikTok no entrega el tiempo visto por API: compleméntalo con el lector de navegador.',
       steps: [
         ['Crea una app en TikTok for Developers', 'Entra con tu cuenta de TikTok y crea una app de uso personal.', 'tiktok-apps'],
-        ['Añade Login Kit y Display API', 'Activa los permisos user.info.basic y video.list (user.info.stats es opcional para los seguidores).', 'tiktok-display'],
+        ['Añade Login Kit, Display API y Content Posting API', 'Activa user.info.basic y video.list para estadísticas, y video.upload para enviar videos a tus borradores (video.publish solo sirve tras la auditoría). user.info.stats es opcional para los seguidores.', 'tiktok-display'],
         ['Trabaja en modo Sandbox', 'Agrega tu propia cuenta de TikTok como usuario de prueba. Así no necesitas la auditoría pública para leer tus videos.'],
         ['Obtén los tokens', 'Autoriza tu cuenta en la app y copia el token de acceso y el token de renovación junto con el Client key y el Client secret.']
       ]

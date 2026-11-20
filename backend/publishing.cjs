@@ -48,7 +48,8 @@ function safeLink(network, input) {
   const known = {
     youtube: ['www.youtube.com', 'youtube.com', 'youtu.be'],
     tiktok: ['www.tiktok.com', 'tiktok.com', 'vm.tiktok.com'],
-    instagram: ['www.instagram.com', 'instagram.com']
+    instagram: ['www.instagram.com', 'instagram.com'],
+    facebook: ['www.facebook.com', 'facebook.com', 'web.facebook.com', 'fb.watch']
   };
   if (url.protocol !== 'https:' || url.username || url.password || !known[network]?.includes(url.hostname) ||
       url.href.length > 1500) throw Error('Introduce un enlace HTTPS de ' + network);
@@ -184,7 +185,7 @@ function createPublishing(root, vault, platform = clients) {
     return job;
   }
 
-  async function enqueue({ target, network, dueAt, confirmed }) {
+  async function enqueue({ target, network, dueAt, confirmed, metadata: prepared, auto = false }) {
     validNetwork(network);
     if (confirmed !== true) throw Error('Debes confirmar el envío a esta red');
     const scheduled = dateString(dueAt) || new Date().toISOString();
@@ -194,23 +195,26 @@ function createPublishing(root, vault, platform = clients) {
     if (!approved || !entry.quality?.ok) throw Error('Primero revisa y aprueba el MP4');
     const file = delivery.resolveOutput(root, target);
     if (await delivery.fingerprint(file) !== approved.sha256) throw Error('El MP4 cambió después de la aprobación');
-    const metadata = delivery.normalizeNetwork(network, entry.networks[network]);
-    if (!metadata.privacy && network !== 'instagram') throw Error('Selecciona la visibilidad antes de autorizar');
+    const metadata = delivery.normalizeNetwork(network, prepared || entry.networks[network]);
+    if (!metadata.privacy && !['instagram', 'facebook'].includes(network) && metadata.mode !== 'inbox') {
+      throw Error('Selecciona la visibilidad antes de autorizar');
+    }
     if (network === 'tiktok' && metadata.branded && !['FOLLOWER_OF_CREATOR', 'PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS'].includes(metadata.privacy)) {
       throw Error('La visibilidad privada no admite la divulgación de contenido patrocinado');
     }
     const thumbnail = network === 'youtube' || account.provider === 'ayrshare' ? delivery.thumbnailPath(root, target, metadata.thumbnail) : null;
     const thumbnailHash = thumbnail ? await delivery.fingerprint(thumbnail) : null;
     const jobs = queue();
-    if (jobs.some(job => job.target.file === target.file && job.network === network &&
-      job.identity.id === account.identity.id && job.status !== 'cancelado')) {
-      throw Error('Este video ya está en la cola de esa cuenta. Usa la acción del elemento existente.');
+    // Sin repetir contenido: el mismo archivo (por nombre o por su huella) solo va una vez a cada cuenta.
+    if (jobs.some(job => job.network === network && job.identity.id === account.identity.id && job.status !== 'cancelado' &&
+      (job.target.file === target.file || job.sha256 === approved.sha256))) {
+      throw Error('Este video ya está publicado o en la cola de esa cuenta.');
     }
     const job = {
       id: randomUUID(), target, network, identity: account.identity, metadata, sha256: approved.sha256, thumbnailHash,
       authorizedAt: new Date().toISOString(), dueAt: scheduled, nextAt: scheduled,
       status: Date.parse(scheduled) > Date.now() ? 'programado' : 'pendiente', attempts: 0, remote: {},
-      url: null, externalId: null, message: ''
+      url: null, externalId: null, message: '', ...(auto ? { auto: true } : {})
     };
     writeQueue([...jobs, job]);
     return publicJob(job);
@@ -512,7 +516,7 @@ function createPublishing(root, vault, platform = clients) {
     return file;
   }
 
-  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, accountReading, snapshotAccounts, growth: () => production.readState(root, GROWTH, {}), refreshStats, stats, exportStats };
+  return { jobsRaw: () => queue(), syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, accountReading, snapshotAccounts, growth: () => production.readState(root, GROWTH, {}), refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };

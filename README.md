@@ -100,6 +100,22 @@ Para usar la misma copia en otro equipo, copia la clave de datos y pégala al co
 
 El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
 
+### Publicación automática
+
+**Publicación automática** (menú lateral) publica los videos que ya revisaste y aprobaste en la pantalla de entrega, en los horarios que elijas para cada red y sin repetir contenido:
+
+- **Sin repetir:** el mismo archivo (o su huella SHA-256) solo va una vez a cada cuenta, el mismo récord solo se publica una vez por red, y si las estadísticas muestran un video con el mismo título ya publicado a mano, tampoco se programa. Un envío automático cancelado no se vuelve a programar en esa red.
+- **Adaptado a cada red:** título dentro de su límite, #Shorts en YouTube, #Reels en Instagram, hashtags del récord y fijos hasta el máximo de cada red, y una frase final distinta por red.
+- **Requisitos que comprueba antes de programar:** duración, formato vertical u horizontal y límites diarios (Studio se queda por debajo de los de cada plataforma).
+- La app planifica cada 10 minutos mientras está abierta; la cola reintenta y registra el enlace publicado.
+
+| Red | Publicación automática | Qué necesita |
+| --- | --- | --- |
+| Instagram | Sí, como Reel (3 s a 15 min) | Token con instagram_business_content_publish. |
+| Facebook (página) | Sí: Reel hasta 90 s en vertical; si no, video de página | Token de página con pages_manage_posts. Los grupos no se pueden automatizar: Meta retiró esa API en 2024. |
+| TikTok | Como borrador en la app (un toque para publicar) o directa | Borrador: permiso video.upload. Directa y pública: auditoría de TikTok o Ayrshare. |
+| YouTube | Tras la auditoría de la API de YouTube | Sin auditoría, YouTube bloquea como privados los videos subidos por API. Solicítala desde la propia pantalla. |
+
 ### Publicar en las redes
 
 Las mismas conexiones permiten publicar desde Studio.

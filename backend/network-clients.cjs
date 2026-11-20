@@ -303,21 +303,24 @@ async function uploadTikTok(context) {
   if (context.account.provider === 'ayrshare') return uploadAyrTikTok(context);
   const { account, token, file, metadata, quality, remote, checkpoint } = context;
   if (!remote.publishId) {
-    const own = await tiktokCreator(account);
-    if (!own.privacy.includes(metadata.privacy)) throw new NetworkError('Vuelve a elegir una visibilidad admitida por TikTok');
-    if (quality.duration > own.maxDuration) throw new NetworkError('Este video supera el límite de tu cuenta de TikTok');
+    // En modo borrador basta el permiso video.upload; la consulta del creador exige video.publish.
+    const own = metadata.mode === 'inbox' ? { comments: true, duet: true, stitch: true, username: '' } : await tiktokCreator(account);
+    if (metadata.mode !== 'inbox' && !own.privacy.includes(metadata.privacy)) throw new NetworkError('Vuelve a elegir una visibilidad admitida por TikTok');
+    if (own.maxDuration && quality.duration > own.maxDuration) throw new NetworkError('Este video supera el límite de tu cuenta de TikTok');
     const size = fs.statSync(file).size;
     const chunkSize = Math.min(size, 16 * 1024 * 1024);
     const total = Math.max(1, Math.floor(size / chunkSize));
-    const result = await request(TIKTOK + '/v2/post/publish/video/init/', {
-      token, method: 'POST', json: {
+    const inbox = metadata.mode === 'inbox';
+    const source_info = { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunkSize, total_chunk_count: total };
+    const result = await request(TIKTOK + (inbox ? '/v2/post/publish/inbox/video/init/' : '/v2/post/publish/video/init/'), {
+      token, method: 'POST', json: inbox ? { source_info } : {
         post_info: {
           title: caption(metadata, 2200), privacy_level: metadata.privacy, disable_comment: !own.comments || !metadata.comments,
           disable_duet: !own.duet || !metadata.duet, disable_stitch: !own.stitch || !metadata.stitch,
           video_cover_timestamp_ms: Math.floor(1000 * Math.min(metadata.coverTime, Math.max(0, quality.duration - .1))),
           brand_content_toggle: metadata.branded, brand_organic_toggle: metadata.ownBrand
         },
-        source_info: { source: 'FILE_UPLOAD', video_size: size, chunk_size: chunkSize, total_chunk_count: total }
+        source_info
       }
     });
     const session = uploadLocation(result.data?.upload_url, ['open-upload.tiktokapis.com']);
@@ -340,6 +343,7 @@ async function uploadTikTok(context) {
     method: 'POST', token, json: { publish_id: remote.publishId }
   });
   const status = result.data?.status;
+  if (status === 'SEND_TO_USER_INBOX') return { id: null, url: null, note: 'Está en tus borradores de TikTok: ábrelo en la app y pulsa Publicar.' };
   if (status === 'FAILED') throw new NetworkError('TikTok rechazó el video: ' + String(result.data.fail_reason || 'falló la carga').replace(/[^\w.-]/g, '').slice(0, 90));
   if (status !== 'PUBLISH_COMPLETE') return { processing: true };
   const rawId = (result.data.publicaly_available_post_id || result.data.publicly_available_post_id || [])[0];
@@ -442,6 +446,54 @@ async function uploadInstagram(context) {
   return { id, url: post.permalink || null };
 }
 
+/**
+ * Facebook: página (no grupos; Meta retiró la API de grupos en 2024).
+ * - Hasta 90 s en vertical → Reel (POST /{page}/video_reels, tres fases).
+ * - Más largo → video de la página (subida reanudable y POST /{page}/videos).
+ */
+const FACEBOOK_REEL_LIMIT = 90;
+
+async function uploadFacebook(context) {
+  const { account, token, file, metadata, quality, remote, checkpoint } = context;
+  const page = numericId(account.identity?.id || account.profileId);
+  const size = fs.statSync(file).size;
+  const text = caption(metadata, 5000);
+  const reel = quality.duration <= FACEBOOK_REEL_LIMIT && quality.height > quality.width;
+  if (!remote.videoId) {
+    if (reel) {
+      if (quality.duration < 3) throw new NetworkError('Facebook admite Reels de 3 a 90 segundos');
+      const started = await request(META + '/' + page + '/video_reels', { method: 'POST', token, form: { upload_phase: 'start' } });
+      const videoId = numericId(started.video_id);
+      const session = uploadLocation(started.upload_url, ['rupload.facebook.com']);
+      checkpoint({ videoId, reel: true });
+      await request(session, { method: 'POST', upload: true, raw: true, body: fs.createReadStream(file),
+        headers: { Authorization: 'OAuth ' + token, offset: '0', file_size: String(size), 'Content-Length': String(size) } });
+      await request(META + '/' + page + '/video_reels', { method: 'POST', token, form: {
+        upload_phase: 'finish', video_id: videoId, video_state: 'PUBLISHED', description: text } });
+      checkpoint({ finished: true });
+      return { processing: true };
+    }
+    const app = await request(META + '/app', { token });
+    const session = await request(META + '/' + numericId(app.id) + '/uploads', { method: 'POST', token, query: {
+      file_name: 'video.mp4', file_length: size, file_type: 'video/mp4' } });
+    if (!/^upload:/.test(String(session.id || ''))) throw new NetworkError('Facebook no abrió la sesión de carga', false);
+    const handle = await request(META + '/' + session.id, { method: 'POST', upload: true, body: fs.createReadStream(file),
+      headers: { Authorization: 'OAuth ' + token, file_offset: '0', 'Content-Length': String(size) } });
+    if (!handle.h) throw new NetworkError('Facebook no confirmó la carga del video', false);
+    const created = await request('https://graph-video.facebook.com/v24.0/' + page + '/videos', { method: 'POST', token, form: {
+      title: metadata.title.slice(0, 255), description: text, fbuploader_video_file_chunk: handle.h } });
+    checkpoint({ videoId: numericId(created.id), reel: false, finished: true });
+    return { processing: true };
+  }
+  const id = numericId(remote.videoId);
+  const info = await request(META + '/' + id, { token, query: { fields: 'status,permalink_url' } });
+  const state = info.status?.video_status;
+  if (state === 'error') throw new NetworkError('Facebook no pudo procesar el video');
+  if (state && !['ready', 'published'].includes(state)) return { processing: true };
+  const url = info.permalink_url ? new URL(info.permalink_url, 'https://www.facebook.com').href : null;
+  return { id, url };
+}
+
 function valueNumber(x) {
   const value = Number(x);
   return x !== undefined && x !== null && Number.isFinite(value) ? value : null;
@@ -485,6 +537,18 @@ async function metrics(name, account, job, quality) {
     return { views: valueNumber(data.view_count), likes: valueNumber(data.like_count), comments: valueNumber(data.comment_count),
       followers: valueNumber(profile.data?.user?.follower_count), retention: null };
   }
+  if (name === 'facebook') {
+    const insights = await request(META + '/' + numericId(id) + '/video_insights', { token }).catch(() => ({ data: [] }));
+    const read = metric => valueNumber((insights.data || []).find(item => item.name === metric)?.values?.at(-1)?.value);
+    const social = await request(META + '/' + numericId(id), { token, query: {
+      fields: 'likes.limit(0).summary(true),comments.limit(0).summary(true)' } }).catch(() => ({}));
+    const page = await request(META + '/' + numericId(account.identity.id), { token, query: { fields: 'followers_count' } }).catch(() => ({}));
+    const watched = read('post_video_avg_time_watched');
+    return { views: read('fb_reels_total_plays') ?? read('total_video_views') ?? read('post_video_views'),
+      likes: valueNumber(social.likes?.summary?.total_count), comments: valueNumber(social.comments?.summary?.total_count),
+      followers: valueNumber(page.followers_count),
+      retention: watched !== null && quality?.duration ? watched / (quality.duration * 10) : null };
+  }
   const base = metaBase(account);
   const data = await request(base + '/' + numericId(id), { token, query: { fields: 'like_count,comments_count' } });
   const profile = await verifyAccount(name, account);
@@ -497,7 +561,7 @@ async function metrics(name, account, job, quality) {
     followers: profile.followers, retention: watch !== null && quality?.duration ? watch / (quality.duration * 10) : null };
 }
 
-const publish = { youtube: uploadYouTube, tiktok: uploadTikTok, instagram: uploadInstagram };
+const publish = { youtube: uploadYouTube, tiktok: uploadTikTok, instagram: uploadInstagram, facebook: uploadFacebook };
 
 const catalogPages = (network,account) => require('./video-statistics.cjs').catalog(request,network === 'instagram' ? metaBase(account) : META,network,account);
 module.exports = { catalogPages, NetworkError, request, googleOAuth, refresh, verifyAccount, tiktokCreator, publish, metrics };

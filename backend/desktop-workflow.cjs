@@ -9,6 +9,7 @@ const clients = require('./network-clients.cjs');
 const store = require('./store.cjs');
 const { createCloud } = require('./cloud-sync.cjs');
 const { buildCentral } = require('./insights.cjs');
+const { createAutopublish } = require('./autopublish.cjs');
 
 // Páginas oficiales que abre el asistente de conexión de Estadísticas.
 const GUIDES = Object.freeze({
@@ -21,7 +22,9 @@ const GUIDES = Object.freeze({
   'meta-explorer': 'https://developers.facebook.com/tools/explorer/',
   'meta-debugger': 'https://developers.facebook.com/tools/debug/accesstoken/',
   'tiktok-apps': 'https://developers.tiktok.com/apps/',
-  'tiktok-display': 'https://developers.tiktok.com/doc/display-api-get-started'
+  'tiktok-display': 'https://developers.tiktok.com/doc/display-api-get-started',
+  'youtube-audit': 'https://support.google.com/youtube/contact/yt_api_form',
+  'tiktok-audit': 'https://developers.tiktok.com/doc/content-sharing-guidelines'
 });
 
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
@@ -30,6 +33,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
   // Copia en Firebase después de cada lectura; un fallo queda en el estado de la nube.
   const cloudSync = () => cloud.sync({ rows: publishing.stats(), growth: publishing.growth(), accounts: publishing.accounts() });
   const cloudQuiet = () => cloudSync().catch(() => {});
+  const autopublish = createAutopublish(root, publishing);
   let browserSession = null;
   let backupTask = null;
   let oauthTask = null;
@@ -182,6 +186,13 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     },
     'statistics.central': () => buildCentral(publishing.stats(), publishing.growth()),
     'cloud.status': () => cloud.status(),
+    'auto.overview': () => autopublish.overview(),
+    'auto.save': async data => {
+      autopublish.saveConfig(data);
+      await autopublish.plan().catch(() => null);
+      return autopublish.overview();
+    },
+    'auto.plan': async () => ({ ...(await autopublish.plan()), overview: autopublish.overview() }),
     'cloud.connect': async data => {
       const result = await cloud.connect(data);
       await cloudSync().catch(() => {});
@@ -239,10 +250,15 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
   });
 
   publishing.recover();
-  let timer, lastBackupAttempt = 0, lastStatsAttempt = 0, lastUpdateAttempt = 0;
+  let timer, lastBackupAttempt = 0, lastStatsAttempt = 0, lastUpdateAttempt = 0, lastPlanAttempt = 0;
   const maintenance = () => {
     const now = Date.now();
     publishing.tick().catch(() => {});
+    // Publicación automática: rellena los horarios libres cada 10 minutos con la app abierta.
+    if (now - lastPlanAttempt >= 10 * 60000) {
+      lastPlanAttempt = now;
+      autopublish.plan().catch(() => {});
+    }
     if (now - lastBackupAttempt >= 20 * 60000 && production.shouldBackup(root, now)) {
       lastBackupAttempt = now;
       backup().catch(() => {});

@@ -7,7 +7,7 @@ const store = require('./store.cjs');
 const media = require('./media.cjs');
 const production = require('./production.cjs');
 
-const NETWORKS = ['youtube', 'tiktok', 'instagram'];
+const NETWORKS = ['youtube', 'tiktok', 'instagram', 'facebook'];
 
 function outputs(root, kind, id) {
   if (kind === 'short') {
@@ -66,7 +66,7 @@ function normalizeNetwork(name, data) {
   const description = String(data?.description || '').trim();
   const tags = Array.isArray(data?.tags) ? data.tags : String(data?.tags || '').split(',');
   const unique = [...new Set(tags.map(value => String(value).trim()).filter(Boolean))];
-  if (!title || title.length > 100 || description.length > (name === 'youtube' ? 4700 : 1950) ||
+  if (!title || title.length > 100 || description.length > (name === 'youtube' || name === 'facebook' ? 4700 : 1950) ||
       unique.length > 25 || unique.some(value => value.length > 55) || unique.join(',').length > 440) {
     throw Error('Revisa el título, la descripción y las etiquetas para ' + name);
   }
@@ -77,6 +77,8 @@ function normalizeNetwork(name, data) {
   const privacy = String(data?.privacy || '');
   const privacyOptions = name === 'youtube' ? ['private', 'unlisted', 'public'] :
     name === 'tiktok' ? ['SELF_ONLY', 'FOLLOWER_OF_CREATOR', 'MUTUAL_FOLLOW_FRIENDS', 'PUBLIC_TO_EVERYONE'] : ['public'];
+  // TikTok: «direct» publica; «inbox» lo deja en los borradores de la app para publicarlo con un toque.
+  const mode = name === 'tiktok' && data?.mode === 'inbox' ? 'inbox' : 'direct';
   if (privacy && !privacyOptions.includes(privacy)) throw Error('Visibilidad inválida');
   const coverUrl = String(data?.coverUrl || '').trim();
   if (coverUrl) {
@@ -86,7 +88,7 @@ function normalizeNetwork(name, data) {
     }
   }
   return {
-    title, description, tags: unique, coverTime, thumbnail: choice, privacy, coverUrl,
+    title, description, tags: unique, coverTime, thumbnail: choice, privacy, coverUrl, mode,
     comments: data?.comments === true, duet: data?.duet === true, stitch: data?.stitch === true,
     madeForKids: data?.madeForKids === true, branded: data?.branded === true, ownBrand: data?.ownBrand === true
   };
