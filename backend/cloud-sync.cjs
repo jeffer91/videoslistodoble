@@ -138,7 +138,7 @@ function createCloud(root, vault, fetchImpl = globalThis.fetch) {
   }
 
   /** Construye la actualización: videos (última cifra), mediciones nuevas, cuentas y crecimiento. */
-  function updates({ rows, growth, accounts }, since) {
+  function updates({ rows, growth, accounts, group }, since) {
     const out = {};
     for (const row of rows) {
       if (!row.network || row.externalId == null) continue;
@@ -159,6 +159,10 @@ function createCloud(root, vault, fetchImpl = globalThis.fetch) {
     }
     for (const [network, identity] of Object.entries(accounts || {})) {
       if (identity) out['cuentas/' + safeKey(network)] = clean({ label: identity.label || '', followers: identity.followers ?? null });
+    }
+    if (group?.latest) {
+      out['grupo/actual'] = clean(group.latest);
+      for (const point of group.history || []) if (!since || point.day >= since.slice(0, 10)) out['grupo/historial/' + safeKey(point.day)] = clean(point);
     }
     out['perfil/ultimaSincronizacion'] = new Date().toISOString();
     return out;

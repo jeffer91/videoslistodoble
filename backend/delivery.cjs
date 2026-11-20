@@ -90,8 +90,53 @@ function normalizeNetwork(name, data) {
   return {
     title, description, tags: unique, coverTime, thumbnail: choice, privacy, coverUrl, mode,
     comments: data?.comments === true, duet: data?.duet === true, stitch: data?.stitch === true,
-    madeForKids: data?.madeForKids === true, branded: data?.branded === true, ownBrand: data?.ownBrand === true
+    madeForKids: data?.madeForKids === true, branded: data?.branded === true, ownBrand: data?.ownBrand === true,
+    // Datos de la ficha de publicación que usa el publicador por navegador.
+    aiRealistic: data?.aiRealistic === true,
+    caption: String(data?.caption || '').slice(0, 2200),
+    groupText: String(data?.groupText || '').slice(0, 500)
   };
+}
+
+/**
+ * Ficha de publicación: lo que el usuario confirma una vez por video y Studio
+ * adapta a cada red. Sin ficha completa no se publica automáticamente.
+ */
+function normalizeSheet(data) {
+  const text = (value, max) => String(value ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, max + 1);
+  const hook = text(data?.hook, 150);
+  const description = text(data?.description, 1500);
+  const groupText = text(data?.groupText, 500);
+  if (hook.length < 10 || hook.length > 150) throw Error('El gancho debe tener entre 10 y 150 caracteres');
+  if (description.length > 1500) throw Error('La descripción admite hasta 1.500 caracteres');
+  if (groupText.length > 500) throw Error('El texto del grupo admite hasta 500 caracteres');
+  const raw = Array.isArray(data?.hashtags) ? data.hashtags : String(data?.hashtags || '').split(/[\s,]+/);
+  const hashtags = [...new Set(raw.map(value => String(value).trim().replace(/^#+/, '')).filter(Boolean))];
+  if (hashtags.length < 1 || hashtags.length > 5) throw Error('Usa entre 1 y 5 hashtags específicos');
+  if (hashtags.some(tag => !/^[\p{L}\p{N}_]{2,40}$/u.test(tag))) throw Error('Cada hashtag debe ser una sola palabra, sin espacios ni signos');
+  return { hook, description, hashtags, aiRealistic: data?.aiRealistic === true, groupText, savedAt: new Date().toISOString() };
+}
+
+function saveSheet(root, target, value) {
+  return updateEntry(root, target, { sheet: normalizeSheet(value) });
+}
+
+/** Propuesta inicial a partir del guion y las etiquetas del récord (el usuario la corrige). */
+function suggestSheet(root, target) {
+  const entry = entryFor(root, target);
+  if (entry.sheet) return entry.sheet;
+  const title = titleFor(root, target);
+  const project = target.kind === 'short' ? store.getProject(root, target.id) : null;
+  const sentences = value => String(value || '').replace(/\s+/g, ' ').trim().split(/(?<=[.!?¿¡])\s+/).filter(Boolean);
+  const hook = (sentences(project?.script?.hook)[0] || title).slice(0, 150);
+  const description = sentences(project?.script?.body).slice(0, 2).join(' ').slice(0, 400);
+  const word = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean).map(part => part[0].toUpperCase() + part.slice(1)).join('').slice(0, 40);
+  const tags = project?.tags || {};
+  const hashtags = [...new Set(['jugadores', 'clubes', 'selecciones', 'competiciones', 'tipos']
+    .flatMap(field => tags[field] || []).map(word).filter(tag => tag.length >= 2))].slice(0, 4);
+  return { hook: hook.length >= 10 ? hook : (hook + ' · ' + title).slice(0, 150), description,
+    hashtags: hashtags.length ? hashtags : ['Futbol'], aiRealistic: false, groupText: '', suggested: true };
 }
 
 function saveNetwork(root, target, network, value) {
@@ -234,6 +279,7 @@ function thumbnailPath(root, target, choice) {
 }
 
 module.exports = {
+  normalizeSheet, saveSheet, suggestSheet,
   NETWORKS, outputs, resolveOutput, sidecar, entryFor, updateEntry, normalizeNetwork, saveNetwork, qualityCheck,
   checkOutput, fingerprint, approveOutput, thumbnails, thumbnailPath
 };

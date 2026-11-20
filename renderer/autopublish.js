@@ -79,8 +79,12 @@
       '<div class="ap-row">' + check(id('short'), 'Shorts / Reels', cfg.formats.includes('short')) + check(id('long'), 'Videos largos', cfg.formats.includes('long')) + '</div>' +
       (privacy && (!browser || network === 'youtube') ? field('Visibilidad', select('privacy', privacy, cfg.privacy)) : '') +
       (network === 'tiktok' && !browser ? field('Modo', select('mode', [['inbox', 'Borrador en la app (sin auditoría)'], ['direct', 'Publicación directa (requiere auditoría o Ayrshare)']], cfg.mode)) : '') +
-      (network === 'facebook' ? check(id('group'), 'También publicar en mi grupo (solo por navegador)', cfg.groupEnabled) +
-        field('Dirección del grupo', '<input id="' + id('groupUrl') + '" value="' + esc(cfg.groupUrl || '') + '" placeholder="https://www.facebook.com/groups/11contra11">') : '') +
+      (network === 'facebook' ? field('Dirección de tu página', '<input id="' + id('pageUrl') + '" value="' + esc(cfg.pageUrl || '') + '" placeholder="https://www.facebook.com/11records11">') +
+        check(id('group'), 'Llevar también cada video a mi grupo (solo por navegador)', cfg.groupEnabled) +
+        field('Dirección del grupo', '<input id="' + id('groupUrl') + '" value="' + esc(cfg.groupUrl || '') + '" placeholder="https://www.facebook.com/groups/11contra11">') +
+        field('Nombre del grupo (como aparece al compartir)', '<input id="' + id('groupName') + '" value="' + esc(cfg.groupName || '') + '" placeholder="11 records">') +
+        field('En el grupo', select('groupMode', [['share', 'Compartir la publicación de la página (recomendado)'], ['upload', 'Subir el video otra vez']], cfg.groupMode || 'share')) +
+        '<p class="st-note">Al compartir, el grupo suma las vistas al mismo video de la página y no se duplica el contenido. Se comparte como tu perfil.</p>' : '') +
       field('Frase final', '<input id="' + id('closing') + '" value="' + esc(cfg.closing) + '" maxlength="200">') +
       (audit ? check(id('audited'), network === 'youtube' ? 'Mi proyecto de Google ya pasó la auditoría de YouTube' : 'Mi app de TikTok ya pasó la auditoría', cfg.audited) +
         '<p class="st-note">' + action('ap-guide', 'Solicitar la auditoría ↗', network + '-audit', 'outline') + '</p>' : '') +
@@ -109,13 +113,13 @@
   function cell(info) {
     if (!info) return '<td>—</td>';
     const map = {
-      listo: ['ap-ready', 'Listo'], 'en-espera': ['ap-wait', 'En espera'], desactivado: ['ap-wait', 'Desactivado'], 'no-apto': ['ap-bad', 'No apto'], repetido: ['ap-dup', 'Ya publicado'],
+      listo: ['ap-ready', 'Listo'], 'en-espera': ['ap-wait', 'En espera'], desactivado: ['ap-wait', 'Desactivado'], 'no-apto': ['ap-bad', 'No apto'], 'sin-ficha': ['ap-wait', 'Falta la ficha'], repetido: ['ap-dup', 'Ya publicado'],
       programado: ['ap-sched', when(info.dueAt)], pendiente: ['ap-sched', 'En cola'], enviando: ['ap-sched', 'Enviando'], procesando: ['ap-sched', 'Procesando'],
       publicado: ['ap-done', '✓ Publicado'], fallo: ['ap-bad', 'Falló'], revisar: ['ap-bad', 'Revisar'], cancelado: ['ap-dup', 'Cancelado']
     };
     const [cls, label] = map[info.state] || ['ap-wait', info.state];
     return '<td><span class="ap-chip ' + cls + '"' + (info.reason ? ' title="' + esc(info.reason) + '"' : '') + '>' + esc(label) + '</span>' +
-      (info.reason && ['no-apto', 'repetido'].includes(info.state) ? '<small>' + esc(info.reason) + '</small>' : '') + '</td>';
+      (info.reason && ['no-apto', 'repetido', 'sin-ficha'].includes(info.state) ? '<small>' + esc(info.reason) + '</small>' : '') + '</td>';
   }
 
   function matrixPanel() {
@@ -144,7 +148,10 @@
     if (document.getElementById(id('mode'))) patch.mode = value(id('mode'));
     if (document.getElementById(id('audited'))) patch.audited = checked(id('audited'));
     if (document.getElementById(id('method'))) patch.method = value(id('method'));
-    if (document.getElementById(id('groupUrl'))) { patch.groupUrl = value(id('groupUrl')); patch.groupEnabled = checked(id('group')); }
+    if (document.getElementById(id('groupUrl'))) {
+      Object.assign(patch, { groupUrl: value(id('groupUrl')), groupEnabled: checked(id('group')), groupName: value(id('groupName')),
+        groupMode: value(id('groupMode')), pageUrl: value(id('pageUrl')) });
+    }
     return patch;
   }
 

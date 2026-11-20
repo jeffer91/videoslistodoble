@@ -338,7 +338,7 @@
       return empty('La central se llena con tus lecturas', 'Sincroniza por API o usa el lector de navegador. Cada lectura guarda una foto del día: con dos o más verás cómo crece cada red.',
         '<div class="row wrap st-center">' + action('st-tab', 'Conectar mis redes', 'connections', '') + action('st-tab', 'Usar el lector', 'browser') + '</div>');
     }
-    return insightCards() + networkTable() + '<div class="st-grid-2">' + growthChart() + crossTable() + '</div>' +
+    return insightCards() + networkTable() + groupPanel() + '<div class="st-grid-2">' + growthChart() + crossTable() + '</div>' +
       '<div class="st-grid-2">' + calendarBars('Mejor día para publicar', central.weekdays, WEEKDAY_NAMES,
         'Rendimiento de cada día frente a la mediana de su red (1× = normal).') +
       calendarBars('Mejor hora para publicar', central.hours, central.hours.map(h => String(h.index)),
@@ -382,6 +382,32 @@
         '<td>' + compact(n.long.average) + ' <small>· ' + n.long.videos + '</small></td>' +
         '<td>' + compact(n.followers) + '</td><td>' + change(n.followers30) + '</td></tr>').join('') +
       '</tbody></table></div><p class="st-note">En verde, la mejor red en cada columna.</p></section>';
+  }
+
+  /** Grupo de Facebook: miembros, cambio y actividad (las cifras de administrador si existen). */
+  function groupPanel() {
+    const group = central.group;
+    if (!group) {
+      return '<section class="panel st-panel"><h2>Grupo de Facebook</h2><p class="st-note">Escribe la dirección del grupo en Publicación automática → Facebook ' +
+        'y haz una lectura de Facebook con el lector de navegador: Studio guardará los miembros y la actividad del grupo cada día.</p></section>';
+    }
+    const { latest, history, change, week } = group;
+    const signed = value => value == null ? '—' : (value >= 0 ? '+' : '') + number(value);
+    const kpi = (label, value, note) => '<div class="st-kpi"><span>' + esc(label) + '</span><strong>' + esc(value) + '</strong>' + (note ? '<small>' + esc(note) + '</small>' : '') + '</div>';
+    const points = history.filter(item => item.members != null);
+    const max = Math.max(...points.map(item => item.members)), min = Math.min(...points.map(item => item.members));
+    const bars = points.length >= 2 ? '<div class="st-group-bars">' + points.slice(-30).map(item =>
+      '<span style="height:' + (12 + 88 * (item.members - min) / Math.max(1, max - min)).toFixed(0) + '%" title="' + esc(day(item.day + 'T12:00:00') + ': ' + number(item.members)) + '"></span>').join('') + '</div>' : '';
+    return '<section class="panel st-panel"><div class="row between wrap"><h2>Grupo de Facebook · ' + esc(latest.name || '11 records') + '</h2>' +
+      '<small>Leído ' + esc(day(latest.at)) + '</small></div><div class="st-kpis">' +
+      kpi('Miembros', latest.members != null ? compact(latest.members) : '—', latest.members != null ? number(latest.members) : '') +
+      kpi('Últimos 7 días', signed(week), 'miembros') + kpi('Desde ' + (group.since ? day(group.since + 'T12:00:00') : 'la primera lectura'), signed(change), 'miembros') +
+      (latest.newMembers != null ? kpi('Miembros nuevos', number(latest.newMembers), 'según Facebook (28 días)') : '') +
+      (latest.activeMembers != null ? kpi('Miembros activos', number(latest.activeMembers), '') : '') +
+      (latest.posts != null ? kpi('Publicaciones', number(latest.posts), '') : '') +
+      (latest.comments != null ? kpi('Comentarios', number(latest.comments), '') : '') +
+      (latest.reactions != null ? kpi('Reacciones', number(latest.reactions), '') : '') + '</div>' + bars +
+      (latest.newMembers == null ? '<p class="st-note">La actividad del grupo (miembros nuevos, publicaciones, reacciones) solo aparece si tu perfil es administrador.</p>' : '') + '</section>';
   }
 
   function growthChart() {

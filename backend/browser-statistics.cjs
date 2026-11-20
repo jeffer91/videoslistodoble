@@ -53,17 +53,18 @@ async function preparePython(app, {onStatus = () => {}, signal} = {}) {
   return {base, cache, python, packages};
 }
 
-async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, signal} = {}) {
+async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, onGroup = () => {}, groupUrl = '', signal} = {}) {
   if (!NETWORKS.includes(network)) throw Error('Red desconocida');
   if (!acquireBrowser('lector')) throw Error('El navegador está publicando un video. Inténtalo en unos minutos.');
-  try { return await runReader(app, network, save, {onStatus, onAccount, signal}); }
+  try { return await runReader(app, network, save, {onStatus, onAccount, onGroup, groupUrl, signal}); }
   finally { releaseBrowser('lector'); }
 }
 
-async function runReader(app, network, save, {onStatus, onAccount, signal}) {
+async function runReader(app, network, save, {onStatus, onAccount, onGroup = () => {}, groupUrl = '', signal}) {
   const {base, cache, python, packages} = await preparePython(app, {onStatus, signal});
   onStatus('opening', {message:'Abriendo el navegador…'});
-  const child = spawn(python,['-u',path.join(base,'browser-stats','reader.py'),network,path.join(cache,'perfil-'+network)],
+  const group = network === 'facebook' && /^https:\/\/(www|web|m)\.facebook\.com\/groups\/[\w.-]+$/.test(groupUrl) ? [groupUrl] : [];
+  const child = spawn(python,['-u',path.join(base,'browser-stats','reader.py'),network,path.join(cache,'perfil-'+network),...group],
     {windowsHide:true,env:{...process.env,PYTHONPATH:packages,PYTHONIOENCODING:'utf-8'}});
   let browserPid = null;
   const stop = () => {
@@ -91,6 +92,7 @@ async function runReader(app, network, save, {onStatus, onAccount, signal}) {
       }
       if (event.video) {save(event.video); count++; onStatus('details', {count});}
       if (event.account && Number.isSafeInteger(event.account.followers)) onAccount(event.account);
+      if (event.group && typeof event.group === 'object') onGroup(event.group);
       if (event.done) summary=event;
       if (event.error) failure=event.error;
     }

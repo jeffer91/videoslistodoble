@@ -11,7 +11,7 @@
   };
   const statsBrands = {...brands,facebook:"Facebook"};
   let ideas = [], jobs = [], accountData = {};
-  let backup, editConfig, updateConfig, delivery, creator, loading;
+  let backup, editConfig, updateConfig, delivery, creator, loading, sheetData, sheetTab = "youtube";
   let projectLinks = [], linksProjectId, logTarget;
   let currentNetwork = 'youtube', currentScene = 'hook', month = '', activeTask = '';
 
@@ -300,7 +300,8 @@
         (target.kind === 'week' ? btn('delivery-chapters', 'Ver capítulos', 'secondary') : '') + '</div>' +
         (approval ? '<p class="success">Video aprobado · ' + esc(when(approval.at)) + '</p>' :
         checked('delivery-confirm', 'Revisé el video y autorizo el uso de este archivo.', false) +
-        btn('delivery-approve', 'Aprobar MP4', '', quality?.ok ? '' : 'disabled'))) +
+        btn('delivery-approve', 'Aprobar MP4', '', quality?.ok ? '' : 'disabled')) +
+        sheetPanel()) +
       '<div>' + panel('Miniaturas',
         field('Texto de portada', input('cover-title', chosen.title, 'maxlength="120"')) +
         field('Segundo del fotograma', input('cover-time', chosen.coverTime, 'type="number" min="0" step=".1"')) +
@@ -332,6 +333,30 @@
           '<p class="muted mini">La aplicación debe estar abierta al llegar la hora. El envío se inicia tras tu autorización.</p>' +
           checked('post-confirm', 'Autorizo enviar este MP4 con estos datos a ' + brands[currentNetwork] + (creator?.provider === 'ayrshare' ? ' mediante Ayrshare.' : '.'), false) +
           btn('delivery-enqueue', 'Confirmar publicación') : '')) + '</div></div>';
+  }
+
+  const sheetNetworks = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook' };
+
+  /** Ficha de publicación: se completa una vez y Studio la adapta a cada red. */
+  function sheetPanel() {
+    if (!sheetData) return '';
+    const { sheet, saved, preview } = sheetData;
+    const tab = sheetNetworks[sheetTab] ? sheetTab : 'youtube';
+    const shown = preview?.[tab];
+    return '<div class="divider"></div><div class="sheet-box"><div class="row between"><h3>Ficha de publicación</h3>' +
+      (saved ? '<span class="pill ok-pill">Lista</span>' : '<span class="pill warn-pill">Obligatoria para publicar</span>') + '</div>' +
+      (sheet.suggested ? '<p class="muted mini">Propuesta a partir del guion y las etiquetas del récord. Corrígela antes de guardar.</p>' : '') +
+      field('Gancho (primera línea, lo que se ve sin abrir el texto)', input('sheet-hook', sheet.hook, 'maxlength="150"')) +
+      field('Descripción', textarea('sheet-description', sheet.description, 'rows="3" maxlength="1500"')) +
+      field('Hashtags específicos (3 a 5, separados por espacios)', input('sheet-hashtags', sheet.hashtags.map(tag => '#' + tag).join(' '), 'maxlength="220"')) +
+      checked('sheet-ai', 'Tiene imágenes o voces generadas con IA que parecen reales (se declara en YouTube y TikTok)', sheet.aiRealistic) +
+      field('Texto al compartir en el grupo de Facebook (opcional)', input('sheet-group', sheet.groupText, 'maxlength="500"')) +
+      '<div class="row wrap">' + btn('delivery-sheet', saved ? 'Actualizar ficha' : 'Guardar ficha') + '</div>' +
+      (preview ? '<div class="sheet-tabs">' + Object.entries(sheetNetworks).map(([key, label]) =>
+        '<button type="button" data-action="sheet-tab" data-id="' + key + '" class="' + (key === tab ? 'active' : '') + '">' + label + '</button>').join('') + '</div>' +
+        '<pre class="sheet-preview">' + esc(shown.text) + '</pre>' +
+        '<p class="mini muted">' + shown.characters + ' caracteres · ' + shown.hashtags + ' de ' + shown.limit + ' hashtags permitidos' +
+        (tab === 'youtube' ? ' · Título: ' + esc(shown.title) : '') + '</p>' : '') + '</div>';
   }
 
   function linkDialog(id) {
@@ -379,7 +404,7 @@
   }
 
   async function openDelivery(target) {
-    [delivery, accountData] = await Promise.all([flow('export.entry', { target }), flow('accounts.list')]);
+    [delivery, accountData, sheetData] = await Promise.all([flow('export.entry', { target }), flow('accounts.list'), flow('export.sheet', { target })]);
     if (target.kind === 'short' && target.id !== state.project?.id) state.project = await api('projects:get', { id: target.id });
     state.page = 'delivery';
     await setNetwork('youtube');
@@ -545,6 +570,17 @@
     if (name === 'delivery-approve') {
       delivery = await run('Verificando el MP4 aprobado', () => flow('export.approve',
         { target: delivery.target, confirmed: isChecked('delivery-confirm') }));
+      return render();
+    }
+    if (name === 'delivery-sheet') {
+      sheetData = await run('Guardando la ficha', () => flow('export.saveSheet', { target: delivery.target, value: {
+        hook: valueOf('sheet-hook'), description: valueOf('sheet-description'), hashtags: valueOf('sheet-hashtags'),
+        aiRealistic: isChecked('sheet-ai'), groupText: valueOf('sheet-group') } }));
+      notice('Ficha guardada. Así se verá en cada red.');
+      return render();
+    }
+    if (name === 'sheet-tab') {
+      sheetTab = id;
       return render();
     }
     if (name === 'delivery-chapters') {

@@ -30,7 +30,7 @@ function caption(metadata) {
  * Publica un archivo. Devuelve { busy: true } si el navegador está ocupado
  * (el lector u otra publicación); la cola lo reintenta más tarde.
  */
-async function publishWithBrowser(app, network, { file, metadata, quality, dryRun = false, groupUrl = '', onStatus = () => {} }, root) {
+async function publishWithBrowser(app, network, { file, metadata, quality, dryRun = false, groupUrl = '', group = null, onStatus = () => {} }, root) {
   if (!NETWORKS.includes(network)) throw new BrowserPublishError('Red desconocida');
   const owner = 'publicador:' + randomUUID();
   if (!acquireBrowser(owner)) return { busy: true };
@@ -45,7 +45,11 @@ async function publishWithBrowser(app, network, { file, metadata, quality, dryRu
       file, title: metadata.title, description: [metadata.description, (metadata.tags || []).map(t => '#' + t).join(' ')].filter(Boolean).join('\n\n'),
       caption: text, privacy: metadata.privacy || 'public', dryRun, screenshot,
       reel: quality ? quality.duration <= REEL_LIMIT && quality.height > quality.width : true,
-      groupUrl: network === 'facebook' ? groupUrl : ''
+      groupUrl: network === 'facebook' ? groupUrl : '',
+      // En el grupo se comparte la publicación de la página (por defecto) o se sube de nuevo.
+      group: network === 'facebook' && groupUrl ? { mode: group?.mode === 'upload' ? 'upload' : 'share', name: group?.name || '',
+        pageUrl: group?.pageUrl || '', text: metadata.groupText || '' } : null,
+      aiRealistic: metadata.aiRealistic === true, category: 'Deportes'
     }));
     const child = spawn(python, ['-u', path.join(base, 'browser-stats', 'publisher.py'), network, path.join(cache, 'perfil-' + network), jobFile],
       { windowsHide: true, env: { ...process.env, PYTHONPATH: packages, PYTHONIOENCODING: 'utf-8' } });
@@ -77,7 +81,7 @@ async function publishWithBrowser(app, network, { file, metadata, quality, dryRu
       throw new BrowserPublishError(failure || diagnostics.trim().split('\n').at(-1) || 'El navegador se cerró antes de terminar',
         { submitted, screenshot: shot && fs.existsSync(shot) ? shot : null });
     }
-    return { id: null, url: result.url || null, note: result.note || '', dry: Boolean(result.dry) };
+    return { id: null, url: result.url || null, note: result.note || '', dry: Boolean(result.dry), groupError: result.groupError === true };
   } finally {
     fs.rmSync(jobFile, { force: true });
     releaseBrowser(owner);

@@ -394,6 +394,69 @@ def open_browser(pw, network, profile):
     return process, browser
 
 
+GROUP_METRICS = {
+    "newMembers": r"(?:miembros nuevos|nuevos miembros|new members)",
+    "activeMembers": r"(?:miembros activos|active members)",
+    "posts": r"(?:publicaciones|posts)",
+    "comments": r"(?:comentarios|comments)",
+    "reactions": r"(?:reacciones|reactions)",
+}
+NUMBER = r"(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)"
+
+
+def group_numbers(text):
+    """Cifras del panel de estadísticas del grupo (la etiqueta va antes o después del número)."""
+    found = {}
+    for key, label in GROUP_METRICS.items():
+        for pattern in [label + r"\s*\n\s*" + NUMBER, NUMBER + r"\s*\n?\s*" + label]:
+            match = re.search(pattern, text, re.I)
+            value = parse_count(match.group(1)) if match else None
+            if value is not None:
+                found[key] = value
+                break
+    return found
+
+
+def read_group(page, url):
+    """Miembros y estadísticas del grupo de Facebook (las de administrador, si las hay)."""
+    emit(stage="navigate", message="Abriendo tu grupo de Facebook…")
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    if not allowed(page.url, "facebook"):
+        raise ValueError("No se pudo abrir el grupo")
+    members = raw = None
+    for _ in range(15):
+        page.wait_for_timeout(1000)
+        text = page.locator("body").inner_text(timeout=10000)
+        match = re.search(NUMBER + r"\s*(?:miembros|members)\b", text, re.I)
+        if match:
+            raw = match.group(0)
+            members = parse_count(match.group(1))
+            if members is not None:
+                break
+    name = None
+    try:
+        name = (page.locator("h1").first.inner_text(timeout=3000) or "").strip()[:120] or None
+    except BrowserError:
+        pass
+    save_diagnostic(page, "facebook-grupo.json")
+    insights = {}
+    emit(stage="navigate", message="Leyendo las estadísticas del grupo…")
+    try:
+        page.goto(url.rstrip("/") + "/insights", wait_until="domcontentloaded", timeout=60000)
+        for _ in range(15):
+            page.wait_for_timeout(1000)
+            insights = group_numbers(page.locator("body").inner_text(timeout=10000))
+            if len(insights) >= 2:
+                break
+        save_diagnostic(page, "facebook-grupo-estadisticas.json")
+    except BrowserError:
+        insights = {}
+    if members is None and not insights:
+        emit(stage="navigate", message="No encontré las cifras del grupo; revisa el diagnóstico.")
+        return
+    emit(group={"members": members, "raw": raw, "name": name, "url": url, **insights})
+
+
 def main():
     global DIAGNOSTIC
     network, profile = sys.argv[1:3]
@@ -412,7 +475,15 @@ def main():
             emit(ready=True)
             wait_for_login(context, network)
             pages = [p for p in context.pages if allowed(p.url, network)]
-            scan(pages[-1] if pages else context.pages[-1], network)
+            target = pages[-1] if pages else context.pages[-1]
+            group = sys.argv[3] if len(sys.argv) > 3 and network == "facebook" else ""
+            if group:
+                # El grupo se lee antes del cierre del escaneo para que el aviso «done» siga siendo el último.
+                try:
+                    read_group(target, group)
+                except Exception as error:  # noqa: BLE001 - el grupo nunca impide leer la página
+                    emit(stage="navigate", message="No se pudo leer el grupo: " + str(error).splitlines()[0][:160])
+            scan(target, network)
         finally:
             try:
                 browser.close()

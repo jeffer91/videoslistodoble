@@ -504,3 +504,10 @@ details > summary { cursor: pointer; }
 .home-item small{color:var(--muted);font-size:12px}
 .ok-pill{background:#143a24!important;border-color:#2f7a4c!important;color:#8fe3ae!important}
 .warn-pill{background:#3a2d18!important;border-color:#967245!important;color:#f2d79f!important}
+/* Ficha de publicación */
+.sheet-box h3{margin:0;font-size:15px}
+.sheet-box .row.between{margin-bottom:10px}
+.sheet-tabs{display:flex;gap:4px;margin:14px 0 8px;flex-wrap:wrap}
+.sheet-tabs button{padding:6px 11px;background:#17271d;border:1px solid var(--line);color:#b5d0bb;font-size:12px}
+.sheet-tabs button.active{background:#196c38;border-color:#31bb62;color:#fff}
+.sheet-preview{white-space:pre-wrap;word-break:break-word;font:13px/1.5 inherit;font-family:inherit;margin:0;padding:12px;background:#0b160f;border:1px solid var(--line);border-radius:9px;max-height:240px;overflow:auto}

@@ -25,7 +25,7 @@ const Guided = (() => {
       '<div class="home-list">' + list.map(item => {
         const data = 'data-kind="' + item.kind + '" data-id="' + esc(item.id) + '" data-file="' + esc(item.file) + '"';
         const status = !item.checked ? '<span class="pill">Sin revisar</span>' : !item.qualityOk ? '<span class="pill warn-pill">Revisa la calidad</span>' :
-          item.approved ? '<span class="pill ok-pill">Aprobado</span>' : '<span class="pill">Por aprobar</span>';
+          item.approved ? (item.sheet ? '<span class="pill ok-pill">Aprobado</span>' : '<span class="pill warn-pill">Falta la ficha</span>') : '<span class="pill">Por aprobar</span>';
         const networks = Object.entries(item.networks).map(([n, job]) => '<span class="pill' + (job.status === 'publicado' ? ' ok-pill' : '') + '">' +
           esc(NETWORK_NAMES[n] || n) + ' · ' + esc(JOB_LABELS[job.status] || job.status) + '</span>').join('');
         return '<article class="home-item"><div><strong>' + esc(item.title) + '</strong><small>' + (item.kind === 'short' ? 'Short' : 'Video largo') +

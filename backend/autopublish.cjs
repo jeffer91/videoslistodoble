@@ -27,15 +27,16 @@ const MINUTE = 60000;
 const REQUIREMENTS = {
   youtube: {
     short: { min: 1, max: 180, vertical: true }, long: { min: 1, max: 43200 },
-    title: 100, description: 4700, hashtags: 15, daily: 6,
+    title: 100, description: 4700, hashtags: 5, daily: 6,
     notes: ['Shorts: video vertical o cuadrado de hasta 3 minutos; Studio añade #Shorts.',
+      'Obligatorio: «No es contenido para niños» y declarar si hay contenido alterado con IA que parezca real (lo indica la ficha).',
       'Videos largos: horizontal 16:9, título de hasta 100 caracteres.',
       'Por navegador se publica desde YouTube Studio con tu sesión, como si lo subieras tú.',
       'Por API, un proyecto de Google sin auditar deja los videos bloqueados como privados.']
   },
   tiktok: {
     short: { min: 3, max: 600 }, long: { min: 3, max: 600 },
-    title: 100, description: 1950, hashtags: 6, daily: 15,
+    title: 100, description: 1950, hashtags: 5, daily: 15,
     notes: ['Texto de hasta 2.200 caracteres; la duración máxima depende de tu cuenta (normalmente 10 min).',
       'Por navegador se publica desde TikTok Studio con tu sesión.',
       'Por API, sin auditoría de TikTok solo se publica en privado: usa el modo borrador o Ayrshare.',
@@ -43,14 +44,15 @@ const REQUIREMENTS = {
   },
   instagram: {
     short: { min: 3, max: 900 }, long: { min: 3, max: 900 },
-    title: 100, description: 1950, hashtags: 30, daily: 25,
+    title: 100, description: 1950, hashtags: 5, daily: 25,
     notes: ['Todo video se publica como Reel: de 3 segundos a 15 minutos y hasta 1 GB.',
-      'Texto de hasta 2.200 caracteres y como máximo 30 hashtags.',
+      'Texto de hasta 2.200 caracteres y como máximo 5 hashtags (límite de Instagram desde diciembre de 2025).',
+      'Studio apaga «Compartir también en Facebook» para que tu página no reciba el video dos veces.',
       'Instagram permite unas 50 publicaciones por API cada 24 horas; Studio usa como máximo 25.']
   },
   facebook: {
     short: { min: 3, max: 14400 }, long: { min: 1, max: 14400 },
-    title: 100, description: 4700, hashtags: 5, daily: 25,
+    title: 100, description: 4700, hashtags: 3, daily: 25,
     notes: ['Reels de página: vertical 9:16, de 3 a 90 segundos (más largos se publican como video).',
       'Videos de página: horizontal, hasta 4 horas.',
       'Por navegador se publica desde Meta Business Suite y, si lo activas, también en tu grupo.',
@@ -73,7 +75,7 @@ const DEFAULTS = {
     tiktok: { enabled: false, method: 'browser', hours: ['13:00', '20:00'], formats: ['short'], privacy: 'PUBLIC_TO_EVERYONE', mode: 'inbox', audited: false, closing: CLOSING.tiktok },
     instagram: { enabled: false, method: 'browser', hours: ['12:00', '19:00'], formats: ['short'], closing: CLOSING.instagram },
     facebook: { enabled: false, method: 'browser', hours: ['12:15', '19:15'], formats: ['short', 'long'], closing: CLOSING.facebook,
-      groupEnabled: false, groupUrl: '' }
+      groupEnabled: false, groupUrl: '', groupName: '11 records', groupMode: 'share', pageUrl: '' }
   }
 };
 
@@ -154,6 +156,19 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
         } else target.groupUrl = '';
       }
       if (network === 'facebook' && value.groupEnabled !== undefined) target.groupEnabled = value.groupEnabled === true;
+      if (network === 'facebook' && value.groupName !== undefined) target.groupName = cleanText(value.groupName, 100);
+      if (network === 'facebook' && value.groupMode !== undefined) target.groupMode = value.groupMode === 'upload' ? 'upload' : 'share';
+      if (network === 'facebook' && value.pageUrl !== undefined) {
+        const url = String(value.pageUrl || '').trim();
+        if (url) {
+          let parsed;
+          try { parsed = new URL(url); } catch { throw Error('Escribe la dirección completa de tu página, por ejemplo https://www.facebook.com/11records11'); }
+          if (parsed.protocol !== 'https:' || !/(^|\.)facebook\.com$/.test(parsed.hostname) || !/^\/[\w.-]+\/?$/.test(parsed.pathname)) {
+            throw Error('La dirección de la página debe ser https://www.facebook.com/tu-pagina');
+          }
+          target.pageUrl = 'https://www.facebook.com' + parsed.pathname.replace(/\/$/, '');
+        } else target.pageUrl = '';
+      }
     }
     if (next.enabled && !next.authorized) throw Error('Marca la autorización antes de activar la publicación automática');
     production.writeState(root, STATE, next);
@@ -224,6 +239,7 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
   }
 
   function fits(candidate, network, cfg) {
+    if (!candidate.entry.sheet) return { ok: false, nosheet: true, reason: 'Falta la ficha de publicación (gancho, descripción y hashtags)' };
     const settings = cfg.networks[network];
     if (!settings.formats.includes(candidate.format)) {
       return { ok: false, off: true, reason: candidate.format === 'short' ? 'Shorts desactivados en esta red' : 'Videos largos desactivados en esta red' };
@@ -243,30 +259,52 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
     return null;
   }
 
-  /** Texto, hashtags y opciones adaptados a cada red. Cada red recibe su propio cierre y su propia selección de hashtags. */
+  /**
+   * Texto, hashtags y opciones adaptados a cada red a partir de la ficha de publicación.
+   * Cada red recibe su propio cierre y solo la cantidad de hashtags que admite.
+   */
   function adapt(candidate, network, cfg = config()) {
     const rule = REQUIREMENTS[network];
     const settings = cfg.networks[network];
     const base = candidate.entry.networks?.[network] || {};
-    const title = clip(String(base.title || candidate.title || '').trim() || 'Récord de fútbol', rule.title);
+    const sheet = candidate.entry.sheet || null;
+    const title = clip(String(candidate.title || base.title || '').trim() || 'Récord de fútbol', rule.title);
     const fromRecord = Object.values(candidate.tags || {}).flat().map(tagWord);
-    const words = [...new Set([...hashtagWords(cfg.hashtags), ...(base.tags || []).map(tagWord), ...fromRecord]
-      .map(word => word.slice(0, 50)).filter(Boolean))];
+    // Primero los de la ficha (los más específicos), luego los fijos; nunca genéricos como #Reels.
+    const words = [...new Set([...(sheet?.hashtags || []), ...hashtagWords(cfg.hashtags), ...(sheet ? [] : [...(base.tags || []).map(tagWord), ...fromRecord])]
+      .map(word => String(word).slice(0, 50)).filter(Boolean))];
     if (network === 'youtube' && candidate.format === 'short' && !words.some(w => w.toLowerCase() === 'shorts')) words.unshift('Shorts');
-    if (network === 'instagram' && candidate.format === 'short' && !words.some(w => w.toLowerCase() === 'reels')) words.push('Reels');
     const tags = [];
     for (const word of words) {
-      if (tags.length >= Math.min(rule.hashtags, 25)) break;
+      if (tags.length >= rule.hashtags) break;
       if ([...tags, word].join(',').length > 440) break;
       tags.push(word);
     }
-    const description = clip([String(base.description || '').trim(), settings.closing].filter(Boolean).join('\n\n'), rule.description - 50);
+    const body = sheet ? [sheet.hook, sheet.description] : [String(base.description || '').trim()];
+    const description = clip([...body, settings.closing].filter(Boolean).join('\n\n'), rule.description - 120);
+    const caption = clip([description, tags.map(tag => '#' + tag).join(' ')].filter(Boolean).join('\n\n'), 2150);
     return {
       title, description, tags, coverTime: Number(base.coverTime) || 0, thumbnail: 0,
       privacy: network === 'youtube' || network === 'tiktok' ? settings.privacy : '',
       mode: network === 'tiktok' ? settings.mode : undefined,
-      comments: true, duet: true, stitch: true, madeForKids: false, branded: false, ownBrand: false
+      comments: true, duet: true, stitch: true, madeForKids: false, branded: false, ownBrand: false,
+      aiRealistic: sheet?.aiRealistic === true, caption,
+      groupText: network === 'facebook' ? (sheet?.groupText || sheet?.hook || '') : ''
     };
+  }
+
+  /** Vista previa de lo que se publicará en cada red para un video concreto. */
+  function preview(target) {
+    const cfg = config();
+    const item = candidates().find(candidate => candidate.target.kind === target.kind && candidate.target.id === target.id && candidate.target.file === target.file);
+    let entry;
+    try { entry = delivery.entryFor(root, target); } catch { throw Error('No se encontró el video'); }
+    const candidate = item || { target, entry, title: entry.networks?.youtube?.title || '', format: target.kind === 'short' ? 'short' : 'long', tags: {} };
+    return Object.fromEntries(NETWORKS.map(network => {
+      const metadata = adapt(candidate, network, cfg);
+      const text = network === 'youtube' ? metadata.description + '\n\n' + metadata.tags.map(t => '#' + t).join(' ') : metadata.caption;
+      return [network, { title: metadata.title, text, hashtags: metadata.tags.length, limit: REQUIREMENTS[network].hashtags, characters: text.length }];
+    }));
   }
 
   function slots(settings, from, days) {
@@ -311,7 +349,8 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
         try {
           const job = await publishing.enqueue({ target: next.target, network, dueAt: slot.toISOString(), confirmed: true,
             metadata: adapt(next, network, cfg), auto: true, method: settings.method,
-            groupUrl: network === 'facebook' && settings.groupEnabled ? settings.groupUrl : '' });
+            groupUrl: network === 'facebook' && settings.groupEnabled ? settings.groupUrl : '',
+            group: network === 'facebook' && settings.groupEnabled ? { mode: settings.groupMode, name: settings.groupName, url: settings.groupUrl, pageUrl: settings.pageUrl } : null });
           created.push({ network, title: next.title, dueAt: job.dueAt });
           used[network].sha.add(next.sha256);
           used[network].files.add(next.target.kind + ':' + next.target.file);
@@ -341,7 +380,7 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
         const dup = duplicate(item, used[network]);
         if (dup) return [network, { state: 'repetido', reason: dup }];
         const fit = fits(item, network, cfg);
-        if (!fit.ok) return [network, { state: fit.off ? 'desactivado' : 'no-apto', reason: fit.reason }];
+        if (!fit.ok) return [network, { state: fit.nosheet ? 'sin-ficha' : fit.off ? 'desactivado' : 'no-apto', reason: fit.reason }];
         if (!cfg.networks[network].enabled || !ready[network].ok) return [network, { state: 'en-espera', reason: ready[network].reason || 'Red desactivada' }];
         return [network, { state: 'listo' }];
       }))
@@ -358,7 +397,7 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
       rows, upcoming, recent };
   }
 
-  return { config, saveConfig, readiness, candidates, adapt, plan, overview };
+  return { config, saveConfig, readiness, candidates, adapt, preview, plan, overview };
 }
 
 module.exports = { createAutopublish, REQUIREMENTS, NETWORKS, tagWord };

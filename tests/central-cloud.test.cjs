@@ -149,3 +149,29 @@ test('si las reglas rechazan el acceso, Studio queda conectado y muestra qué re
     assert.match(status.rules, new RegExp(status.key));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('el grupo de Facebook guarda una foto por día con miembros y actividad, y sube a Firebase', async () => {
+  const root = tempRoot();
+  try {
+    const p = createPublishing(root, vault, {});
+    assert.equal(p.groupStats(), null);
+    assert.throws(() => p.groupReading({ members: 'muchos' }), /cifras/);
+    p.groupReading({ members: 20000, name: '11 records', url: 'https://www.facebook.com/groups/11contra11' }, new Date('2026-11-10T10:00:00Z'));
+    p.groupReading({ members: 20300 }, new Date('2026-11-18T10:00:00Z'));
+    p.groupReading({ members: 20400, newMembers: 312, posts: 48, reactions: 5300 }, new Date('2026-11-19T09:00:00Z'));
+    p.groupReading({ members: 20410, newMembers: 315 }, new Date('2026-11-19T21:00:00Z'));
+    const group = p.groupStats();
+    assert.equal(group.history.length, 3, 'una foto por día');
+    assert.equal(group.latest.members, 20410);
+    assert.equal(group.latest.name, '11 records');
+    assert.equal(group.change, 410);
+    assert.equal(group.week, 110);
+    const writes = [];
+    const cloud = createCloud(root, vault, async (url, options) => { writes.push({ url, body: options.body && JSON.parse(options.body) }); return { ok: true, status: 200, text: async () => '{}' }; });
+    await cloud.connect({ config: CONFIG });
+    await cloud.sync({ rows: [], growth: {}, accounts: {}, group });
+    const sent = Object.assign({}, ...writes.map(item => item.body || {}));
+    assert.equal(sent['grupo/actual'].members, 20410);
+    assert.equal(sent['grupo/historial/2026-11-19'].newMembers, 315);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

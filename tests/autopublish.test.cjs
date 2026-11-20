@@ -10,7 +10,7 @@ const { createAutopublish, REQUIREMENTS, tagWord } = require('../backend/autopub
 const vault = { isEncryptionAvailable: () => true, encryptString: v => Buffer.from(v), decryptString: v => v.toString() };
 
 /** Crea un Short exportado, revisado y aprobado, como lo deja la app. */
-function approvedShort(root, title, { duration = 45, width = 1080, height = 1920, tags } = {}) {
+function approvedShort(root, title, { duration = 45, width = 1080, height = 1920, tags, sheet = true } = {}) {
   const project = store.createProject(root, { title });
   const dir = path.join(root, 'Exportaciones', 'Shorts');
   fs.mkdirSync(dir, { recursive: true });
@@ -23,7 +23,9 @@ function approvedShort(root, title, { duration = 45, width = 1080, height = 1920
   const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const target = { kind: 'short', id: project.id, file: path.basename(file) };
   delivery.updateEntry(root, target, { quality: { ok: true, checks: [], duration, width, height, hasAudio: true },
-    approval: { at: new Date().toISOString(), sha256: sha } });
+    approval: { at: new Date().toISOString(), sha256: sha },
+    ...(sheet ? { sheet: delivery.normalizeSheet({ hook: title + ', un récord para la historia', description: 'Así se logró.',
+      hashtags: ['Futbol', 'Records', 'Mundial', 'Historia', 'Goles'], aiRealistic: false }) } : {}) });
   return { project, target, sha };
 }
 
@@ -42,13 +44,14 @@ async function setup(platformExtras = {}) {
 test('cada red recibe un texto adaptado: #Shorts en YouTube, su cierre propio y límites de hashtags', async () => {
   const { root, auto } = await setup();
   try {
-    approvedShort(root, 'El portero que marcó 131 goles', { tags: { jugadores: ['Rogério Ceni'], tipos: ['Porteros'] } });
+    approvedShort(root, 'El portero que marcó 131 goles', { tags: { jugadores: ['Rogério Ceni'], tipos: ['Porteros'] }, sheet: false });
     const [item] = auto.candidates();
     const cfg = auto.config();
     const yt = auto.adapt(item, 'youtube', cfg), ig = auto.adapt(item, 'instagram', cfg), fb = auto.adapt(item, 'facebook', cfg);
     assert.equal(yt.tags[0], 'Shorts');
     assert.ok(yt.tags.includes('RogerioCeni'));
-    assert.ok(ig.tags.includes('Reels'));
+    assert.ok(!ig.tags.includes('Reels'), 'Instagram ya no recibe #Reels genérico');
+    assert.ok(ig.tags.length <= 5);
     assert.ok(fb.tags.length <= REQUIREMENTS.facebook.hashtags);
     assert.notEqual(yt.description, ig.description, 'no se repite el mismo texto en todas las redes');
     assert.equal(auto.adapt(item, 'tiktok', cfg).mode, 'inbox');
@@ -218,5 +221,34 @@ test('la cola publica por navegador sin cuenta por API, espera si el navegador e
     assert.equal(failed.screenshot, '/tmp/fallo.png');
     await publishing.tick();
     assert.equal(calls.length, 3, 'no vuelve a intentarlo');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('la ficha de publicación es obligatoria y adapta el texto y los hashtags a cada red', async () => {
+  const { root, auto } = await setup();
+  try {
+    const missing = approvedShort(root, 'Sin ficha todavía', { sheet: false });
+    const ready = approvedShort(root, 'Marruecos quinto del mundo');
+    delivery.saveSheet(root, ready.target, { hook: 'Marruecos ya es quinto del ranking FIFA', description: 'Nunca un africano llegó tan alto.',
+      hashtags: '#Marruecos #RankingFIFA #Mundial2026 #Africa #Futbol', aiRealistic: true, groupText: 'Mirad lo que logró Marruecos' });
+    auto.saveConfig({ authorized: true, enabled: true, hashtags: '#11Records #Futbol #Records',
+      networks: { instagram: { enabled: true }, facebook: { enabled: true, groupEnabled: true, groupUrl: 'https://www.facebook.com/groups/11contra11', pageUrl: 'https://www.facebook.com/11records11/' } } });
+    const view = auto.overview();
+    assert.equal(view.rows.find(row => row.title === 'Sin ficha todavía').networks.instagram.state, 'sin-ficha');
+    const item = auto.candidates().find(candidate => candidate.target.id === ready.project.id);
+    const instagram = auto.adapt(item, 'instagram');
+    assert.equal(instagram.tags.length, 5);
+    assert.ok(!instagram.tags.some(tag => /^reels$/i.test(tag)));
+    assert.deepEqual(instagram.tags.slice(0, 2), ['Marruecos', 'RankingFIFA']);
+    assert.match(instagram.caption, /^Marruecos ya es quinto/);
+    assert.equal(auto.adapt(item, 'facebook').tags.length, 3);
+    assert.equal(auto.adapt(item, 'facebook').groupText, 'Mirad lo que logró Marruecos');
+    const youtube = auto.adapt(item, 'youtube');
+    assert.equal(youtube.tags[0], 'Shorts');
+    assert.equal(youtube.aiRealistic, true);
+    assert.equal(auto.config().networks.facebook.pageUrl, 'https://www.facebook.com/11records11');
+    const preview = auto.preview(ready.target);
+    assert.equal(preview.instagram.limit, 5);
+    assert.ok(preview.tiktok.characters <= 2200);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -16,6 +16,8 @@ const ACCOUNT_NETWORKS = [...NETWORKS, 'facebook'];
 const INVENTORY = 'catalogo-estadistico';
 const GROWTH = 'crecimiento-cuentas';
 const BROWSER_ACCOUNTS = 'cuentas-navegador';
+const GROUP = 'grupo-facebook';
+const GROUP_FIELDS = ['members', 'newMembers', 'activeMembers', 'posts', 'comments', 'reactions'];
 const WAIT = 45000;
 const PROVIDERS = new Set(['direct', 'ayrshare', 'instagram-login']);
 // Instagram no permite renovar un token ya vencido: se renueva con una semana de margen.
@@ -185,7 +187,7 @@ function createPublishing(root, vault, platform = clients) {
     return job;
   }
 
-  async function enqueue({ target, network, dueAt, confirmed, metadata: prepared, auto = false, method = 'api', groupUrl = '' }) {
+  async function enqueue({ target, network, dueAt, confirmed, metadata: prepared, auto = false, method = 'api', groupUrl = '', group = null }) {
     validNetwork(network);
     if (confirmed !== true) throw Error('Debes confirmar el envío a esta red');
     const scheduled = dateString(dueAt) || new Date().toISOString();
@@ -217,7 +219,9 @@ function createPublishing(root, vault, platform = clients) {
       authorizedAt: new Date().toISOString(), dueAt: scheduled, nextAt: scheduled,
       status: Date.parse(scheduled) > Date.now() ? 'programado' : 'pendiente', attempts: 0, remote: {},
       url: null, externalId: null, message: '', ...(auto ? { auto: true } : {}),
-      ...(browser ? { method: 'browser', ...(network === 'facebook' && groupUrl ? { groupUrl } : {}) } : {})
+      ...(browser ? { method: 'browser', ...(network === 'facebook' && groupUrl ? { groupUrl } : {}),
+        ...(network === 'facebook' && groupUrl && group ? { group: { mode: group.mode === 'upload' ? 'upload' : 'share',
+          name: String(group.name || '').slice(0, 100), pageUrl: String(group.pageUrl || '').slice(0, 300) } } : {}) } : {})
     };
     writeQueue([...jobs, job]);
     return publicJob(job);
@@ -245,7 +249,7 @@ function createPublishing(root, vault, platform = clients) {
     updateJob(job.id, { status: 'enviando', message: 'Publicando desde el navegador…', attempts: job.attempts + 1 });
     let result;
     try {
-      result = await platform.browserPublish(job.network, { file, metadata: job.metadata, quality: entry.quality, groupUrl: job.groupUrl || '' });
+      result = await platform.browserPublish(job.network, { file, metadata: job.metadata, quality: entry.quality, groupUrl: job.groupUrl || '', group: job.group || null });
     } catch (error) {
       // Si ya se pulsó «Publicar», no se reintenta solo: hay que comprobarlo en la red.
       return updateJob(job.id, { status: error.submitted ? 'revisar' : 'fallo', screenshot: error.screenshot || null,
@@ -258,7 +262,7 @@ function createPublishing(root, vault, platform = clients) {
     let externalId = null;
     try { externalId = url ? extractId(job.network, url) : null; } catch { externalId = null; }
     const published = updateJob(job.id, { status: 'publicado', url, externalId,
-      publishedAt: new Date().toISOString(), message: result.note || 'Publicado desde el navegador.' });
+      publishedAt: new Date().toISOString(), message: result.note || 'Publicado desde el navegador.', ...(result.groupError ? { groupError: true } : {}) });
     if (job.target.kind === 'short') store.saveProject(root, { id: job.target.id, stage: 'publicado' });
     return published;
   }
@@ -414,6 +418,29 @@ function createPublishing(root, vault, platform = clients) {
   }
 
   /** Seguidores leídos desde el navegador (perfil o panel del canal). */
+  /** Una foto por día del grupo de Facebook: miembros y, si eres administrador, su actividad. */
+  function groupReading(data, now = new Date()) {
+    const values = Object.fromEntries(GROUP_FIELDS.map(key => [key, data?.[key]]).filter(([, value]) => Number.isSafeInteger(value) && value >= 0));
+    if (!Object.keys(values).length) throw Error('El grupo no tiene cifras válidas');
+    const saved = production.readState(root, GROUP, { history: [] });
+    const day = now.toISOString().slice(0, 10);
+    const point = { day, ...values };
+    const history = [...(saved.history || []).filter(item => item.day !== day), point].sort((a, b) => a.day.localeCompare(b.day)).slice(-400);
+    const latest = { ...values, name: String(data.name || saved.latest?.name || '').slice(0, 120), url: String(data.url || saved.latest?.url || '').slice(0, 300), at: now.toISOString() };
+    production.writeState(root, GROUP, { latest, history });
+    return groupStats();
+  }
+
+  function groupStats() {
+    const { latest = null, history = [] } = production.readState(root, GROUP, { history: [] });
+    if (!latest) return null;
+    const withMembers = history.filter(item => item.members != null);
+    const first = withMembers[0], last = withMembers.at(-1);
+    const week = withMembers.filter(item => Date.parse(item.day) >= Date.parse(last?.day || 0) - 7 * 86400000)[0];
+    return { latest, history, change: first && last && first !== last ? last.members - first.members : null,
+      week: week && last && week !== last ? last.members - week.members : null, since: first?.day || null };
+  }
+
   function accountReading(network, { followers }) {
     accountName(network);
     if (!Number.isSafeInteger(followers) || followers < 0) throw Error('Cifra de seguidores inválida');
@@ -554,7 +581,7 @@ function createPublishing(root, vault, platform = clients) {
     return file;
   }
 
-  return { jobsRaw: () => queue(), syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, accountReading, snapshotAccounts, growth: () => production.readState(root, GROWTH, {}), refreshStats, stats, exportStats };
+  return { jobsRaw: () => queue(), syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, accountReading, groupReading, groupStats, snapshotAccounts, growth: () => production.readState(root, GROWTH, {}), refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };

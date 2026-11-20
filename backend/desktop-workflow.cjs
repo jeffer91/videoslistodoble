@@ -33,7 +33,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     browserPublish: (network, context) => publishWithBrowser(app, network, context, root) });
   const cloud = createCloud(root, safeStorage);
   // Copia en Firebase después de cada lectura; un fallo queda en el estado de la nube.
-  const cloudSync = () => cloud.sync({ rows: publishing.stats(), growth: publishing.growth(), accounts: publishing.accounts() });
+  const cloudSync = () => cloud.sync({ rows: publishing.stats(), growth: publishing.growth(), accounts: publishing.accounts(), group: publishing.groupStats() });
   const cloudQuiet = () => cloudSync().catch(() => {});
   const autopublish = createAutopublish(root, publishing);
   let browserSession = null;
@@ -63,7 +63,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       try { exportedAt = new Date(fs.statSync(delivery.resolveOutput(root, target)).mtimeMs).toISOString(); } catch { /* sin fecha */ }
       list.push({ kind, id, title, file: target.file, exportedAt, versions: files.length,
         duration: entry.quality?.duration ?? null, checked: Boolean(entry.quality), qualityOk: entry.quality?.ok === true,
-        approved: Boolean(entry.approval), networks });
+        approved: Boolean(entry.approval), sheet: Boolean(entry.sheet), networks });
     };
     for (const project of store.listProjects(root)) {
       if (project.status === 'auxiliary' || !project.exports?.length) continue;
@@ -180,6 +180,13 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'export.quality': ({ target }) => runMedia(signal => delivery.checkOutput(root, target, signal)),
     'export.thumbnails': ({ target, values }) => runMedia(signal => delivery.thumbnails(root, target, values, signal)),
     'export.metadata': ({ target, network, value }) => delivery.saveNetwork(root, target, network, value),
+    // Ficha de publicación: propuesta inicial, guardado y vista previa de cada red.
+    'export.sheet': ({ target }) => ({ sheet: delivery.suggestSheet(root, target), saved: Boolean(delivery.entryFor(root, target).sheet),
+      preview: delivery.entryFor(root, target).sheet ? autopublish.preview(target) : null }),
+    'export.saveSheet': ({ target, value }) => {
+      delivery.saveSheet(root, target, value);
+      return { sheet: delivery.entryFor(root, target).sheet, saved: true, preview: autopublish.preview(target) };
+    },
     'export.chapters': ({ target }) => {
       const doc = delivery.resolveOutput(root, target).replace(/\.mp4$/, '.capitulos.txt');
       if (!fs.existsSync(doc)) throw Error('Exporta la compilación para generar los capítulos');
@@ -217,7 +224,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       cloudQuiet();
       return result;
     },
-    'statistics.central': () => buildCentral(publishing.stats(), publishing.growth()),
+    'statistics.central': () => ({ ...buildCentral(publishing.stats(), publishing.growth()), group: publishing.groupStats() }),
     'cloud.status': () => cloud.status(),
     'auto.overview': () => autopublish.overview(),
     'auto.save': async data => {
@@ -232,7 +239,8 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       const item = autopublish.candidates().reverse().find(candidate => cfg.networks[network]?.formats.includes(candidate.format));
       if (!item) throw Error('Aprueba al menos un video de un formato activo para ensayar');
       const result = await publishWithBrowser(app, network, { file: delivery.resolveOutput(root, item.target), metadata: autopublish.adapt(item, network, cfg),
-        quality: item.entry.quality, dryRun: true, groupUrl: network === 'facebook' && cfg.networks.facebook.groupEnabled ? cfg.networks.facebook.groupUrl : '' }, root)
+        quality: item.entry.quality, dryRun: true, groupUrl: network === 'facebook' && cfg.networks.facebook.groupEnabled ? cfg.networks.facebook.groupUrl : '',
+        group: { mode: cfg.networks.facebook.groupMode, name: cfg.networks.facebook.groupName, pageUrl: cfg.networks.facebook.pageUrl } }, root)
         .catch(error => { const e = Error(error.message + (error.screenshot ? ' · Captura: ' + error.screenshot : '')); throw e; });
       if (result.busy) throw Error('El navegador está ocupado con otra tarea. Inténtalo en unos minutos.');
       return { title: item.title, ...result };
@@ -255,6 +263,8 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       require('./browser-statistics.cjs').readBrowser(app, network,
         video => { publishing.browserReading(network, video); },
         { signal: controller.signal, onStatus: (stage, data) => Object.assign(session, { stage }, data),
+          groupUrl: network === 'facebook' ? autopublish.config().networks.facebook.groupUrl : '',
+          onGroup: group => { try { publishing.groupReading(group); session.group = group.members ?? null; } catch { /* sin cifras */ } },
           onAccount: account => { try { publishing.accountReading(network, account); session.followers = account.followers; } catch { /* cifra no válida */ } } })
         .then(result => {
           publishing.snapshotAccounts();
