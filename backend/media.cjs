@@ -300,6 +300,8 @@ function fillAndContain(src,wide,withPresenter,titleFile,withLogo,appearance,spe
  }else f.push('['+input+']null[vout]');
  return f.join(';');
 }
+// FFmpeg no acepta notación científica en tiempos («5.6e-15»): siempre decimal fijo y nunca negativo.
+function seconds(value){const n=Number(value);return (Number.isFinite(n)&&n>0?n:0).toFixed(3)}
 async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,signal,progress,logo,mediaStart=0,speed=1,appearance=null,theme='historic',edit={},templateFile=null,sceneKey='body',narrationSpeed=1,visual=null){
  if(!(length>0))throw Error('El fragmento no tiene duración');
  const testing=process.env.RECORDS_RENDER_TEST_MODE==='1';const W=testing?(wide?480:270):(wide?1920:1080),H=testing?(wide?270:480):(wide?1080:1920);
@@ -312,10 +314,10 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  const frameKind=appearance?.frame||'sport';
  const geometry=withPresenter&&frameKind!=='none'?cornerBalls.calculate(
   wide,sceneKey==='closing',appearance,testing,voiceInfo.width,voiceInfo.height):null;
- const args=['-hide_banner','-loglevel','error','-y','-ss',String(start),'-i',voice];
+ const args=['-hide_banner','-loglevel','error','-y','-ss',seconds(start),'-i',voice];
  if(withPresenter){
   if(mediaAsset.type==='image')args.push('-loop','1','-i',mediaAsset.file);
-  else args.push('-stream_loop','-1','-ss',String(mediaStart),'-i',mediaAsset.file);
+  else args.push('-stream_loop','-1','-ss',seconds(mediaStart),'-i',mediaAsset.file);
  }
  if(hasLogo)args.push('-loop','1','-i',logo);
  const templateIndex=templateFile?1+(withPresenter?1:0)+(hasLogo?1:0):null;
@@ -330,7 +332,7 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
  args.push('-map','[vout]');
  if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,atempo='+Math.max(.5,Math.min(2,narrationSpeed)).toFixed(3)+editing.voiceFilter(edit.voice,edit.voiceFallback)+(edit.muteAudio?',volume=0':''));
  else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0)+(geometry?1:0))+':a:0');
- args.push('-t',String(length/Math.max(.5,Math.min(2,narrationSpeed))),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
+ args.push('-t',seconds(length/Math.max(.5,Math.min(2,narrationSpeed))),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
  await command(toolPath('ffmpeg'),args,signal,null,ctx);
  if(progress)progress();
@@ -523,4 +525,4 @@ async function joinWithTransition(root,a,b,effect,duration,signal,keepSpeech=fal
  }catch(e){fs.rmSync(tmp,{recursive:true,force:true});throw e}
 }
 
-module.exports={command,probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,normalizeFinal,joinWithTransition,exportShort,exportWeekly,toolPath};
+module.exports={seconds,command,probe,detectSilences,waveform,retainedRanges,selectedDuration,timeline,splitByEdits,fillAndContain,preparePreview,resolvePreview,getPreviewTimeline,compileScene,concat,renderTransition,temporary,normalizeFinal,joinWithTransition,exportShort,exportWeekly,toolPath};

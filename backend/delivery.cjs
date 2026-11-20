@@ -237,7 +237,7 @@ async function thumbnails(root, target, { title, time, assetId }, signal) {
     if (!image) {
       const duration = (await media.probe(file)).duration;
       await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-ss',
-        String(Math.min(seconds, Math.max(0, duration - .2))), '-i', file, '-frames:v', '1', snapshot], signal);
+        media.seconds(Math.min(seconds, Math.max(0, duration - .2))), '-i', file, '-frames:v', '1', snapshot], signal);
     }
     const themes = [
       { accent: '#ffd765', base: '#11231a', side: 'left' },

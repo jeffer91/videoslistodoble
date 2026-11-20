@@ -162,3 +162,12 @@ test('la animación respeta el segundo de la toma y deja visibles los apoyos ant
  const parts=require('../backend/media.cjs').timeline(scene,10,[image,drawing]);
  assert.deepEqual(parts.map(p=>[p.start,p.end,p.medium.assetId]),[[0,3,'foto'],[3,7,'dibujo'],[7,10,'foto']]);
 });
+
+test('los tiempos para FFmpeg nunca salen en notación científica ni negativos', () => {
+  const media = require('../backend/media.cjs');
+  assert.equal(String(5.679798047642687e-15), '5.679798047642687e-15', 'así fallaba antes');
+  assert.equal(media.seconds(5.679798047642687e-15), '0.000');
+  assert.equal(media.seconds(-0.2), '0.000');
+  assert.equal(media.seconds(NaN), '0.000');
+  assert.equal(media.seconds(12.34567), '12.346');
+});
