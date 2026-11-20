@@ -13,7 +13,26 @@
   let ideas = [], jobs = [], accountData = {};
   let backup, editConfig, updateConfig, delivery, creator, loading, sheetData, sheetTab = "youtube";
   let projectLinks = [], linksProjectId, logTarget;
-  let currentNetwork = 'youtube', currentScene = 'hook', month = '', activeTask = '';
+  let currentNetwork = 'youtube', currentScene = 'hook', month = '', activeTask = '', audioSample = null;
+  const VOICES = [['locutor', 'Locutor (recomendado)'], ['natural', 'Natural'], ['original', 'Original'],
+    ['limpia', 'Voz limpia (clásica)'], ['podcast', 'Estudio (clásica)'], ['exterior', 'Exterior (clásica)']];
+  const VOICE_HELP = {
+    locutor: 'Quita el ruido con IA, da cuerpo y presencia a la voz, controla las «s» y la deja pareja como en radio. Volumen listo para redes (−14 LUFS).',
+    natural: 'Quita el ruido con IA y ajusta el volumen, sin cambiar el timbre de tu voz.',
+    original: 'Sin limpieza ni ajustes de voz; solo se ajusta el volumen final.'
+  };
+
+  /** Diez segundos de la escena: cómo suena ahora y cómo sonará con el perfil elegido. */
+  function audioCompare() {
+    const project = state.project;
+    const sample = audioSample?.project === project?.id && audioSample.scene === currentScene ? audioSample : null;
+    const src = kind => 'records://audio-sample/' + encodeURIComponent(project.id) + '/' + currentScene + '/' + kind + '?v=' + sample.data.version;
+    return '<div class="audio-compare"><div class="row wrap">' + btn('audio-compare', sample ? 'Volver a escuchar con este perfil' : 'Escuchar antes / después', 'secondary') + '</div>' +
+      (sample ? '<div class="two"><label>Antes<audio controls preload="metadata" src="' + src('antes') + '"></audio></label>' +
+        '<label>Después · ' + esc(VOICES.find(([key]) => key === sample.profile)?.[1] || '') + '<audio controls preload="metadata" src="' + src('despues') + '"></audio></label></div>' +
+        '<ul class="audio-notes">' + sample.data.report.notes.map(note => '<li>' + esc(note) + '</li>').join('') +
+        (sample.data.report.noise !== null ? '<li class="muted">Ruido de fondo medido: ' + sample.data.report.noise + ' dB</li>' : '') + '</ul>' : '') + '</div>';
+  }
 
   function flow(action, data = {}) {
     return api('studio:flow', { action, data });
@@ -211,7 +230,7 @@
   }
 
   function workingPlan() {
-    return structuredClone(state.project.editingPlan || { version: 1, source: 'manual', voice: 'original', captions: true, scenes: {} });
+    return structuredClone(state.project.editingPlan || { version: 1, source: 'manual', voice: 'locutor', captions: true, scenes: {} });
   }
 
   function planPage() {
@@ -234,7 +253,8 @@
       btn('studio-handoff', 'Exportar transcripción para Claude', 'secondary')) +
       '<div class="workflow-columns">' +
       panel('Plan de edición', '<div class="two">' + field('Escena', select('plan-scene', Object.entries(names), currentScene)) +
-        field('Perfil de voz', select('plan-voice', [['original', 'Original'], ['limpia', 'Voz limpia'], ['podcast', 'Estudio'], ['exterior', 'Exterior']], plan.voice)) + '</div>' +
+        field('Perfil de voz', select('plan-voice', VOICES, plan.voice || 'locutor')) + '</div>' +
+        '<p class="muted mini">' + esc(VOICE_HELP[plan.voice || 'locutor'] || '') + '</p>' + audioCompare() +
         checked('plan-captions', 'Mostrar subtítulos resaltados', plan.captions !== false) +
         field('Palabras para resaltar (separadas por comas)', input('plan-highlight', (entry.highlights || []).join(', '), 'maxlength="1000"')) +
         btn('plan-save-style', 'Guardar ajustes de edición', 'secondary') +
@@ -530,6 +550,13 @@
       plan.scenes[currentScene] ||= {};
       plan.scenes[currentScene].highlights = valueOf('plan-highlight').split(',').map(text => text.trim()).filter(Boolean);
       return savePlan(plan);
+    }
+    if (name === 'audio-compare') {
+      const profile = valueOf('plan-voice');
+      const data = await run('Preparando la muestra de audio (la primera vez se descarga el limpiador de voz)', () =>
+        flow('audio.preview', { projectId: state.project.id, scene: currentScene, profile }));
+      audioSample = { project: state.project.id, scene: currentScene, profile, data };
+      return render();
     }
     if (name === 'plan-add-item') return itemModal(id);
     if (name === 'plan-remove-item') {

@@ -6,15 +6,35 @@ const catalog = require('./catalog.cjs');
 
 const SCENES = ['hook', 'body', 'closing'];
 const MODES = ['both', 'audio', 'video'];
+// Las voces «natural» y «locutor» llegan ya limpias por IA (DeepFilterNet, ver voice-audio.cjs);
+// si la IA no está disponible se añade un reductor clásico delante (voiceFilter con fallback).
+const LOCUTOR = [
+  'highpass=f=80:p=2',
+  'agate=threshold=0.006:ratio=2:range=0.4:attack=8:release=260',          // respiraciones y pausas más bajas, sin cortar
+  'equalizer=f=300:t=q:w=1.1:g=-3',                                          // menos sonido de caja
+  'equalizer=f=120:t=q:w=0.9:g=2',                                           // cuerpo de radio
+  'equalizer=f=4200:t=q:w=1:g=3',                                            // presencia: se entiende en el móvil
+  'highshelf=f=10500:g=2',                                                   // aire
+  'deesser=i=0.35:m=0.5:f=0.5:s=o',                                          // «s» menos silbantes
+  'acompressor=threshold=0.063:ratio=3:attack=15:release=180:knee=3:makeup=1.6', // nivelado (−24 dB)
+  'acompressor=threshold=0.32:ratio=8:attack=2:release=60',                 // control de picos (−10 dB)
+  'alimiter=limit=0.89:level=false'
+].join(',');
+const NATURAL = 'highpass=f=70,acompressor=threshold=0.1:ratio=2:attack=20:release=200:makeup=1.3,alimiter=limit=0.89:level=false';
+const AI_PROFILES = new Set(['natural', 'locutor']);
 const PROFILES = {
   original: '',
+  locutor: LOCUTOR,
+  natural: NATURAL,
   limpia: 'highpass=f=75,afftdn=nf=-28',
   podcast: 'highpass=f=85,afftdn=nf=-27,equalizer=f=3200:t=q:w=1:g=3,acompressor=threshold=0.13:ratio=3:attack=12:release=130,alimiter=limit=0.88',
   exterior: 'highpass=f=110,afftdn=nf=-23,equalizer=f=250:t=q:w=1.2:g=-3,acompressor=threshold=0.15:ratio=2.5'
 };
 
-function voiceFilter(profile) {
-  return PROFILES[profile] ? ',' + PROFILES[profile] : '';
+function voiceFilter(profile, fallback = false) {
+  const chain = PROFILES[profile] || '';
+  if (!chain) return '';
+  return ',' + (fallback && AI_PROFILES.has(profile) ? 'afftdn=nf=-30:tn=1,' : '') + chain;
 }
 
 function text(value, limit, field) {
@@ -85,7 +105,7 @@ function normalizePlan(plan, project) {
     const sourceAsset = item.sourceAsset ?? project.scenes[key]?.video ?? null;
     return { sourceAsset: sourceAsset ? asset(sourceAsset, ['video']) : null, cuts, texts, highlights, graphics, memes };
   };
-  const voice = plan.voice || 'original';
+  const voice = plan.voice || 'locutor';
   if (!Object.hasOwn(PROFILES, voice)) throw Error('Perfil de voz inválido');
   return { version: 1, source: plan.source === 'claude' ? 'claude' : 'manual', voice,
     captions: plan.captions !== false, scenes: Object.fromEntries(SCENES.map(key => [key, entry(key)])) };
@@ -100,7 +120,7 @@ function effectiveScene(project, key) {
   return {
     ...scene, cuts: [...(scene.cuts || []), ...(current?.cuts || [])],
     captions: plan?.captions !== false && transcript?.assetId === scene.video ? transcript.words : [],
-    editing: current, voice: plan?.voice || 'original'
+    editing: current, voice: plan?.voice || 'locutor'
   };
 }
 
@@ -417,7 +437,7 @@ function exportHandoff(root, id) {
 }
 
 module.exports = {
-  PROFILES, voiceFilter, normalizeWords, normalizePlan, effectiveScene, clipsOnOutput, plannedMemes, assDocument,
+  PROFILES, AI_PROFILES, voiceFilter, normalizeWords, normalizePlan, effectiveScene, clipsOnOutput, plannedMemes, assDocument,
   overlayScene, editingSettings, editSettings, parseWhisper, setTranscript, transcribe,
   importScript, applyPlan, exportHandoff
 };

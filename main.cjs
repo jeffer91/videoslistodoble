@@ -45,7 +45,7 @@ app.whenReady().then(()=>{
   protocol.handle('records',async request=>{
     try{
       const u=new URL(request.url);
-      if(['preview','review','output','rendered','take','thumbnail'].includes(u.hostname)){
+      if(['preview','review','output','rendered','take','thumbnail','audio-sample'].includes(u.hostname)){
         const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
         let file;
         if(u.hostname==='take'){
@@ -56,6 +56,9 @@ app.whenReady().then(()=>{
           if(pieces.length!==4)throw Error('Miniatura desconocida');
           file=delivery.thumbnailPath(ROOT,{kind:pieces[0],id:pieces[1],file:pieces[2]},Number(pieces[3]));
           return require('electron').net.fetch(require('node:url').pathToFileURL(file).toString());
+        }else if(u.hostname==='audio-sample'){
+          if(pieces.length!==3)throw Error('Muestra de audio desconocida');
+          file=require('./backend/voice-audio.cjs').samplePath(ROOT,pieces[0],pieces[1],pieces[2]);
         }else if(u.hostname==='output'){
           if(pieces.length!==3)throw Error('Exportación desconocida');
           file=delivery.resolveOutput(ROOT,{kind:pieces[0],id:pieces[1],file:pieces[2]});
@@ -83,7 +86,7 @@ app.whenReady().then(()=>{
           status=206;
         }
         const stream=require('node:stream').Readable.toWeb(fs.createReadStream(file,{start,end}));
-        const headers={'Content-Type':u.hostname==='take'?'video/webm':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(end-start+1),'Cache-Control':'no-store'};
+        const headers={'Content-Type':u.hostname==='take'?'video/webm':u.hostname==='audio-sample'?'audio/mp4':'video/mp4','Accept-Ranges':'bytes','Content-Length':String(end-start+1),'Cache-Control':'no-store'};
         if(status===206)headers['Content-Range']='bytes '+start+'-'+end+'/'+total;
         return new Response(stream,{status,headers});
       }

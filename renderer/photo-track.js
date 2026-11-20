@@ -21,8 +21,8 @@ const PhotoTrack=(()=>{
   });
  }
  function label(asset,item,index){
-  const style=item.photo?.style||asset?.name?.match(/[-_](pintura|lapiz)\.mp4$/i)?.[1]?.toLowerCase();
-  const kind=({pintura:'Pintura',lapiz:'Lápiz',in:'Acercamiento',out:'Alejamiento',pan:'Panorámica',still:'Foto'})[style] || (asset?.type==='video'?'Clip':'Imagen');
+  const style=item.photo?.style||asset?.name?.match(/[-_](pintura|lapiz|profundidad|destacado|impacto)\.mp4$/i)?.[1]?.toLowerCase();
+  const kind=({pintura:'Pintura',lapiz:'Lápiz',in:'Acercamiento',out:'Alejamiento',pan:'Panorámica',still:'Foto',profundidad:'Profundidad',destacado:'Destacado',impacto:'Impacto'})[style] || (asset?.type==='video'?'Clip':'Imagen');
   return kind+' '+(index+1);
  }
  function selectBlock(index){
@@ -57,16 +57,30 @@ const PhotoTrack=(()=>{
   const photos=state.project.assets.filter(a=>a.type==='image');
   modal('Elegir imagen',btn('photo-import','Importar foto')+'<div class="photo-picker">'+photos.map(a=>'<button data-action="photo-select" data-id="'+esc(a.id)+'"><img src="'+url(state.project,a.id)+'" alt="">'+esc(a.name)+'</button>').join('')+'</div>');
  }
+ // Efectos agrupados: los que separan al protagonista usan el punto «+» para elegir a quién destacar.
+ const EFFECTS=[['Dibujados',[['lapiz','Dibujo a lápiz'],['pintura','Pintura']]],
+  ['Con profundidad',[['profundidad','Profundidad 2.5D'],['destacado','Jugador destacado'],['impacto','Impacto (revelar la cifra)']]],
+  ['Cámara',[['in','Acercamiento'],['out','Alejamiento'],['pan','Desplazamiento lateral'],['still','Foto fija']]]];
+ const LAYER_NOTE=' Marca con el «+» al jugador. La primera vez se descarga el modelo de recorte (unos 170 MB).';
+ const HELP={profundidad:'Separa al jugador del fondo y los mueve a distinta velocidad, como una toma de cámara real.'+LAYER_NOTE,
+  destacado:'El fondo se apaga a blanco y negro y el jugador queda en color con un contorno de luz.'+LAYER_NOTE,
+  impacto:'Golpe de zoom con destello y sacudida al inicio. Ideal para el momento en que se revela el récord.',
+  in:'Se acerca con suavidad al punto «+».',out:'Empieza cerca del punto «+» y se aleja con suavidad.',
+  pan:'Recorre la foto de lado a lado con un leve acercamiento.',still:'La foto queda quieta.',
+  lapiz:'La foto se dibuja a lápiz delante del espectador.',pintura:'La foto se pinta a pinceladas.'};
  function form(){
   const d=draft;
   modal('Preparar imagen','<p>Arrastra sobre la foto para recortar. Haz clic dentro del encuadre para elegir el centro del zoom.</p>'+
    '<div class="crop-area"><img id="photo-original" draggable="false" src="'+url(state.project,d.assetId)+'"><div id="photo-crop"></div><i id="photo-focus">+</i></div>'+
    btn('photo-reset','Usar foto completa','secondary')+
-   '<label>Efecto<select id="photo-style">'+[['still','Foto fija'],['lapiz','Dibujo a lápiz'],['pintura','Pintura'],['in','Acercamiento'],['out','Alejamiento'],['pan','Desplazamiento lateral']].map(([v,l])=>'<option value="'+v+'" '+(v===d.style?'selected':'')+'>'+l+'</option>').join('')+'</select></label>'+
+   '<label>Efecto<select id="photo-style">'+EFFECTS.map(([group,items])=>'<optgroup label="'+group+'">'+items.map(([v,l])=>'<option value="'+v+'" '+(v===d.style?'selected':'')+'>'+l+'</option>').join('')+'</optgroup>').join('')+'</select></label>'+
+   '<p class="mini muted" id="photo-style-help">'+esc(HELP[d.style]||'')+'</p>'+
    '<label><input type="checkbox" id="photo-glow" '+(d.glow?'checked':'')+'> Brillo suave en la fotografía</label>'+
    '<div class="two"><label>Inicio en la toma (s)<input type="number" step=".01" id="photo-at" value="'+round(d.at)+'"></label><label>Duración (s)<input type="number" min="1" max="180" step=".1" id="photo-seconds" value="'+round(d.seconds)+'"></label></div>'+
    btn('photo-preview','Generar vista previa'));
   paint();
+  const choice=$('#photo-style'),help=$('#photo-style-help');
+  if(choice&&help)choice.onchange=()=>{help.textContent=HELP[choice.value]||''};
  }
  function paint(){
   const [l,t,r,b]=draft.crop,box=$('#photo-crop'),mark=$('#photo-focus');

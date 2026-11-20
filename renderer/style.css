@@ -511,3 +511,7 @@ details > summary { cursor: pointer; }
 .sheet-tabs button{padding:6px 11px;background:#17271d;border:1px solid var(--line);color:#b5d0bb;font-size:12px}
 .sheet-tabs button.active{background:#196c38;border-color:#31bb62;color:#fff}
 .sheet-preview{white-space:pre-wrap;word-break:break-word;font:13px/1.5 inherit;font-family:inherit;margin:0;padding:12px;background:#0b160f;border:1px solid var(--line);border-radius:9px;max-height:240px;overflow:auto}
+/* Antes / después del audio */
+.audio-compare{margin:10px 0 14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0c1510}
+.audio-compare audio{width:100%;margin-top:6px}
+.audio-notes{margin:10px 0 0;padding-left:18px;font-size:13px;line-height:1.5}

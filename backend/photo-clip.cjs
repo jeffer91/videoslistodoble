@@ -2,10 +2,18 @@
 const path=require('node:path'),fs=require('node:fs');
 const sharp=require('sharp');
 const media=require('./media.cjs'),store=require('./store.cjs');
+const STYLES=['still','in','out','pan','lapiz','pintura','profundidad','destacado','impacto'];
+// Modelo U²-Net que separa al protagonista del fondo (Profundidad 2.5D y Jugador destacado).
+const SUBJECT={url:'https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx',
+ sha256:'8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491',limit:200*1024*1024,label:'el modelo de recorte'};
+async function subjectModel(root,signal){
+ if(process.env.RECORDS_SUBJECT_MODEL!==undefined)return process.env.RECORDS_SUBJECT_MODEL||null;
+ return require('./verified-download.cjs').ensure(path.join(root,'Recursos','Modelos','u2net.onnx'),SUBJECT,signal);
+}
 
 async function generate(root,options,signal,drawingRuntime){
  const {projectId,assetId,style,seconds,glow,focus,crop}=options;
- if(!['still','in','out','pan','lapiz','pintura'].includes(style)||!Number.isFinite(seconds)||seconds<1||seconds>180)
+ if(!STYLES.includes(style)||!Number.isFinite(seconds)||seconds<1||seconds>180)
   throw Error('Selecciona un efecto y una duración entre 1 y 180 segundos.');
  if(!Array.isArray(crop)||crop.length!==4||!crop.every(v=>Number.isFinite(v)&&v>=0&&v<=1)||
    crop[2]-crop[0]<.02||crop[3]-crop[1]<.02||!Array.isArray(focus)||focus.length!==2||!focus.every(v=>Number.isFinite(v)&&v>=0&&v<=1))
@@ -28,17 +36,17 @@ async function generate(root,options,signal,drawingRuntime){
    const border=require('./drawing-border.cjs');
    await border.cropClip(paper,output,border.drawingRect(await media.probe(paper),cropped.width,cropped.height),signal);
   }else{
-   const frames=Math.ceil(seconds*30),progress='min(1,on/'+Math.max(1,frames-1)+')';
-   const z={in:'1+0.18*'+progress,out:'1.18-0.18*'+progress,pan:'1.15',still:'1'}[style];
-   const w=Math.max(2,2*Math.round(540*rect.width/Math.max(rect.width,rect.height)));
-   const h=Math.max(2,2*Math.round(540*rect.height/Math.max(rect.width,rect.height)));
-   const fx=style==='pan'?progress:String(focus[0]);
-   let filter="zoompan=z='"+z+"':x='(iw-iw/zoom)*("+fx+")':y='(ih-ih/zoom)*"+focus[1]+"':d="+frames+":s="+w+"x"+h+":fps=30";
-   if(glow)filter+=",eq=brightness='0.08*pow(sin(PI*t/"+seconds+"),8)':eval=frame";
-   await media.command(media.toolPath('ffmpeg'),['-loglevel','error','-y','-i',file,'-vf',filter,'-frames:v',String(frames),'-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart',output],signal);
+   // Movimientos de cámara y efectos con capas: motor de animación (fotogramas con precisión de subpíxel).
+   const runtime=await drawingRuntime();
+   let model=null;
+   if(['profundidad','destacado'].includes(style)){
+    try{model=await subjectModel(root,signal)}catch(error){if(signal?.aborted)throw error}
+   }
+   const options=JSON.stringify({focus,glow:Boolean(glow),model});
+   await media.command(runtime.exe,[...runtime.args,file,output,style,String(seconds),media.toolPath('ffmpeg'),options],signal);
   }
   const duration=(await media.probe(output)).duration;
   return {asset:store.importAsset(root,projectId,output,path.parse(asset.name).name+'-'+style+'.mp4'),duration};
  }finally{fs.rmSync(tmp,{recursive:true,force:true})}
 }
-module.exports={generate};
+module.exports={generate,STYLES,SUBJECT};

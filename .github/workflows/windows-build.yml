@@ -21,6 +21,11 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Comprobar sintaxis
         run: npm run check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preparar el motor de animación para las pruebas
+        run: python -m pip install --disable-pip-version-check -r animation/requirements.txt
       - name: Ejecutar pruebas automatizadas
         run: npm test
       - name: Preparar Chromium para la grabadora móvil

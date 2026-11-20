@@ -19,3 +19,7 @@ engine = build / 'animation' / 'records-animation' / 'records-animation.exe'
 ffmpeg = subprocess.check_output(['node', '-p', "require('ffmpeg-static')"], text=True).strip()
 subprocess.run([engine, 'assets/logo-11-records.png', build / 'animation-smoke.mp4',
                 'lapiz', '3', ffmpeg], check=True)
+# Los movimientos nuevos también deben ir dentro del motor empaquetado.
+for style in ('impacto', 'profundidad', 'in'):
+    subprocess.run([engine, 'assets/logo-11-records.png', build / f'animation-smoke-{style}.mp4',
+                    style, '2', ffmpeg, '{"focus": [0.5, 0.5]}'], check=True)

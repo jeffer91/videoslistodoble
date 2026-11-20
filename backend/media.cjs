@@ -328,7 +328,7 @@ async function renderPiece(ctx,voice,mediaAsset,start,length,target,wide,title,s
   edit.freezeVideo===true,templateIndex,sceneKey,cornerIndex,visual);
  args.push('-filter_complex',filter);
  args.push('-map','[vout]');
- if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,atempo='+Math.max(.5,Math.min(2,narrationSpeed)).toFixed(3)+editing.voiceFilter(edit.voice)+(edit.muteAudio?',volume=0':''));
+ if(voiceInfo.hasAudio)args.push('-map','0:a:0','-af','aresample=async=1:first_pts=0,atempo='+Math.max(.5,Math.min(2,narrationSpeed)).toFixed(3)+editing.voiceFilter(edit.voice,edit.voiceFallback)+(edit.muteAudio?',volume=0':''));
  else args.push('-map',String(1+(withPresenter?1:0)+(hasLogo?1:0)+(templateFile?1:0)+(geometry?1:0))+':a:0');
  args.push('-t',String(length/Math.max(.5,Math.min(2,narrationSpeed))),'-r','30','-s',W+'x'+H,'-c:v','libx264','-preset','veryfast','-crf','21',
   '-pix_fmt','yuv420p','-c:a','aac','-ar','48000','-ac','2','-b:a','160k','-movflags','+faststart',target);
@@ -378,7 +378,10 @@ function timeline(scene,duration,mediaEntries){
 }
 async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
  const scene=editing.effectiveScene(p,key);if(!scene||!scene.video)throw Error('Falta video de '+key+' en '+p.title);
- const voice=store.resolveAsset(root,p.id,scene.video),voiceInfo=await probe(voice);
+ const take=store.resolveAsset(root,p.id,scene.video),voiceInfo=await probe(take);
+ // Voz limpiada con IA una sola vez por toma (se reutiliza en cada fragmento y en exportaciones siguientes).
+ const cleaned=await require('./voice-audio.cjs').cleanVoice(root,take,scene.voice,signal);
+ const voice=cleaned.file;
  const length=selectedDuration(scene,voiceInfo.duration);
  if(length<.5)throw Error('La escena '+key+' quedó vacía');
  const autoMicrocuts=store.getSettings(root).autoMicrocuts!==false;
@@ -414,7 +417,7 @@ async function compileScene(root,p,key,wide,tmp,signal,progress,logo){
   const visual={background:plan.background,resource,photoSize,
    piece:{start:m.start,total:voiceInfo.duration,rate:scene.playbackSpeed||1}};
   await renderPiece(tmp,voice,m.medium,m.start,m.end-m.start,output,wide,scene.title||p.title,
-   signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,{...m,voice:scene.voice},templateFile,key,
+   signal,progress,logo,m.mediaStart,m.speed,appearance,p.style,{...m,voice:scene.voice,voiceFallback:cleaned.fallback},templateFile,key,
    scene.playbackSpeed||1,visual);
   segments.push(output);
  }
@@ -488,8 +491,15 @@ async function exportWeekly(root,id,signal,send){
 }
 
 async function normalizeFinal(input,output,signal){
+ // Dos pasadas a −14 LUFS (volumen de las redes): se mide y luego se aplica una ganancia lineal.
+ const master=require('./master-audio.cjs');
+ let gain=null;
+ try{
+  gain=await master.targetGain(async end=>master.readMeasure((await command(toolPath('ffmpeg'),['-hide_banner','-nostats','-i',input,
+   '-map','0:a:0','-af','aformat=sample_rates=48000:channel_layouts=stereo,'+end,'-f','null',process.platform==='win32'?'NUL':'-'],signal)).stderr));
+ }catch(error){if(signal?.aborted)throw error}
  await command(toolPath('ffmpeg'),['-hide_banner','-loglevel','error','-y','-i',input,
-  '-map','0:v:0','-map','0:a:0','-c:v','copy','-af','loudnorm=I=-16:TP=-1.5:LRA=11',
+  '-map','0:v:0','-map','0:a:0','-c:v','copy','-af','aformat=sample_rates=48000:channel_layouts=stereo,'+master.loudness(gain),
   '-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart',output],signal);
  return output;
 }

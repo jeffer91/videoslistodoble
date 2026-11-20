@@ -179,6 +179,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'export.approve': ({ target, confirmed }) => runMedia(signal => delivery.approveOutput(root, target, confirmed, signal)),
     'export.quality': ({ target }) => runMedia(signal => delivery.checkOutput(root, target, signal)),
     'export.thumbnails': ({ target, values }) => runMedia(signal => delivery.thumbnails(root, target, values, signal)),
+    'audio.preview': ({ projectId, scene, profile }) => require('./voice-audio.cjs').preview(root, store.getProject(root, projectId), scene, profile),
     'export.metadata': ({ target, network, value }) => delivery.saveNetwork(root, target, network, value),
     // Ficha de publicación: propuesta inicial, guardado y vista previa de cada red.
     'export.sheet': ({ target }) => ({ sheet: delivery.suggestSheet(root, target), saved: Boolean(delivery.entryFor(root, target).sheet),

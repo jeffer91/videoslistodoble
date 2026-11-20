@@ -4,8 +4,13 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),shar
 const {spawnSync}=require('node:child_process');
 const {generate}=require('../backend/photo-clip.cjs');
 const media=require('../backend/media.cjs'),store=require('../backend/store.cjs');
+// Motor de animación desde el código fuente (en el instalador va empaquetado).
+const PYTHON=process.env.RECORDS_PYTHON||(process.platform==='win32'?'python':'python3');
+const engine=spawnSync(PYTHON,['-c','import cv2, numpy'],{encoding:'utf8'});
+const runtime=async()=>({exe:PYTHON,args:[path.join(__dirname,'..','animation','worker.py')]});
+const needsEngine={skip:engine.status===0?false:'Falta Python con OpenCV para el motor de animación'};
 
-test('dos fotos conservan el encuadre, efecto y posición; redimensionar recorre el clip completo',async()=>{
+test('dos fotos conservan el encuadre, efecto y posición; redimensionar recorre el clip completo',needsEngine,async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'records-photos-'));
  try{
   store.ensureRoot(root);const p=store.createProject(root,{title:'Imágenes'}),file=path.join(root,'dos.png');
@@ -14,8 +19,8 @@ test('dos fotos conservan el encuadre, efecto y posición; redimensionar recorre
   await sharp(pixels,{raw:{width:120,height:60,channels:3}}).png().toFile(file);
   const original=store.importAsset(root,p.id,file);
   const options={projectId:p.id,assetId:original.id,seconds:1,style:'in',crop:[.5,0,1,1],focus:[.2,.7],glow:true};
-  const a=await generate(root,options);
-  const b=await generate(root,{...options,style:'out',crop:[0,0,.5,1]});
+  const a=await generate(root,options,undefined,runtime);
+  const b=await generate(root,{...options,style:'out',crop:[0,0,.5,1]},undefined,runtime);
   function pixel(asset){
    const frame=spawnSync(media.toolPath('ffmpeg'),['-loglevel','error','-i',store.resolveAsset(root,p.id,asset.id),'-vf','scale=1:1','-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','pipe:1']);
    assert.equal(frame.status,0,String(frame.stderr));return frame.stdout;
@@ -84,4 +89,27 @@ test('un bloque antiguo con nombre largo se puede quitar sin borrar su archivo n
  assert.match(modal.innerHTML,/Quitar de la escena/);assert.ok(!modal.innerHTML.includes(asset.name));
  await ui.handle('photo-remove');
  assert.equal(scene.media.length,1);assert.equal(scene.media[0].at,0);assert.equal(project.assets[0],asset);
+});
+
+test('efectos nuevos: impacto, profundidad y destacado crean clips nítidos; sin protagonista se usa un acercamiento',{...needsEngine,timeout:120000},async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'records-motion-'));
+ const previous=process.env.RECORDS_SUBJECT_MODEL;
+ try{
+  process.env.RECORDS_SUBJECT_MODEL='';
+  store.ensureRoot(root);const p=store.createProject(root,{title:'Efectos'}),file=path.join(root,'foto.png');
+  const w=320,h=240,pixels=Buffer.alloc(w*h*3);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=3*(y*w+x),inside=(x-160)**2+(y-120)**2<60**2;pixels[i]=inside?230:40+x%60;pixels[i+1]=inside?60:90;pixels[i+2]=inside?40:120+y%40}
+  await sharp(pixels,{raw:{width:w,height:h,channels:3}}).png().toFile(file);
+  const photo=store.importAsset(root,p.id,file);
+  for(const style of ['impacto','profundidad','destacado','pan']){
+   const result=await generate(root,{projectId:p.id,assetId:photo.id,seconds:1.5,style,crop:[0,0,1,1],focus:[.5,.5],glow:false},new AbortController().signal,runtime);
+   const info=await media.probe(store.resolveAsset(root,p.id,result.asset.id));
+   assert.ok(Math.abs(info.duration-1.5)<.15,style+' dura '+info.duration);
+   assert.equal(info.width,1080,style+' a resolución completa');
+   assert.match(result.asset.name,new RegExp('-'+style+'\\.mp4$'));
+  }
+ }finally{
+  if(previous===undefined)delete process.env.RECORDS_SUBJECT_MODEL;else process.env.RECORDS_SUBJECT_MODEL=previous;
+  fs.rmSync(root,{recursive:true,force:true});
+ }
 });
