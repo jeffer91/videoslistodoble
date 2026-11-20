@@ -57,7 +57,7 @@
   if(!p)return home();
   const tags=C.tagsOf(p),script=C.normalizeScript(p.script),stage=C.deriveStage(p),inWeeks=compilationsOf(p.id);
   const words=C.SCRIPT_PARTS.map(part=>script[part]).join(' ').trim().split(/\s+/).filter(Boolean).length;
-  return titlebar('Ficha del récord','Guion, etiquetas y etapa. El guion aparece en el prompter al grabar.',btn('home','← Mis récords','secondary')+btn('card-save','Guardar ficha')+btn('card-go-editor','Grabar y editar →')+btn('studio-editing','Transcripción y plan','secondary')+btn('record-recovery','Recuperar toma','secondary'))+
+  return titlebar('Ficha del récord','Guion, etiquetas y etapa. El guion aparece en el prompter al grabar.',btn('home','← Mis récords','secondary')+btn('card-save','Guardar ficha')+((p.exports||[]).length?btn('delivery-open','Revisar Short exportado','','data-kind="short" data-id="'+esc(p.id)+'" data-file="'+esc(String(p.exports.at(-1).file).split(/[\\/]/).pop())+'"'):'')+btn('card-go-editor','Grabar y editar →')+btn('studio-editing','Transcripción y plan','secondary')+btn('record-recovery','Recuperar toma','secondary'))+
    '<div class="card-layout"><section>'+
    '<div class="panel"><div class="field"><label for="card-title">Título del récord</label><input id="card-title" maxlength="120" value="'+esc(p.title)+'"></div>'+
    '<div class="two"><div class="field"><label for="card-stage">Etapa</label><select id="card-stage">'+C.STAGES.map(s=>'<option value="'+s+'" '+(stage===s?'selected':'')+'>'+esc(C.STAGE_LABELS[s])+'</option>').join('')+'</select></div>'+
@@ -68,13 +68,14 @@
    C.SCRIPT_PARTS.map(part=>'<div class="field"><label for="card-script-'+part+'">'+SCENE_LABELS[part]+'</label><textarea id="card-script-'+part+'" class="script-area" data-script="'+part+'" rows="'+(part==='body'?9:4)+'" placeholder="'+(part==='hook'?'La frase que detiene el dedo en los primeros 2 segundos':part==='body'?'El récord, la cifra exacta y el contexto':'Pregunta final y «síguenos»')+'">'+esc(script[part])+'</textarea></div>').join('')+
    '<div class="row wrap">'+btn('card-paste-script','Pegar guion completo','secondary')+btn('studio-script-import','Importar guion y etiquetas','secondary')+'<span class="muted mini">Reconoce los encabezados GANCHO, DESARROLLO y CIERRE.</span></div></div>'+
    '</section><section>'+
+   StudioWorkflow.projectDeliveries(p)+
    '<div class="panel"><h2>Etiquetas</h2><p class="muted mini">Separa con comas. Sirven para buscar y para armar videos por categoría.</p>'+
    C.TAG_FIELDS.map(field=>'<div class="field"><label for="card-tag-'+field+'">'+esc(C.TAG_LABELS[field])+'</label><input id="card-tag-'+field+'" data-tagfield="'+field+'" list="taglist-'+field+'" value="'+esc(tags[field].join(', '))+'" placeholder="'+esc({jugadores:'Lamine Yamal, Lionel Messi',clubes:'Barcelona',selecciones:'España',estadios:'Santiago Bernabéu',competiciones:'Champions League',tipos:'Más joven, goleador, racha'}[field])+'"></div>').join('')+
    C.TAG_FIELDS.map(field=>'<datalist id="taglist-'+field+'">'+C.tagIndex(visibleProjects())[field].map(v=>'<option value="'+esc(v.value)+'">').join('')+'</datalist>').join('')+'</div>'+
    '<div class="panel"><h2>Notas y fuentes</h2><div class="field"><textarea id="card-notes" rows="4" placeholder="Enlaces, cifras por verificar, ideas para el gráfico…">'+esc(p.notes||'')+'</textarea></div></div>'+
    '<div class="panel"><h2>Aparece en</h2>'+(inWeeks.length?'<div class="list">'+inWeeks.map(w=>'<div class="asset"><span><strong>'+esc(w.title)+'</strong> <small>· '+(w.kind==='category'?'Por categoría':'Semanal')+(w.exportedAt?' · exportada':'')+'</small></span>'+btn('open-week','Abrir','secondary','data-id="'+esc(w.id)+'"')+'</div>').join('')+'</div>':'<p class="muted">Todavía no está en ningún video largo.</p>')+
    '<p class="muted mini">Un récord puede salir en la compilación semanal y también en videos por categoría.</p></div>'+
-   StudioWorkflow.projectDeliveries(p)+'</section></div>';
+   '</section></div>';
  }
  function readCard(){
   const p=state.project;if(!p)throw Error('Abre un récord');

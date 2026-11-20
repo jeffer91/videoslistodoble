@@ -42,6 +42,37 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
   const update = { status: 'disponible en una instalación publicada', message: '', installed: app.getVersion(), available: '' };
   let updater;
 
+  /** Videos terminados para Inicio: última exportación, si está aprobada y en qué redes salió. */
+  function homeOutputs() {
+    const jobs = publishing.jobsRaw();
+    const list = [];
+    const add = (kind, id, title, files, updatedAt) => {
+      const file = files.filter(Boolean).at(-1);
+      if (!file) return;
+      const target = { kind, id, file: path.basename(file) };
+      let entry = null;
+      try { entry = delivery.entryFor(root, target); } catch { return; }
+      const networks = {};
+      for (const job of jobs.filter(item => item.target.kind === kind && item.target.id === id && item.status !== 'cancelado')) {
+        const rank = { publicado: 3, procesando: 2, enviando: 2, pendiente: 1, programado: 1, revisar: 0, fallo: 0 };
+        if (!networks[job.network] || (rank[job.status] ?? 0) > (rank[networks[job.network].status] ?? 0)) {
+          networks[job.network] = { status: job.status, url: job.url || null, dueAt: job.dueAt };
+        }
+      }
+      let exportedAt = updatedAt;
+      try { exportedAt = new Date(fs.statSync(delivery.resolveOutput(root, target)).mtimeMs).toISOString(); } catch { /* sin fecha */ }
+      list.push({ kind, id, title, file: target.file, exportedAt, versions: files.length,
+        duration: entry.quality?.duration ?? null, checked: Boolean(entry.quality), qualityOk: entry.quality?.ok === true,
+        approved: Boolean(entry.approval), networks });
+    };
+    for (const project of store.listProjects(root)) {
+      if (project.status === 'auxiliary' || !project.exports?.length) continue;
+      add('short', project.id, project.title, project.exports.map(item => item.file), project.updatedAt);
+    }
+    for (const week of store.listWeeks(root)) add('week', week.id, week.title, week.outputs || [], week.updatedAt);
+    return list.sort((a, b) => String(b.exportedAt).localeCompare(String(a.exportedAt))).slice(0, 24);
+  }
+
   function getUpdater() {
     if (updater) return updater;
     if (!app.isPackaged || process.platform !== 'win32') throw Error('Las actualizaciones requieren el instalador de Windows');
@@ -82,7 +113,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
   }
 
   const handlers = {
-    'home': () => production.compilationReadiness(root),
+    'home': () => ({ ...production.compilationReadiness(root), outputs: homeOutputs() }),
     'idea.list': () => production.listIdeas(root),
     'idea.add': ({ value }) => production.addIdeas(root, value),
     'idea.import': async () => {
