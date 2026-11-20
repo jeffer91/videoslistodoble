@@ -90,13 +90,13 @@ Cada lectura (API o navegador) guarda una **foto diaria por red** con seguidores
 
 ### Copia en Firebase
 
-**Estadísticas → Conexiones → Base de datos en la nube** sube una copia a Firebase Realtime Database después de cada lectura:
+**Estadísticas → Conexiones → Base de datos en la nube** sube una copia a Firebase Realtime Database después de cada lectura, **sin cuentas ni inicio de sesión**:
 
-1. En Firebase → Authentication, habilita **Correo electrónico/contraseña**.
-2. En Realtime Database → Reglas, pega las reglas que muestra Studio (solo tu usuario puede leer y escribir `users/<uid>`). Las reglas de «modo de prueba» dejan la base abierta a cualquiera.
-3. Pega el bloque `firebaseConfig` de la consola, escribe correo y contraseña y pulsa **Crear cuenta y conectar**.
+1. Pega el bloque `firebaseConfig` de la consola de Firebase y pulsa **Conectar Firebase**.
+2. Studio genera una **clave de datos** secreta y guarda todo en `estudios/<clave>`: `videos`, `mediciones` (historial con fecha), `crecimiento` (foto diaria por red) y `cuentas`.
+3. En Realtime Database → Reglas, pega las reglas que muestra Studio y pulsa Publicar. Solo abren la carpeta de tu clave: quien no la conozca no puede leer ni borrar nada. Las reglas del «modo de prueba» vencen a los 30 días y después Firebase rechaza todas las escrituras. Si prefieres la base totalmente abierta, Studio también muestra esas reglas.
 
-La sesión se guarda cifrada en el equipo. Los datos quedan en `users/<uid>/videos`, `mediciones` (historial con fecha), `crecimiento` (foto diaria por red) y `cuentas`. Los datos locales siguen siendo la fuente principal.
+Para usar la misma copia en otro equipo, copia la clave de datos y pégala al conectar. La clave se guarda cifrada en el equipo y los datos locales siguen siendo la fuente principal.
 
 El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
 

@@ -2,7 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const { buildCentral, recordKey, momentum } = require('../backend/insights.cjs');
-const { createCloud, parseConfig, safeKey, RULES } = require('../backend/cloud-sync.cjs');
+const { createCloud, parseConfig, safeKey, rulesFor, OPEN_RULES } = require('../backend/cloud-sync.cjs');
 const { createPublishing } = require('../backend/publishing.cjs');
 const store = require('../backend/store.cjs');
 
@@ -84,64 +84,68 @@ test('la configuración de Firebase se lee del bloque pegado y rechaza direccion
   assert.throws(() => parseConfig('apiKey: "AIzaSyB8zLRktgL_S8EduHcr3KPL_o64S9mTXJo", databaseURL: "https://evil.example.com", projectId: "x1234"'), /Firebase/);
   assert.throws(() => parseConfig('{}'), /apiKey/);
   assert.equal(safeKey('tiktok_a.b#c$d[e]f/g'), 'tiktok_a_b_c_d_e_f_g');
-  assert.match(RULES, /auth.uid === \$uid/);
+  const rules = JSON.parse(rulesFor('clave-secreta-de-prueba-1234'));
+  assert.deepEqual(rules.rules.estudios['clave-secreta-de-prueba-1234'], { '.read': true, '.write': true });
+  assert.equal(rules.rules['.read'], undefined, 'la raíz queda cerrada');
+  assert.equal(JSON.parse(OPEN_RULES).rules['.write'], true);
 });
 
-test('Firebase: inicia sesión, guarda la sesión cifrada y sube solo lo nuevo bajo el usuario', async () => {
+const CONFIG = '{ apiKey: "AIzaSyB8zLRktgL_S8EduHcr3KPL_o64S9mTXJo", databaseURL: "https://videos-f0371-default-rtdb.firebaseio.com", projectId: "videos-f0371" }';
+const DB = 'https://videos-f0371-default-rtdb.firebaseio.com';
+
+test('Firebase sin inicio de sesión: genera una clave, la guarda cifrada y sube solo lo nuevo', async () => {
   const root = tempRoot();
   const calls = [];
   const fakeFetch = async (url, options) => {
-    calls.push({ url, method: options.method, body: options.body ? (options.body.startsWith('{') ? JSON.parse(options.body) : options.body) : null });
-    const reply = data => ({ ok: true, status: 200, text: async () => JSON.stringify(data) });
-    if (url.includes('accounts:signUp')) return reply({ idToken: 'id1', refreshToken: 'refresh1', localId: 'uid42', email: 'a@b.co', expiresIn: '3600' });
-    return reply({});
+    calls.push({ url, method: options.method, body: options.body ? JSON.parse(options.body) : null });
+    return { ok: true, status: 200, text: async () => '{}' };
   };
   try {
     const cloud = createCloud(root, vault, fakeFetch);
-    const config = '{ apiKey: "AIzaSyB8zLRktgL_S8EduHcr3KPL_o64S9mTXJo", databaseURL: "https://videos-f0371-default-rtdb.firebaseio.com", projectId: "videos-f0371" }';
-    const status = await cloud.connect({ config, email: 'a@b.co', password: 'secreto1', create: true });
+    const status = await cloud.connect({ config: CONFIG });
     assert.equal(status.connected, true);
-    assert.equal(status.email, 'a@b.co');
-    const secret = JSON.parse(fs.readFileSync(path.join(root, 'Configuracion', 'nube-secreto.json'), 'utf8'));
-    assert.ok(!JSON.stringify(secret).includes('refresh1'), 'la sesión no se guarda en texto plano');
-    assert.ok(calls.at(-1).url.startsWith('https://videos-f0371-default-rtdb.firebaseio.com/users/uid42/perfil.json?auth=id1'));
+    assert.match(status.key, /^[A-Za-z0-9_-]{32}$/);
+    assert.ok(!calls.some(c => /identitytoolkit|securetoken|auth=/.test(c.url)), 'no usa Authentication');
+    assert.equal(calls[0].url, DB + '/estudios/' + status.key + '/perfil.json');
+    assert.match(status.rules, new RegExp(status.key));
+    const saved = fs.readFileSync(path.join(root, 'Configuracion', 'nube-secreto.json'), 'utf8');
+    assert.ok(!saved.includes(status.key), 'la clave no se guarda en texto plano');
 
     const rows = [{ network: 'tiktok', externalId: '73', title: 'Récord', metrics: { views: 9 }, rawMetrics: { views: '9' },
       history: [{ at: '2026-11-18T10:00:00.000Z', metrics: { views: 5 } }, { at: '2026-11-19T10:00:00.000Z', metrics: { views: 9 } }] }];
     const result = await cloud.sync({ rows, growth: { tiktok: [{ day: '2026-11-19', at: '2026-11-19T10:00:00.000Z', followers: 10 }] }, accounts: {} });
     const sent = calls.at(-1);
     assert.equal(sent.method, 'PATCH');
-    assert.ok(sent.url.startsWith('https://videos-f0371-default-rtdb.firebaseio.com/users/uid42.json?auth='));
+    assert.equal(sent.url, DB + '/estudios/' + status.key + '.json');
     assert.equal(sent.body['videos/tiktok_73'].metrics.views, 9);
     assert.equal(sent.body['videos/tiktok_73'].rawMetrics, undefined);
     assert.ok(sent.body['mediciones/tiktok_73/2026-11-19T10-00-00-000Z']);
     assert.ok(sent.body['crecimiento/tiktok/2026-11-19']);
     assert.ok(result.count > 3);
 
-    // Segunda subida: las mediciones ya enviadas no se repiten.
     rows[0].history.push({ at: new Date(Date.now() + 1000).toISOString(), metrics: { views: 12 } });
     await cloud.sync({ rows, growth: {}, accounts: {} });
-    const second = Object.keys(calls.at(-1).body).filter(k => k.startsWith('mediciones/'));
-    assert.equal(second.length, 1);
+    assert.equal(Object.keys(calls.at(-1).body).filter(k => k.startsWith('mediciones/')).length, 1, 'no repite mediciones');
+
+    // Reconectar al mismo proyecto conserva la clave; otro equipo puede usar la misma clave.
+    assert.equal((await cloud.connect({ config: CONFIG })).key, status.key);
+    const other = createCloud(tempRoot(), vault, fakeFetch);
+    assert.equal((await other.connect({ config: CONFIG, key: status.key })).key, status.key);
+    await assert.rejects(other.connect({ config: CONFIG, key: 'corta' }), /clave de datos/);
     cloud.disconnect();
     assert.equal(cloud.status().connected, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('Firebase explica los errores de reglas y de inicio de sesión', async () => {
+test('si las reglas rechazan el acceso, Studio queda conectado y muestra qué reglas pegar', async () => {
   const root = tempRoot();
   try {
-    const fail = (status, error) => async () => ({ ok: false, status, text: async () => JSON.stringify(error) });
-    const config = 'apiKey: "AIzaSyB8zLRktgL_S8EduHcr3KPL_o64S9mTXJo", databaseURL: "https://x-default-rtdb.firebaseio.com", projectId: "videos-f0371"';
-    await assert.rejects(createCloud(root, vault, fail(400, { error: { message: 'OPERATION_NOT_ALLOWED' } }))
-      .connect({ config, email: 'a@b.co', password: 'secreto1' }), /Authentication/);
-    let first = true;
-    const rules = async url => {
-      if (first) { first = false; return { ok: true, status: 200, text: async () => JSON.stringify({ idToken: 'i', refreshToken: 'r', localId: 'u', expiresIn: '3600' }) }; }
-      return { ok: false, status: 401, text: async () => JSON.stringify({ error: 'Permission denied' }) };
-    };
-    const cloud = createCloud(root, vault, rules);
-    await assert.rejects(cloud.connect({ config, email: 'a@b.co', password: 'secreto1' }), /Reglas/);
-    assert.equal(cloud.status().connected, false, 'no queda a medio conectar');
+    const denied = async () => ({ ok: false, status: 401, text: async () => JSON.stringify({ error: 'Permission denied' }) });
+    const cloud = createCloud(root, vault, denied);
+    await assert.rejects(cloud.connect({ config: CONFIG }), /Reglas/);
+    const status = cloud.status();
+    assert.equal(status.connected, true);
+    assert.match(status.lastError, /Reglas/);
+    assert.match(status.rules, new RegExp(status.key));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

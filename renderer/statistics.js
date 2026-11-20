@@ -460,24 +460,29 @@
   /* ---------- Firebase ---------- */
 
   function cloudPanel() {
-    const rulesBox = '<details class="st-details"' + (cloud.connected ? '' : ' open') + '><summary>Reglas de seguridad para Realtime Database</summary><p class="st-note">Firebase → Realtime Database → Reglas: borra lo que haya, pega esto y pulsa Publicar. Así solo tu usuario puede leer y escribir tus datos.</p>' +
-      '<pre class="st-code">' + esc(cloud.rules || '') + '</pre>' + action('st-copy-rules', 'Copiar reglas', '') + '</details>';
+    const rules = (title, body, id) => '<pre class="st-code">' + esc(body) + '</pre>' + action('st-copy-rules', title, id);
+    const head = '<section class="panel st-panel st-cloud"><div class="row between wrap"><h2>Base de datos en la nube · Firebase</h2>';
     if (cloud.connected) {
-      return '<section class="panel st-panel st-cloud"><div class="row between wrap"><h2>Base de datos en la nube · Firebase</h2><span class="st-status on">Conectada</span></div>' +
-        '<p>' + esc(cloud.email) + ' <small>· proyecto ' + esc(cloud.projectId) + '</small></p>' +
-        '<p class="st-note">Última copia: ' + esc(cloud.lastSyncAt ? moment(cloud.lastSyncAt) : 'pendiente') + (cloud.lastCount ? ' · ' + number(cloud.lastCount) + ' datos enviados' : '') + '. Studio sube los datos solo después de cada lectura.</p>' +
+      return head + '<span class="st-status ' + (cloud.lastError ? 'warn' : 'on') + '">' + (cloud.lastError ? 'Revisa las reglas' : 'Conectada') + '</span></div>' +
+        '<p>Proyecto <strong>' + esc(cloud.projectId) + '</strong> · sin cuentas ni inicio de sesión.</p>' +
+        '<p class="st-note">Última copia: ' + esc(cloud.lastSyncAt ? moment(cloud.lastSyncAt) : 'pendiente') + (cloud.lastCount ? ' · ' + number(cloud.lastCount) + ' datos enviados' : '') +
+        '. Studio sube los datos solo después de cada lectura.</p>' +
         (cloud.lastError ? '<p class="st-error">' + esc(cloud.lastError) + '</p>' : '') +
-        '<div class="row wrap">' + action('st-cloud-sync', 'Subir ahora', '', '') + action('st-cloud-off', 'Desconectar', '', 'outline') + '</div>' + rulesBox + '</section>';
+        '<div class="row wrap">' + action('st-cloud-sync', 'Subir ahora', '', '') + action('st-cloud-off', 'Desconectar', '', 'outline') + '</div>' +
+        '<details class="st-details" open><summary>Reglas de Realtime Database (pégalas antes del 19 de diciembre)</summary>' +
+        '<p class="st-note">Tus reglas de prueba vencen el 19 de diciembre de 2026 y después Firebase rechaza todo. En Realtime Database → Reglas, borra lo que haya, pega estas y pulsa Publicar. ' +
+        'Solo abren la carpeta de tu clave: no hace falta iniciar sesión y nadie que no la conozca puede leer ni borrar tus datos.</p>' +
+        rules('Copiar reglas recomendadas', cloud.rules, 'key') +
+        '<details class="st-details"><summary>Prefiero la base totalmente abierta</summary><p class="st-note">Cualquiera que conozca la dirección de tu base podrá leer, cambiar o borrar todo. Úsala solo si no te importa.</p>' +
+        rules('Copiar reglas abiertas', cloud.openRules, 'open') + '</details></details>' +
+        '<details class="st-details"><summary>Clave de datos (para usar la misma copia en otro equipo)</summary><p class="st-note">Guárdala en un lugar seguro: quien la tenga puede ver tus datos.</p>' +
+        '<pre class="st-code">' + esc(cloud.key) + '</pre>' + action('st-copy-key', 'Copiar clave', '') + '</details></section>';
     }
-    return '<section class="panel st-panel st-cloud"><div class="row between wrap"><h2>Base de datos en la nube · Firebase</h2><span class="st-status off">Sin conectar</span></div>' +
-      '<p class="st-note">Guarda una copia de todas tus estadísticas e historial en tu Realtime Database, protegida con tu usuario.</p>' +
-      '<ol class="st-steps st-steps-compact">' +
-      '<li><span class="st-step-n">1</span><div><h4>Activa el inicio de sesión por correo</h4><p>Firebase → Authentication → Comenzar → Método de acceso → Correo electrónico/contraseña → Habilitar.</p></div></li>' +
-      '<li><span class="st-step-n">2</span><div><h4>Protege la base de datos</h4><p>Tus reglas actuales dejan la base abierta a cualquiera. Reemplázalas por estas:</p>' + rulesBox + '</div></li>' +
-      '<li class="st-step-final"><span class="st-step-n">3</span><div><h4>Conecta Studio</h4>' +
-      field('Configuración de Firebase (pega el bloque firebaseConfig completo)', '<textarea id="st-fb-config" rows="5" spellcheck="false" placeholder="const firebaseConfig = { apiKey: ..., databaseURL: ..., projectId: ... }"></textarea>') +
-      '<div class="st-form-grid">' + text('st-fb-email', 'Correo') + secret('st-fb-pass', 'Contraseña (mínimo 6 caracteres)') + '</div>' +
-      '<div class="row wrap">' + action('st-cloud-connect', 'Crear cuenta y conectar', 'create', '') + action('st-cloud-connect', 'Ya tengo cuenta: iniciar sesión', 'login') + '</div></div></li></ol></section>';
+    return head + '<span class="st-status off">Sin conectar</span></div>' +
+      '<p class="st-note">Guarda una copia de todas tus estadísticas e historial en tu Realtime Database. Sin cuentas ni inicio de sesión: solo pega la configuración.</p>' +
+      field('Configuración de Firebase (pega el bloque firebaseConfig completo)', '<textarea id="st-fb-config" rows="6" spellcheck="false" placeholder="const firebaseConfig = { apiKey: ..., databaseURL: ..., projectId: ... }"></textarea>') +
+      '<details class="st-details"><summary>Ya tengo una clave de datos de otro equipo</summary>' + text('st-fb-key', 'Clave de datos') + '</details>' +
+      '<div class="row wrap st-gap">' + action('st-cloud-connect', 'Conectar Firebase', '', '') + '</div></section>';
   }
 
   /* ---------- Videos ---------- */
@@ -873,21 +878,27 @@
     }
     if (name === 'st-reader-clear') { reader = null; return render(); }
     if (name === 'st-growth') { growthMetric = id; return render(); }
-    if (name === 'st-copy-rules') {
-      try { await navigator.clipboard.writeText(cloud.rules); }
-      catch { return notice('No se pudo copiar: selecciona el texto de las reglas y cópialo a mano.', true); }
-      return notice('Reglas copiadas. Pégalas en Firebase → Realtime Database → Reglas y pulsa Publicar.');
+    if (name === 'st-copy-rules' || name === 'st-copy-key') {
+      const content = name === 'st-copy-key' ? cloud.key : id === 'open' ? cloud.openRules : cloud.rules;
+      try { await navigator.clipboard.writeText(content); }
+      catch { return notice('No se pudo copiar: selecciona el texto y cópialo a mano.', true); }
+      return notice(name === 'st-copy-key' ? 'Clave copiada.' : 'Reglas copiadas. Pégalas en Firebase → Realtime Database → Reglas y pulsa Publicar.');
     }
     if (name === 'st-cloud-connect') {
       element.disabled = true;
-      const label = element.textContent;
       element.textContent = 'Conectando…';
       try {
-        cloud = await flow('cloud.connect', { config: $('#st-fb-config')?.value || '', email: value('st-fb-email'),
-          password: $('#st-fb-pass')?.value || '', create: id === 'create' });
+        cloud = await flow('cloud.connect', { config: $('#st-fb-config')?.value || '', key: value('st-fb-key') });
         notice(cloud.lastError ? 'Conectado, pero la primera copia falló: ' + cloud.lastError : 'Firebase conectado. Tus estadísticas ya están en la nube.', Boolean(cloud.lastError));
-        return render();
-      } finally { element.disabled = false; element.textContent = label; }
+      } catch (error) {
+        cloud = await flow('cloud.status');
+        notice(error.message, true);
+      } finally {
+        element.disabled = false;
+        element.textContent = 'Conectar Firebase';
+        render();
+      }
+      return;
     }
     if (name === 'st-cloud-sync') {
       element.disabled = true;

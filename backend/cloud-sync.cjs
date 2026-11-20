@@ -1,45 +1,28 @@
 'use strict';
 /**
- * Copia en la nube de las estadísticas: Firebase Realtime Database.
+ * Copia en la nube de las estadísticas: Firebase Realtime Database, sin cuentas
+ * ni inicio de sesión.
  *
- * - Studio inicia sesión con correo y contraseña (Firebase Authentication, API REST).
- * - Cada dato se guarda bajo users/<uid>, y las reglas solo permiten leer o
- *   escribir a ese mismo usuario.
- * - Los datos locales siguen siendo la fuente principal: la nube es copia y
- *   punto de consulta desde otros equipos.
+ * - Basta con pegar la configuración del proyecto.
+ * - Studio genera una clave de datos secreta y guarda todo en estudios/<clave>.
+ * - Las reglas recomendadas solo abren esa ruta: quien no conozca la clave no
+ *   puede leer ni borrar nada. Se puede usar la misma clave en otro equipo.
+ * - Los datos locales siguen siendo la fuente principal: la nube es copia.
  */
+const { randomBytes } = require('node:crypto');
 const production = require('./production.cjs');
 
 const STATE = 'nube';
 const SECRET = 'nube-secreto';
 const TIMEOUT = 30000;
 const BATCH = 1500;
+const KEY = /^[A-Za-z0-9_-]{24,64}$/;
 
-const RULES = JSON.stringify({
-  rules: {
-    users: {
-      $uid: {
-        '.read': 'auth != null && auth.uid === $uid',
-        '.write': 'auth != null && auth.uid === $uid'
-      }
-    }
-  }
-}, null, 2);
-
-const AUTH_ERRORS = {
-  EMAIL_NOT_FOUND: 'No existe una cuenta con ese correo. Usa «Crear cuenta».',
-  INVALID_PASSWORD: 'La contraseña no es correcta.',
-  INVALID_LOGIN_CREDENTIALS: 'Correo o contraseña incorrectos.',
-  EMAIL_EXISTS: 'Ya existe una cuenta con ese correo. Usa «Iniciar sesión».',
-  OPERATION_NOT_ALLOWED: 'Activa el acceso con correo y contraseña en Firebase → Authentication → Método de acceso.',
-  CONFIGURATION_NOT_FOUND: 'Activa Firebase Authentication en tu proyecto y habilita «Correo electrónico/contraseña».',
-  WEAK_PASSWORD: 'La contraseña debe tener al menos 6 caracteres.',
-  INVALID_EMAIL: 'El correo no es válido.',
-  TOO_MANY_ATTEMPTS_TRY_LATER: 'Demasiados intentos. Espera unos minutos.',
-  USER_DISABLED: 'Esta cuenta está desactivada en Firebase.',
-  TOKEN_EXPIRED: 'La sesión venció. Vuelve a iniciar sesión.',
-  INVALID_REFRESH_TOKEN: 'La sesión venció. Vuelve a iniciar sesión.'
-};
+/** Reglas que solo abren la carpeta de esta clave; el resto queda cerrado. */
+function rulesFor(key) {
+  return JSON.stringify({ rules: { estudios: { [key || 'TU_CLAVE']: { '.read': true, '.write': true } } } }, null, 2);
+}
+const OPEN_RULES = JSON.stringify({ rules: { '.read': true, '.write': true } }, null, 2);
 
 /** Lee apiKey, databaseURL y projectId del bloque firebaseConfig pegado tal cual. */
 function parseConfig(input) {
@@ -77,95 +60,81 @@ function clean(value) {
 }
 
 function createCloud(root, vault, fetchImpl = globalThis.fetch) {
-  const state = () => production.readState(root, STATE, {});
+  const state = () => production.readState(root, STATE, {}) || {};
   const save = patch => production.writeState(root, STATE, { ...state(), ...patch });
-  let session = null;
   let syncing = null;
 
-  async function call(url, { method = 'GET', body, form } = {}) {
+  async function call(url, { method = 'GET', body } = {}) {
     const response = await fetchImpl(url, {
       method, signal: AbortSignal.timeout(TIMEOUT),
-      headers: form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : body ? { 'Content-Type': 'application/json' } : {},
-      body: form ? new URLSearchParams(form).toString() : body === undefined ? undefined : JSON.stringify(body)
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body)
     });
     const text = await response.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text.slice(0, 200) }; }
     if (!response.ok) {
-      const code = String(data?.error?.message || data?.error || '').split(/[ :]/)[0];
-      if (response.status === 401 || /permission denied/i.test(String(data?.error))) {
-        throw Error('Firebase rechazó el acceso. Pega en Realtime Database → Reglas las reglas que muestra Studio.');
+      if (response.status === 401 || response.status === 403 || /permission denied/i.test(String(data?.error))) {
+        throw Error('Firebase rechazó el acceso: pega en Realtime Database → Reglas las reglas que muestra Studio y pulsa Publicar.');
       }
-      if (/^404/.test(String(response.status)) && /firebaseio|firebasedatabase/.test(url)) throw Error('No se encontró la Realtime Database del proyecto');
-      throw Error(AUTH_ERRORS[code] || 'Firebase respondió ' + response.status + (code ? ' · ' + code : ''));
+      if (response.status === 404) throw Error('No se encontró la Realtime Database del proyecto. Revisa databaseURL.');
+      throw Error('Firebase respondió ' + response.status + (data?.error ? ' · ' + String(data.error).slice(0, 120) : ''));
     }
     return data;
   }
 
-  function storeSecret(refreshToken) {
-    if (!vault.isEncryptionAvailable()) throw Error('El sistema no ofrece cifrado seguro para guardar la sesión');
-    production.writeState(root, SECRET, { cipher: vault.encryptString(refreshToken).toString('base64') });
+  function storeKey(key) {
+    const cipher = vault.isEncryptionAvailable() ? vault.encryptString(key).toString('base64') : null;
+    production.writeState(root, SECRET, cipher ? { cipher } : { plain: key });
   }
 
-  function readSecret() {
+  function dataKey() {
     const saved = production.readState(root, SECRET, null);
-    if (!saved?.cipher) throw Error('Conecta Firebase en Estadísticas → Conexiones');
+    if (!saved) throw Error('Conecta Firebase en Estadísticas → Conexiones');
+    if (saved.plain) return saved.plain;
     try { return vault.decryptString(Buffer.from(saved.cipher, 'base64')); }
-    catch { throw Error('La sesión de Firebase está cifrada para otro equipo. Vuelve a iniciar sesión.'); }
-  }
-
-  async function token() {
-    const current = state();
-    if (!current.uid) throw Error('Conecta Firebase en Estadísticas → Conexiones');
-    if (session && session.expires - Date.now() > 120000) return session.idToken;
-    const data = await call('https://securetoken.googleapis.com/v1/token?key=' + encodeURIComponent(current.apiKey),
-      { method: 'POST', form: { grant_type: 'refresh_token', refresh_token: readSecret() } });
-    if (data.user_id !== current.uid) throw Error('La sesión de Firebase pertenece a otro usuario');
-    if (data.refresh_token) storeSecret(data.refresh_token);
-    session = { idToken: data.id_token, expires: Date.now() + Number(data.expires_in || 3600) * 1000 };
-    return session.idToken;
+    catch { throw Error('La clave de Firebase está cifrada para otro equipo. Conéctalo de nuevo con tu clave de datos.'); }
   }
 
   async function write(path, value, method = 'PATCH') {
-    const { databaseURL, uid } = state();
-    const url = databaseURL + '/users/' + encodeURIComponent(uid) + (path ? '/' + path : '') + '.json?auth=' + encodeURIComponent(await token());
-    return call(url, { method, body: value });
+    const { databaseURL } = state();
+    return call(databaseURL + '/estudios/' + dataKey() + (path ? '/' + path : '') + '.json', { method, body: value });
   }
 
-  async function connect({ config, email, password, create }) {
+  /** Conecta con la configuración pegada. Sin cuentas: la clave identifica tus datos. */
+  async function connect({ config, key }) {
     const parsed = parseConfig(config);
-    email = String(email || '').trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Error('Escribe un correo válido');
-    if (String(password || '').length < 6) throw Error('La contraseña debe tener al menos 6 caracteres');
-    const endpoint = create ? 'accounts:signUp' : 'accounts:signInWithPassword';
-    const data = await call('https://identitytoolkit.googleapis.com/v1/' + endpoint + '?key=' + encodeURIComponent(parsed.apiKey),
-      { method: 'POST', body: { email, password, returnSecureToken: true } });
-    storeSecret(data.refreshToken);
-    production.writeState(root, STATE, { ...parsed, email: data.email || email, uid: data.localId, connectedAt: new Date().toISOString(),
-      lastSyncAt: null, lastError: '' });
-    session = { idToken: data.idToken, expires: Date.now() + Number(data.expiresIn || 3600) * 1000 };
-    // Comprueba en el momento que las reglas permiten escribir en la carpeta del usuario.
+    key = String(key || '').trim();
+    if (key && !KEY.test(key)) throw Error('La clave de datos debe tener entre 24 y 64 letras, números, - o _');
+    const previous = state();
+    let reuse = '';
+    try { reuse = previous.databaseURL === parsed.databaseURL ? dataKey() : ''; } catch { reuse = ''; }
+    const chosen = key || reuse || randomBytes(24).toString('base64url');
+    storeKey(chosen);
+    production.writeState(root, STATE, { ...parsed, connectedAt: new Date().toISOString(), lastSyncAt: null, lastError: '' });
     try {
-      await write('perfil', { app: '11 Récords Studio', email: data.email || email, conectado: new Date().toISOString() });
+      // Comprueba en el momento que las reglas permiten escribir en la carpeta.
+      await write('perfil', { app: '11 Récords Studio', conectado: new Date().toISOString() });
     } catch (error) {
-      disconnect();
+      save({ lastError: String(error.message).slice(0, 300) });
       throw error;
     }
     return status();
   }
 
   function disconnect() {
-    session = null;
     production.writeState(root, SECRET, null);
     production.writeState(root, STATE, {});
     return status();
   }
 
   function status() {
-    const { email, projectId, databaseURL, lastSyncAt, lastError, lastCount, connectedAt } = state();
-    return { connected: Boolean(email && databaseURL && production.readState(root, SECRET, null)?.cipher),
-      email: email || '', projectId: projectId || '', databaseURL: databaseURL || '', lastSyncAt: lastSyncAt || null,
-      lastError: lastError || '', lastCount: lastCount || 0, connectedAt: connectedAt || null, syncing: Boolean(syncing), rules: RULES };
+    const { projectId, databaseURL, lastSyncAt, lastError, lastCount, connectedAt } = state();
+    let key = '';
+    try { key = databaseURL ? dataKey() : ''; } catch { key = ''; }
+    return { connected: Boolean(databaseURL && key), projectId: projectId || '', databaseURL: databaseURL || '', key,
+      lastSyncAt: lastSyncAt || null, lastError: lastError || '', lastCount: lastCount || 0, connectedAt: connectedAt || null,
+      syncing: Boolean(syncing), rules: rulesFor(key), openRules: OPEN_RULES };
   }
 
   /** Construye la actualización: videos (última cifra), mediciones nuevas, cuentas y crecimiento. */
@@ -216,7 +185,7 @@ function createCloud(root, vault, fetchImpl = globalThis.fetch) {
     return syncing;
   }
 
-  return { connect, disconnect, status, sync, rules: () => RULES };
+  return { connect, disconnect, status, sync };
 }
 
-module.exports = { createCloud, parseConfig, safeKey, RULES };
+module.exports = { createCloud, parseConfig, safeKey, rulesFor, OPEN_RULES };
