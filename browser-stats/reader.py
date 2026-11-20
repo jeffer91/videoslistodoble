@@ -67,12 +67,16 @@ def scan(page, network):
             page.mouse.wheel(0, 1400)
         page.wait_for_timeout(1000)
         idle = 0 if fresh else idle + 1
+        if fresh:
+            emit(stage="listing", found=len(discovered))
         if idle >= 3:
             break
 
     details = page.context.new_page()
     missing = 0
-    for key, row in discovered.items():
+    total = len(discovered)
+    for index, (key, row) in enumerate(discovered.items(), start=1):
+        emit(stage="details", index=index, total=total)
         url = row["url"]
         if network == "youtube":
             url = f"https://studio.youtube.com/video/{key}/analytics/tab-overview/period-lifetime"
@@ -122,6 +126,10 @@ def main():
         try:
             page = context.pages[0]
             page.goto(START[network], wait_until="commit", timeout=60000)
+            try:
+                page.bring_to_front()
+            except BrowserError:
+                pass
             emit(ready=True)
             if sys.stdin.readline().strip() == "scan":
                 scan(context.pages[-1], network)

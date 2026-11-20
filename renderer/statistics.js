@@ -33,6 +33,7 @@
 
   const view = { tab: 'summary', network: '', format: '', period: '', tag: '', search: '', sort: 'publishedAt', desc: true };
   let rows = [], status = {}, accounts = {}, loaded = false;
+  let reader = null, readerTimer = null, readerSeen = '';
 
   const flow = (action, data) => StudioWorkflow.flow(action, data);
 
@@ -132,10 +133,11 @@
   /* ---------- datos ---------- */
 
   async function load() {
-    [rows, status, accounts] = await Promise.all([
-      flow('statistics.list'), flow('statistics.status'), flow('statistics.accounts')
+    [rows, status, accounts, reader] = await Promise.all([
+      flow('statistics.list'), flow('statistics.status'), flow('statistics.accounts'), flow('statistics.browser.state')
     ]);
     loaded = true;
+    if (reader && !reader.finished) watchReader();
   }
 
   function filtered({ ignoreFormat = false } = {}) {
@@ -167,7 +169,8 @@
     const tabs = '<nav class="st-tabs" role="tablist">' + TABS.map(([id, label]) =>
       '<button role="tab" data-action="st-tab" data-id="' + id + '" class="st-tab' + (view.tab === id ? ' active' : '') +
       '" aria-selected="' + (view.tab === id) + '">' + esc(label) +
-      (id === 'connections' ? ' <small>' + connectedCount() + '/4</small>' : '') + '</button>').join('') + '</nav>';
+      (id === 'connections' ? ' <small>' + connectedCount() + '/4</small>' : '') +
+      (id === 'browser' && reader && !reader.finished ? ' <small class="st-live">en curso</small>' : '') + '</button>').join('') + '</nav>';
     const body = view.tab === 'videos' ? videosTab() : view.tab === 'connections' ? connectionsTab()
       : view.tab === 'browser' ? browserTab() : summaryTab();
     return '<div class="st">' + header + syncBar() + tabs + body + '</div>';
@@ -549,16 +552,83 @@
     tiktok: 'Abre TikTok Studio → Contenido y baja hasta tus publicaciones más antiguas.'
   };
 
+  const READER_STEPS = [['preparing', 'Preparar'], ['opening', 'Abrir navegador'], ['ready', 'Iniciar sesión'], ['listing', 'Leer listado'], ['details', 'Leer cifras']];
+
+  function readerStep(stage) {
+    if (stage === 'python' || stage === 'playwright') return 0;
+    const index = READER_STEPS.findIndex(([id]) => id === stage);
+    return index < 0 ? READER_STEPS.length : index;
+  }
+
+  function readerPanel() {
+    if (!reader) return '';
+    const name = NETWORKS[reader.network]?.name || reader.network;
+    if (reader.stage === 'done') {
+      return '<section class="st-reader st-reader-ok"><h2>Lectura de ' + esc(name) + ' terminada</h2><p>' + number(reader.result?.count) +
+        ' videos con cifras' + (reader.result?.missing ? ' · ' + number(reader.result.missing) + ' identificados sin cifras' : '') + '.</p>' +
+        '<div class="row wrap">' + action('st-tab', 'Ver videos', 'videos', '') + action('st-reader-clear', 'Cerrar aviso', '') + '</div></section>';
+    }
+    if (reader.stage === 'error' || reader.stage === 'canceled') {
+      return '<section class="st-reader st-reader-bad"><h2>' + (reader.stage === 'canceled' ? 'Lectura cancelada' : 'La lectura de ' + esc(name) + ' no terminó') + '</h2>' +
+        (reader.error && reader.stage === 'error' ? '<p>' + esc(reader.error) + '</p>' : '') +
+        '<div class="row wrap">' + action('st-browser', 'Intentar de nuevo', reader.network, '') + action('st-reader-clear', 'Cerrar aviso', '') + '</div></section>';
+    }
+    const current = readerStep(reader.stage);
+    const steps = '<ol class="st-reader-steps">' + READER_STEPS.map(([, label], i) =>
+      '<li class="' + (i < current ? 'done' : i === current ? 'now' : '') + '">' + esc(label) + '</li>').join('') + '</ol>';
+    let body;
+    if (reader.stage === 'ready') {
+      body = '<p class="st-reader-big">El navegador está abierto. Si no lo ves, búscalo en la barra de tareas.</p>' +
+        '<ol class="st-plain"><li>Inicia sesión y elige la cuenta correcta.</li><li>' + esc(BROWSER_TIPS[reader.network]) + '</li>' +
+        '<li>Selecciona todo el período disponible y vuelve aquí.</li></ol>' +
+        '<div class="row wrap">' + action('st-reader-scan', 'Leer videos', '', '') + action('st-reader-stop', 'Cancelar', '') + '</div>';
+    } else {
+      const detail = reader.stage === 'details' && reader.total
+        ? 'Video ' + number(reader.index) + ' de ' + number(reader.total) + ' · ' + number(reader.count) + ' con cifras'
+        : reader.stage === 'listing' ? number(reader.found) + ' videos encontrados' : '';
+      const progress = reader.stage === 'details' && reader.total
+        ? '<div class="st-bar"><div style="width:' + (100 * reader.index / reader.total).toFixed(1) + '%"></div></div>' : '<div class="st-bar st-bar-busy"><div></div></div>';
+      body = '<p class="st-reader-big">' + esc(reader.message || 'Trabajando…') + '</p>' + progress +
+        (detail ? '<p class="st-note">' + esc(detail) + '</p>' : '') +
+        (reader.stage === 'python' || reader.stage === 'playwright' ? '<p class="st-note">Puede tardar unos minutos según tu conexión. Solo ocurre la primera vez.</p>' : '') +
+        '<div class="row wrap">' + action('st-reader-stop', 'Cancelar', '') + '</div>';
+    }
+    return '<section class="st-reader"><h2>Lector de ' + esc(name) + '</h2>' + steps + body + '</section>';
+  }
+
+  function watchReader() {
+    clearInterval(readerTimer);
+    readerTimer = setInterval(async () => {
+      try {
+        reader = await flow('statistics.browser.state');
+      } catch { return; }
+      const signature = JSON.stringify(reader);
+      if (signature === readerSeen) return;
+      readerSeen = signature;
+      if (!reader || reader.finished) {
+        clearInterval(readerTimer);
+        readerTimer = null;
+        rows = await flow('statistics.list');
+        if (reader?.stage === 'done') notice('Lectura terminada: ' + reader.result.count + ' videos con cifras', !reader.result.count);
+        if (reader?.stage === 'error') notice(reader.error, true);
+      }
+      if (state.page === 'statistics') render();
+    }, 900);
+  }
+
   function browserTab() {
-    return '<p class="st-lead">Úsalo para completar lo que la API no entrega (por ejemplo, el tiempo visto en TikTok) o mientras conectas tus cuentas. ' +
+    const busy = reader && !reader.finished;
+    return readerPanel() +
+      '<p class="st-lead">Úsalo para completar lo que la API no entrega (por ejemplo, el tiempo visto en TikTok) o mientras conectas tus cuentas. ' +
       'Se abre un navegador propio de Studio, inicias sesión una vez y la sesión queda guardada por red.</p>' +
       '<div class="st-connections">' + Object.entries(NETWORKS).map(([id]) =>
         '<article class="st-connection st-' + id + '"><header>' + badge(id) + '</header><p>' + esc(BROWSER_TIPS[id]) + '</p>' +
-        action('st-browser', 'Abrir lector de ' + NETWORKS[id].name, id, '') + '</article>').join('') + '</div>' +
+        action('st-browser', 'Abrir lector de ' + NETWORKS[id].name, id, '') .replace('<button', '<button' + (busy ? ' disabled' : '')) +
+        '</article>').join('') + '</div>' +
       '<section class="panel st-panel"><h2>Cómo funciona</h2><ol class="st-plain">' +
-      '<li>Pulsa el botón de la red: se abre Edge o Chrome con un perfil propio de Studio.</li>' +
+      '<li>Pulsa el botón de la red: se abre Edge o Chrome con un perfil propio de Studio. La primera vez Studio prepara Python y Playwright.</li>' +
       '<li>Inicia sesión, elige la cuenta y abre el listado indicado con todo el período disponible.</li>' +
-      '<li>Vuelve a Studio y pulsa <strong>Leer videos</strong>. Studio recorre la lista y guarda cada cifra con su fecha.</li></ol>' +
+      '<li>Vuelve a Studio y pulsa <strong>Leer videos</strong> en el panel que aparece arriba. Verás el avance video por video.</li></ol>' +
       '<p class="st-note">Si un video ya llegó por API, la lectura se suma a la misma ficha y se indica el origen de cada cifra. Las cifras abreviadas («1,2 K») se guardan con su texto original. Los cambios de diseño de cada red pueden afectar a la lectura.</p></section>';
   }
 
@@ -634,19 +704,18 @@
         btn('system-open-data', 'Abrir archivo', 'secondary', 'data-path="' + esc(file) + '"'));
     }
     if (name === 'st-browser') {
-      const buttons = [...document.querySelectorAll('[data-action="st-browser"]')];
-      buttons.forEach(b => { b.disabled = true; });
-      element.textContent = 'Preparando navegador…';
-      try {
-        const result = await flow('statistics.browser', { network: id });
-        await load();
-        render();
-        if (!result.canceled) notice(result.count + ' videos con cifras · ' + result.missing + ' identificados sin cifras.', !result.count || result.missing > 0);
-      } finally {
-        buttons.forEach(b => { b.disabled = false; });
-        element.textContent = 'Abrir lector de ' + NETWORKS[id].name;
-      }
+      reader = await flow('statistics.browser', { network: id });
+      readerSeen = '';
+      view.tab = 'browser';
+      render();
+      return watchReader();
     }
+    if (name === 'st-reader-scan' || name === 'st-reader-stop') {
+      element.disabled = true;
+      reader = await flow(name === 'st-reader-scan' ? 'statistics.browser.decide' : 'statistics.browser.stop', { scan: true }) || reader;
+      return render();
+    }
+    if (name === 'st-reader-clear') { reader = null; return render(); }
   }
 
   document.addEventListener('click', event => {

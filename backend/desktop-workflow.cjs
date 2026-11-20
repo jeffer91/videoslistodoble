@@ -24,7 +24,7 @@ const GUIDES = Object.freeze({
 
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
   const publishing = createPublishing(root, safeStorage);
-  let browsing = false;
+  let browserSession = null;
   let backupTask = null;
   let oauthTask = null;
   const update = { status: 'disponible en una instalación publicada', message: '', installed: app.getVersion(), available: '' };
@@ -170,18 +170,33 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     },
     'statistics.list': () => publishing.stats(),
     'statistics.refresh': () => publishing.refreshStats(),
-    'statistics.browser': async ({network}) => {
-      if (browsing) throw Error('Ya hay una lectura desde el navegador en curso');
-      browsing=true;
-      try {
-        return await require('./browser-statistics.cjs').readBrowser(app,network,async ()=>{
-          const result=await dialog.showMessageBox(window(),{type:'info',title:'Leer '+network,
-            message:'En el navegador, inicia sesión y abre tu listado de videos o Reels.',
-            detail:'Elige la cuenta correcta y el período completo disponible. Cuando veas tus publicaciones, vuelve aquí y pulsa Leer videos.',
-            buttons:['Leer videos','Cancelar'],cancelId:1,defaultId:0});
-          return result.response===0;
-        },video=>publishing.browserReading(network,video));
-      } finally {browsing=false;}
+    'statistics.browser': ({ network }) => {
+      if (browserSession && !browserSession.finished) throw Error('Ya hay una lectura desde el navegador en curso');
+      let decide;
+      const controller = new AbortController();
+      const session = { id: Date.now(), network, stage: 'preparing', message: 'Preparando el lector…', count: 0,
+        found: 0, index: 0, total: 0, finished: false, result: null, error: '' };
+      const decision = new Promise(resolve => { decide = resolve; });
+      browserSession = { session, decide, controller };
+      require('./browser-statistics.cjs').readBrowser(app, network, () => decision,
+        video => { publishing.browserReading(network, video); },
+        { signal: controller.signal, onStatus: (stage, data) => Object.assign(session, { stage }, data) })
+        .then(result => Object.assign(session, { finished: true, stage: result.canceled ? 'canceled' : 'done', result }))
+        .catch(error => Object.assign(session, { finished: true, stage: controller.signal.aborted ? 'canceled' : 'error',
+          error: String(error?.message || error).slice(0, 400) }));
+      return { ...session };
+    },
+    'statistics.browser.state': () => browserSession ? { ...browserSession.session } : null,
+    'statistics.browser.decide': ({ scan }) => {
+      if (!browserSession || browserSession.session.stage !== 'ready') throw Error('El navegador todavía no está listo');
+      browserSession.decide(scan === true);
+      return { ...browserSession.session };
+    },
+    'statistics.browser.stop': () => {
+      if (!browserSession || browserSession.session.finished) return null;
+      browserSession.decide(false);
+      browserSession.controller.abort();
+      return { ...browserSession.session };
     },
     'statistics.manual': data => publishing.manualStats(data),
     'statistics.export': () => publishing.exportStats(),
