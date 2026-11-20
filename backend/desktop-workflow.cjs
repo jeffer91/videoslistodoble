@@ -214,7 +214,9 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'cloud.disconnect': () => cloud.disconnect(),
     'cloud.sync': async () => { await cloudSync(); return cloud.status(); },
     'statistics.browser': ({ network }) => {
-      if (browserSession && !browserSession.finished) throw Error('Ya hay una lectura desde el navegador en curso');
+      const running = browserSession && !browserSession.session.finished ? browserSession.session : null;
+      if (running && running.network === network) return { ...running };
+      if (running) throw Error('Ya se está leyendo ' + running.network + '. Espera a que termine o pulsa Cancelar en el panel.');
       const controller = new AbortController();
       const session = { id: Date.now(), network, stage: 'preparing', message: 'Preparando el lector…', count: 0,
         found: 0, index: 0, total: 0, finished: false, result: null, error: '' };

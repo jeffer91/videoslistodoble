@@ -865,7 +865,15 @@
         btn('system-open-data', 'Abrir archivo', 'secondary', 'data-path="' + esc(file) + '"'));
     }
     if (name === 'st-browser') {
-      reader = await flow('statistics.browser', { network: id });
+      try { reader = await flow('statistics.browser', { network: id }); }
+      catch (error) {
+        // Muestra la lectura que ya está en marcha para poder seguirla o cancelarla.
+        reader = await flow('statistics.browser.state');
+        view.tab = 'browser';
+        render();
+        if (reader && !reader.finished) watchReader();
+        throw error;
+      }
       readerSeen = '';
       view.tab = 'browser';
       render();

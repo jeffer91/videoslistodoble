@@ -56,16 +56,27 @@
   }
   function extract(scope, detail) {
     const metrics = {}, rawMetrics = {};
+    const parse = (key, raw) => TIME_KEYS.has(key) ? seconds(raw) : PERCENT_KEYS.has(key) ? percent(raw) : count(raw);
     const put = (key, raw) => {
-      const n = TIME_KEYS.has(key) ? seconds(raw) : PERCENT_KEYS.has(key) ? percent(raw) : count(raw);
-      if (n !== null) { metrics[key] = n; rawMetrics[key] = raw.trim(); }
+      if (!raw) return;
+      let n = parse(key, raw), used = raw.trim();
+      // Celdas de varias líneas («100,0 %» y debajo «2 me gusta»): se usa la línea con la cifra de esa métrica.
+      if (n === null && /\n/.test(raw)) {
+        for (const line of raw.split(/\n/).map(text => text.trim()).filter(Boolean)) {
+          if (!PERCENT_KEYS.has(key) && /%/.test(line)) continue;
+          const bare = line.toLowerCase().replace(new RegExp('\\s*(' + names[key].join('|') + ')$'), '').trim();
+          const value = parse(key, bare);
+          if (value !== null) { n = value; used = line; break; }
+        }
+      }
+      if (n !== null) { metrics[key] = n; rawMetrics[key] = used; }
     };
     const fragments = [scope.innerText, ...Array.from(scope.querySelectorAll('[aria-label],[title]'),x=>x.getAttribute('aria-label')||x.title)];
     const table=scope.closest('table,[role="table"],[role="grid"]');
     const headers=table ? [...table.querySelectorAll('th,[role="columnheader"]')].map(h=>h.innerText.trim().toLowerCase()) : [];
     const cells=scope.querySelectorAll('td,[role="cell"],[role="gridcell"]');
     for (const [key, labels] of Object.entries(names)) {
-      const columnIndex=headers.findIndex(h=>labels.includes(h));
+      const columnIndex=headers.findIndex(h=>labels.some(label=>h===label||h.startsWith(label+' ')||h.startsWith(label+'(')));
       if(cells[columnIndex]) put(key,cells[columnIndex].innerText);
       const column = scope.querySelector('#'+key+' .cell-content, .tablecell-'+key+', [data-e2e="'+key+'-count"], [data-e2e="video-'+(key==='likes'?'digg':key.replace(/s$/,''))+'-count"]');
       if (column) put(key,column.innerText);
@@ -92,7 +103,7 @@
     // Duración visible sobre la miniatura (TikTok, Facebook): «0:45», «12:03».
     let duration=null;
     // Solo en el listado: en la ficha de estadísticas los tiempos son métricas, no la duración.
-    if (!detail) for (const node of scope.querySelectorAll('span,div')) {
+    if (!detail) for (const node of scope.querySelectorAll('*')) {
       if (node.children.length) continue;
       const text=(node.textContent||'').trim();
       if (/^(?:\d+:)?\d{1,2}:\d{2}$/.test(text)) { duration=seconds(text); break; }
@@ -118,7 +129,12 @@
     const row=a.closest('ytcp-video-row,tr,[role="row"],article,li,[data-e2e*="post-item"]');
     const scope=row && [...row.querySelectorAll('a[href]')].every(link=>!videoId(link.href)||videoId(link.href)===id)?row:a;
     const analytics=[...scope.querySelectorAll?.('a[href*="/analytics"]')||[]].map(link=>link.href).find(href=>videoId(href)===id);
-    rows.push({externalId:id,url:a.href,title:(a.title || a.innerText || a.querySelector('img')?.alt || '').trim().slice(0,500),
+    const looksLikeTitle = text => text && !/^(?:\d+:)?\d{1,2}:\d{2}$/.test(text) && !/^[\d.,\s]+(?:mil|k|m)?$/i.test(text);
+    const options = [scope.querySelector?.('#video-title,[id="video-title"]')?.innerText,
+      ...[...scope.querySelectorAll('a[href]')].filter(link => videoId(link.href) === id).flatMap(link => [link.title, link.getAttribute?.('aria-label'), link.innerText]),
+      a.querySelector?.('img')?.alt].map(text => String(text || '').trim()).filter(looksLikeTitle);
+    const title = options.sort((x, y) => y.length - x.length)[0] || '';
+    rows.push({externalId:id,url:a.href,title:title.slice(0,500),
       ...(analytics?{analyticsUrl:analytics}:{}),...extract(scope,false)});
   }
   const insightView=openedId && belongs(location.hostname) && (location.pathname.includes('/insights/') || document.querySelector('[role="dialog"]'));
