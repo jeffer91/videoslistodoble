@@ -4,7 +4,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
+import subprocess
 import sys
+import time
+from urllib.request import urlopen
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, Error as BrowserError
@@ -110,31 +114,78 @@ def scan(page, network):
     emit(done=True, discovered=len(discovered), missing=missing)
 
 
+def find_browser():
+    """Edge o Chrome instalados en el equipo (no el navegador de pruebas de Playwright)."""
+    if os.name == "nt":
+        roots = [os.environ.get(k) for k in ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")]
+        for root in filter(None, roots):
+            for relative in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe"):
+                candidate = os.path.join(root, relative)
+                if os.path.isfile(candidate):
+                    return candidate
+        return shutil.which("msedge") or shutil.which("chrome")
+    return shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+
+
+def free_port():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def open_browser(pw, network, profile):
+    """Abre el navegador como una ventana normal y Studio solo se conecta para leer.
+
+    Un navegador lanzado en modo automatizado queda marcado y Google (y otras redes)
+    rechazan el inicio de sesión. Abierto de forma normal, el usuario inicia sesión
+    él mismo y la sesión queda guardada en el perfil propio de Studio.
+    """
+    executable = find_browser()
+    if not executable:
+        raise ValueError("Instala Microsoft Edge o Google Chrome para usar el lector.")
+    port = free_port()
+    process = subprocess.Popen([executable, f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
+                                "--no-first-run", "--no-default-browser-check", "--new-window", START[network]],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    emit(browserPid=process.pid)
+    deadline = time.time() + 40
+    while time.time() < deadline:
+        if process.poll() is not None:
+            raise ValueError("El navegador se cerró al abrirse. Cierra cualquier lectura anterior y vuelve a intentarlo.")
+        try:
+            with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2):
+                break
+        except OSError:
+            time.sleep(0.5)
+    else:
+        process.kill()
+        raise ValueError("El navegador no respondió a tiempo.")
+    browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+    return process, browser
+
+
 def main():
     network, profile = sys.argv[1:3]
     with sync_playwright() as pw:
-        executable = shutil.which("chromium") or shutil.which("google-chrome")
-        channels = ["msedge", "chrome"] if os.name == "nt" else ["chrome"]
-        for channel in channels:
-            try:
-                context = pw.chromium.launch_persistent_context(profile, headless=False, **(
-                    {"executable_path": executable} if executable else {"channel": channel}))
-                break
-            except BrowserError:
-                if channel == channels[-1]:
-                    raise ValueError("Instala Microsoft Edge o Google Chrome y cierra cualquier lectura anterior.")
+        process, browser = open_browser(pw, network, profile)
         try:
-            page = context.pages[0]
-            page.goto(START[network], wait_until="commit", timeout=60000)
+            context = browser.contexts[0]
+            page = next((p for p in context.pages if allowed(p.url, network)), None) or (context.pages or [context.new_page()])[0]
+            if not allowed(page.url, network):
+                page.goto(START[network], wait_until="commit", timeout=60000)
             try:
                 page.bring_to_front()
             except BrowserError:
                 pass
             emit(ready=True)
             if sys.stdin.readline().strip() == "scan":
-                scan(context.pages[-1], network)
+                pages = [p for p in context.pages if allowed(p.url, network)]
+                scan(pages[-1] if pages else context.pages[-1], network)
         finally:
-            context.close()
+            try:
+                browser.close()
+            finally:
+                process.terminate()
 
 
 if __name__ == "__main__":

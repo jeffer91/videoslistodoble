@@ -1,6 +1,6 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "Estudio local para crear, revisar y publicar videos de 11 Récords",
   "main": "main.cjs",

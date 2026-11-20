@@ -38,7 +38,12 @@ async function readBrowser(app, network, confirm, save, {onStatus = () => {}, si
   onStatus('opening', {message:'Abriendo el navegador…'});
   const child = spawn(python,['-u',path.join(base,'browser-stats','reader.py'),network,path.join(cache,'perfil-'+network)],
     {windowsHide:true,env:{...process.env,PYTHONPATH:packages,PYTHONIOENCODING:'utf-8'}});
-  const stop = () => child.kill();
+  let browserPid = null;
+  const stop = () => {
+    child.kill();
+    // El navegador se abre como proceso normal: se cierra también al cancelar.
+    if (browserPid) { try { process.kill(browserPid); } catch { /* Ya estaba cerrado. */ } browserPid = null; }
+  };
   app.once('before-quit',stop);
   signal?.addEventListener('abort',stop,{once:true});
   child.stdin.on('error',()=>{});
@@ -51,6 +56,7 @@ async function readBrowser(app, network, confirm, save, {onStatus = () => {}, si
     for await (const line of readline.createInterface({input:child.stdout})) {
       let event;
       try { event=JSON.parse(line); } catch { continue; }
+      if (Number.isSafeInteger(event.browserPid)) browserPid = event.browserPid;
       if (event.ready) {
         onStatus('ready', {message:'Navegador abierto. Inicia sesión y abre tu listado de videos.'});
         canceled=!(await confirm());

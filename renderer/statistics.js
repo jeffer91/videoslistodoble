@@ -579,7 +579,7 @@
     let body;
     if (reader.stage === 'ready') {
       body = '<p class="st-reader-big">El navegador está abierto. Si no lo ves, búscalo en la barra de tareas.</p>' +
-        '<ol class="st-plain"><li>Inicia sesión y elige la cuenta correcta.</li><li>' + esc(BROWSER_TIPS[reader.network]) + '</li>' +
+        '<ol class="st-plain"><li>Inicia sesión tú mismo y elige la cuenta correcta. Es una ventana normal de Edge o Chrome con un perfil propio de Studio: la sesión queda guardada para la próxima vez.</li><li>' + esc(BROWSER_TIPS[reader.network]) + '</li>' +
         '<li>Selecciona todo el período disponible y vuelve aquí.</li></ol>' +
         '<div class="row wrap">' + action('st-reader-scan', 'Leer videos', '', '') + action('st-reader-stop', 'Cancelar', '') + '</div>';
     } else {
@@ -626,7 +626,7 @@
         action('st-browser', 'Abrir lector de ' + NETWORKS[id].name, id, '') .replace('<button', '<button' + (busy ? ' disabled' : '')) +
         '</article>').join('') + '</div>' +
       '<section class="panel st-panel"><h2>Cómo funciona</h2><ol class="st-plain">' +
-      '<li>Pulsa el botón de la red: se abre Edge o Chrome con un perfil propio de Studio. La primera vez Studio prepara Python y Playwright.</li>' +
+      '<li>Pulsa el botón de la red: se abre una ventana normal de Edge o Chrome con un perfil propio de Studio, separado de tu navegador habitual. La primera vez Studio prepara Python y Playwright.</li>' +
       '<li>Inicia sesión, elige la cuenta y abre el listado indicado con todo el período disponible.</li>' +
       '<li>Vuelve a Studio y pulsa <strong>Leer videos</strong> en el panel que aparece arriba. Verás el avance video por video.</li></ol>' +
       '<p class="st-note">Si un video ya llegó por API, la lectura se suma a la misma ficha y se indica el origen de cada cifra. Las cifras abreviadas («1,2 K») se guardan con su texto original. Los cambios de diseño de cada red pueden afectar a la lectura.</p></section>';
