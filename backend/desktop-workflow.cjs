@@ -28,7 +28,9 @@ const GUIDES = Object.freeze({
 });
 
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
-  const publishing = createPublishing(root, safeStorage);
+  const { publishWithBrowser } = require('./browser-publish.cjs');
+  const publishing = createPublishing(root, safeStorage, { ...clients,
+    browserPublish: (network, context) => publishWithBrowser(app, network, context, root) });
   const cloud = createCloud(root, safeStorage);
   // Copia en Firebase después de cada lectura; un fallo queda en el estado de la nube.
   const cloudSync = () => cloud.sync({ rows: publishing.stats(), growth: publishing.growth(), accounts: publishing.accounts() });
@@ -193,6 +195,17 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       return autopublish.overview();
     },
     'auto.plan': async () => ({ ...(await autopublish.plan()), overview: autopublish.overview() }),
+    // Ensayo: hace todo en la web de la red excepto pulsar «Publicar», con el último video apto.
+    'auto.test': async ({ network }) => {
+      const cfg = autopublish.config();
+      const item = autopublish.candidates().reverse().find(candidate => cfg.networks[network]?.formats.includes(candidate.format));
+      if (!item) throw Error('Aprueba al menos un video de un formato activo para ensayar');
+      const result = await publishWithBrowser(app, network, { file: delivery.resolveOutput(root, item.target), metadata: autopublish.adapt(item, network, cfg),
+        quality: item.entry.quality, dryRun: true, groupUrl: network === 'facebook' && cfg.networks.facebook.groupEnabled ? cfg.networks.facebook.groupUrl : '' }, root)
+        .catch(error => { const e = Error(error.message + (error.screenshot ? ' · Captura: ' + error.screenshot : '')); throw e; });
+      if (result.busy) throw Error('El navegador está ocupado con otra tarea. Inténtalo en unos minutos.');
+      return { title: item.title, ...result };
+    },
     'cloud.connect': async data => {
       const result = await cloud.connect(data);
       await cloudSync().catch(() => {});

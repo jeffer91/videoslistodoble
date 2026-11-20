@@ -109,12 +109,19 @@ El alcance y las pruebas de aceptación del módulo están en [Requisitos de Est
 - **Requisitos que comprueba antes de programar:** duración, formato vertical u horizontal y límites diarios (Studio se queda por debajo de los de cada plataforma).
 - La app planifica cada 10 minutos mientras está abierta; la cola reintenta y registra el enlace publicado.
 
-| Red | Publicación automática | Qué necesita |
+Por defecto Studio **publica por navegador**: abre Edge o Chrome con el perfil propio de cada red (el mismo del lector de estadísticas, con la sesión ya iniciada) y publica desde la web, como si lo hicieras tú. No hace falta conectar cuentas por API ni pasar auditorías.
+
+| Red | Por navegador | Por API (opcional) |
 | --- | --- | --- |
-| Instagram | Sí, como Reel (3 s a 15 min) | Token con instagram_business_content_publish. |
-| Facebook (página) | Sí: Reel hasta 90 s en vertical; si no, video de página | Token de página con pages_manage_posts. Los grupos no se pueden automatizar: Meta retiró esa API en 2024. |
-| TikTok | Como borrador en la app (un toque para publicar) o directa | Borrador: permiso video.upload. Directa y pública: auditoría de TikTok o Ayrshare. |
-| YouTube | Tras la auditoría de la API de YouTube | Sin auditoría, YouTube bloquea como privados los videos subidos por API. Solicítala desde la propia pantalla. |
+| YouTube | YouTube Studio: título, descripción, «No es para niños» y visibilidad. Espera a que termine la carga antes de publicar. | Bloqueado como privado hasta la auditoría de Google. |
+| TikTok | TikTok Studio: texto con hashtags y Publicar cuando el video está procesado. | Borrador sin auditoría; directo con auditoría o Ayrshare. |
+| Instagram | Crear → Reel con su texto y Compartir. | Reel con instagram_business_content_publish. |
+| Facebook | Meta Business Suite: Reel (hasta 90 s en vertical) o video de la página, y opcionalmente también en tu grupo. | Página con pages_manage_posts; los grupos no tienen API. |
+
+- **Probar sin publicar** (en cada red) hace todo excepto pulsar el botón final, con el último video apto. YouTube deja un borrador privado que puedes borrar.
+- El lector y el publicador nunca usan el navegador a la vez: si está ocupado, la publicación espera 5 minutos.
+- Si algo falla antes de publicar, el envío queda como «Falló» con una captura de la pantalla. Si ya se pulsó Publicar y no llegó la confirmación, queda como «Revisar» y no se reintenta solo, para no duplicar.
+- Publicar de forma automatizada desde la web puede hacer que una red pida verificaciones; cuando una red cambia su diseño puede hacer falta ajustar el publicador.
 
 ### Publicar en las redes
 

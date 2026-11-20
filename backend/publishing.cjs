@@ -185,28 +185,30 @@ function createPublishing(root, vault, platform = clients) {
     return job;
   }
 
-  async function enqueue({ target, network, dueAt, confirmed, metadata: prepared, auto = false }) {
+  async function enqueue({ target, network, dueAt, confirmed, metadata: prepared, auto = false, method = 'api', groupUrl = '' }) {
     validNetwork(network);
     if (confirmed !== true) throw Error('Debes confirmar el envío a esta red');
     const scheduled = dateString(dueAt) || new Date().toISOString();
-    const account = await accountFor(network);
+    // Por navegador se publica con la sesión del perfil de Studio: no hace falta una cuenta conectada por API.
+    const browser = method === 'browser';
+    const account = browser ? { identity: { id: 'navegador:' + network, label: 'Navegador' }, provider: 'browser' } : await accountFor(network);
     const entry = delivery.entryFor(root, target);
     const approved = entry.approval;
     if (!approved || !entry.quality?.ok) throw Error('Primero revisa y aprueba el MP4');
     const file = delivery.resolveOutput(root, target);
     if (await delivery.fingerprint(file) !== approved.sha256) throw Error('El MP4 cambió después de la aprobación');
     const metadata = delivery.normalizeNetwork(network, prepared || entry.networks[network]);
-    if (!metadata.privacy && !['instagram', 'facebook'].includes(network) && metadata.mode !== 'inbox') {
+    if (!browser && !metadata.privacy && !['instagram', 'facebook'].includes(network) && metadata.mode !== 'inbox') {
       throw Error('Selecciona la visibilidad antes de autorizar');
     }
     if (network === 'tiktok' && metadata.branded && !['FOLLOWER_OF_CREATOR', 'PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS'].includes(metadata.privacy)) {
       throw Error('La visibilidad privada no admite la divulgación de contenido patrocinado');
     }
-    const thumbnail = network === 'youtube' || account.provider === 'ayrshare' ? delivery.thumbnailPath(root, target, metadata.thumbnail) : null;
+    const thumbnail = !browser && (network === 'youtube' || account.provider === 'ayrshare') ? delivery.thumbnailPath(root, target, metadata.thumbnail) : null;
     const thumbnailHash = thumbnail ? await delivery.fingerprint(thumbnail) : null;
     const jobs = queue();
-    // Sin repetir contenido: el mismo archivo (por nombre o por su huella) solo va una vez a cada cuenta.
-    if (jobs.some(job => job.network === network && job.identity.id === account.identity.id && job.status !== 'cancelado' &&
+    // Sin repetir contenido: el mismo archivo (por nombre o por su huella) solo va una vez a cada red.
+    if (jobs.some(job => job.network === network && job.status !== 'cancelado' &&
       (job.target.file === target.file || job.sha256 === approved.sha256))) {
       throw Error('Este video ya está publicado o en la cola de esa cuenta.');
     }
@@ -214,7 +216,8 @@ function createPublishing(root, vault, platform = clients) {
       id: randomUUID(), target, network, identity: account.identity, metadata, sha256: approved.sha256, thumbnailHash,
       authorizedAt: new Date().toISOString(), dueAt: scheduled, nextAt: scheduled,
       status: Date.parse(scheduled) > Date.now() ? 'programado' : 'pendiente', attempts: 0, remote: {},
-      url: null, externalId: null, message: '', ...(auto ? { auto: true } : {})
+      url: null, externalId: null, message: '', ...(auto ? { auto: true } : {}),
+      ...(browser ? { method: 'browser', ...(network === 'facebook' && groupUrl ? { groupUrl } : {}) } : {})
     };
     writeQueue([...jobs, job]);
     return publicJob(job);
@@ -232,7 +235,42 @@ function createPublishing(root, vault, platform = clients) {
     if (changed) writeQueue(jobs);
   }
 
+  async function browserStep(job) {
+    const file = delivery.resolveOutput(root, job.target);
+    const entry = delivery.entryFor(root, job.target);
+    if (await delivery.fingerprint(file) !== job.sha256) throw Error('El video cambió. Cancela y crea un envío con la versión nueva.');
+    const current = queue().find(item => item.id === job.id);
+    if (!current || !['pendiente', 'programado', 'procesando'].includes(current.status)) return;
+    if (!platform.browserPublish) throw Error('La publicación por navegador no está disponible');
+    updateJob(job.id, { status: 'enviando', message: 'Publicando desde el navegador…', attempts: job.attempts + 1 });
+    let result;
+    try {
+      result = await platform.browserPublish(job.network, { file, metadata: job.metadata, quality: entry.quality, groupUrl: job.groupUrl || '' });
+    } catch (error) {
+      // Si ya se pulsó «Publicar», no se reintenta solo: hay que comprobarlo en la red.
+      return updateJob(job.id, { status: error.submitted ? 'revisar' : 'fallo', screenshot: error.screenshot || null,
+        message: (error.submitted ? 'Se pulsó Publicar pero no llegó la confirmación. Revisa la red. ' : '') + String(error.message).slice(0, 220) });
+    }
+    if (result.busy) return updateJob(job.id, { status: current.status, message: 'El navegador está ocupado; se reintenta en 5 minutos.',
+      nextAt: new Date(Date.now() + 5 * 60000).toISOString(), attempts: job.attempts });
+    let url = null;
+    try { url = safeLink(job.network, result.url); } catch { url = null; }
+    let externalId = null;
+    try { externalId = url ? extractId(job.network, url) : null; } catch { externalId = null; }
+    const published = updateJob(job.id, { status: 'publicado', url, externalId,
+      publishedAt: new Date().toISOString(), message: result.note || 'Publicado desde el navegador.' });
+    if (job.target.kind === 'short') store.saveProject(root, { id: job.target.id, stage: 'publicado' });
+    return published;
+  }
+
   async function step(job) {
+    if (job.method === 'browser') {
+      locks.add(job.id);
+      try { return await browserStep(job); }
+      catch (error) { updateJob(job.id, { status: 'fallo', message: String(error.message).slice(0, 240) }); }
+      finally { locks.delete(job.id); }
+      return;
+    }
     locks.add(job.id);
     let started = false;
     try {

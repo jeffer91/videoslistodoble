@@ -53,6 +53,7 @@
 
   function readinessChip(network) {
     const r = data.readiness[network], account = data.accounts[network];
+    if (r.browser) return '<span class="st-status on">Lista · navegador</span>';
     if (!account) return '<span class="st-status off">Sin conectar</span>';
     if (r.blocked) return '<span class="st-status warn">Requiere auditoría</span>';
     if (r.note) return '<span class="st-status on">Lista · borrador</span>';
@@ -66,23 +67,27 @@
       network === 'tiktok' ? [['PUBLIC_TO_EVERYONE', 'Todo el mundo'], ['FOLLOWER_OF_CREATOR', 'Seguidores'], ['MUTUAL_FOLLOW_FRIENDS', 'Amigos'], ['SELF_ONLY', 'Solo yo']] : null;
     const select = (key, options, current) => '<select id="' + id(key) + '">' + options.map(([v, l]) =>
       '<option value="' + v + '"' + (v === current ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>';
-    const audit = network === 'youtube' || network === 'tiktok';
+    const browser = cfg.method !== 'api';
+    const audit = !browser && (network === 'youtube' || network === 'tiktok');
     return '<article class="st-connection st-' + network + ' ap-card"><header>' + badge(network) + readinessChip(network) + '</header>' +
-      '<p class="st-account">' + esc(account ? account.label : 'Conecta la cuenta en Estadísticas → Conexiones') + '</p>' +
+      field('Cómo publicar', select('method', [['browser', 'Navegador (recomendado)'], ['api', 'API oficial']], cfg.method || 'browser')) +
+      (!browser ? '<p class="st-account">' + esc(account ? account.label : 'Conecta la cuenta en Estadísticas → Conexiones') + '</p>' : '') +
       (r.reason ? '<p class="st-note' + (r.blocked ? ' ap-warn' : '') + '">' + esc(r.reason) + '</p>' : '') +
       (r.note ? '<p class="st-note">' + esc(r.note) + '</p>' : '') +
       check(id('enabled'), 'Publicar automáticamente en ' + NAMES[network], cfg.enabled) +
       field('Horarios (hora de este equipo)', '<input id="' + id('hours') + '" value="' + esc(cfg.hours.join(', ')) + '" placeholder="12:30, 19:30">') +
       '<div class="ap-row">' + check(id('short'), 'Shorts / Reels', cfg.formats.includes('short')) + check(id('long'), 'Videos largos', cfg.formats.includes('long')) + '</div>' +
-      (privacy ? field('Visibilidad', select('privacy', privacy, cfg.privacy)) : '') +
-      (network === 'tiktok' ? field('Modo', select('mode', [['inbox', 'Borrador en la app (sin auditoría)'], ['direct', 'Publicación directa (requiere auditoría o Ayrshare)']], cfg.mode)) : '') +
+      (privacy && (!browser || network === 'youtube') ? field('Visibilidad', select('privacy', privacy, cfg.privacy)) : '') +
+      (network === 'tiktok' && !browser ? field('Modo', select('mode', [['inbox', 'Borrador en la app (sin auditoría)'], ['direct', 'Publicación directa (requiere auditoría o Ayrshare)']], cfg.mode)) : '') +
+      (network === 'facebook' ? check(id('group'), 'También publicar en mi grupo (solo por navegador)', cfg.groupEnabled) +
+        field('Dirección del grupo', '<input id="' + id('groupUrl') + '" value="' + esc(cfg.groupUrl || '') + '" placeholder="https://www.facebook.com/groups/11contra11">') : '') +
       field('Frase final', '<input id="' + id('closing') + '" value="' + esc(cfg.closing) + '" maxlength="200">') +
       (audit ? check(id('audited'), network === 'youtube' ? 'Mi proyecto de Google ya pasó la auditoría de YouTube' : 'Mi app de TikTok ya pasó la auditoría', cfg.audited) +
         '<p class="st-note">' + action('ap-guide', 'Solicitar la auditoría ↗', network + '-audit', 'outline') + '</p>' : '') +
       '<details class="st-details"><summary>Lo que exige ' + NAMES[network] + '</summary><ul class="ap-notes">' +
       req.notes.map(note => '<li>' + esc(note) + '</li>').join('') + '<li>Máximo en Studio: ' + req.daily + ' publicaciones al día.</li></ul></details>' +
-      (network === 'facebook' ? '<p class="st-note">Tu grupo «11 records» no admite publicación automática: Meta retiró esa API. Comparte en el grupo la publicación de la página.</p>' : '') +
-      '<div class="row wrap">' + action('ap-save', 'Guardar ' + NAMES[network], network, '') + '</div></article>';
+      '<div class="row wrap">' + action('ap-save', 'Guardar ' + NAMES[network], network, '') +
+      (browser ? action('ap-test', 'Probar sin publicar', network) : '') + '</div></article>';
   }
 
   function globalPanel(cfg) {
@@ -96,7 +101,7 @@
   function upcomingPanel() {
     return '<section class="panel st-panel"><h2>Próximas publicaciones</h2>' + (data.upcoming.length ? '<ul class="ap-list">' + data.upcoming.map(job =>
       '<li><span class="ap-when">' + esc(when(job.dueAt)) + '</span>' + badge(job.network) + '<span class="ap-title">' + esc(job.title || 'Video') + '</span>' +
-      '<span class="st-format">' + (job.auto ? 'Automática' : 'Manual') + '</span><span class="st-format">' + esc(STATUS[job.status] || job.status) + '</span>' +
+      '<span class="st-format">' + (job.method === 'browser' ? 'Navegador' : 'API') + (job.group ? ' + grupo' : '') + '</span><span class="st-format">' + esc(STATUS[job.status] || job.status) + '</span>' +
       (['pendiente', 'programado'].includes(job.status) ? action('ap-cancel', 'Cancelar', job.id, 'outline') : '<span></span>') + '</li>').join('') + '</ul>'
       : '<p class="st-note">Nada programado. Aprueba un video en la pantalla de entrega y activa al menos una red.</p>') + '</section>';
   }
@@ -127,7 +132,8 @@
     return '<section class="panel st-panel"><h2>Resultados recientes</h2><ul class="ap-list">' + data.recent.map(job =>
       '<li><span class="ap-when">' + esc(when(job.at)) + '</span>' + badge(job.network) + '<span class="ap-title">' + esc(job.title || 'Video') +
       (job.message ? '<small>' + esc(job.message) + '</small>' : '') + '</span><span class="st-format">' + esc(STATUS[job.status] || job.status) + '</span>' +
-      (job.url ? btn('publish-open', 'Abrir', 'outline', 'data-url="' + esc(job.url) + '" data-network="' + job.network + '"') : '<span></span>') + '</li>').join('') + '</ul></section>';
+      (job.url ? btn('publish-open', 'Abrir', 'outline', 'data-url="' + esc(job.url) + '" data-network="' + job.network + '"') :
+        job.screenshot ? btn('system-open-data', 'Ver captura', 'outline', 'data-path="' + esc(job.screenshot) + '"') : '<span></span>') + '</li>').join('') + '</ul></section>';
   }
 
   function networkPatch(network) {
@@ -137,6 +143,8 @@
     if (document.getElementById(id('privacy'))) patch.privacy = value(id('privacy'));
     if (document.getElementById(id('mode'))) patch.mode = value(id('mode'));
     if (document.getElementById(id('audited'))) patch.audited = checked(id('audited'));
+    if (document.getElementById(id('method'))) patch.method = value(id('method'));
+    if (document.getElementById(id('groupUrl'))) { patch.groupUrl = value(id('groupUrl')); patch.groupEnabled = checked(id('group')); }
     return patch;
   }
 
@@ -161,6 +169,15 @@
     if (name === 'ap-save') return save({ networks: { [id]: networkPatch(id) } }, NAMES[id] + ' guardado');
     if (name === 'ap-save-global') return save({ hashtags: value('ap-hashtags'), gapMinutes: Number(value('ap-gap')) }, 'Ajustes guardados');
     if (name === 'ap-guide') return flow('statistics.guide', { key: id });
+    if (name === 'ap-test') {
+      element.disabled = true;
+      element.textContent = 'Ensayando en el navegador…';
+      try {
+        const result = await flow('auto.test', { network: id });
+        notice(NAMES[id] + ': ' + (result.note || 'Ensayo correcto') + ' (video: ' + result.title + ')');
+      } finally { element.disabled = false; element.textContent = 'Probar sin publicar'; }
+      return;
+    }
     if (name === 'ap-plan') {
       element.disabled = true;
       try {

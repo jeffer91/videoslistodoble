@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
 const store = require('../backend/store.cjs');
 const delivery = require('../backend/delivery.cjs');
+const production = require('../backend/production.cjs');
 const { createPublishing } = require('../backend/publishing.cjs');
 const { createAutopublish, REQUIREMENTS, tagWord } = require('../backend/autopublish.cjs');
 
@@ -62,11 +63,20 @@ test('no se activa sin autorización y respeta YouTube y TikTok sin auditar', as
   try {
     assert.throws(() => auto.saveConfig({ enabled: true }), /autorización/);
     auto.saveConfig({ authorized: true, enabled: true });
+    // Por navegador (opción por defecto) no hace falta auditoría ni cuenta por API.
+    assert.equal(auto.config().networks.youtube.method, 'browser');
+    assert.equal(auto.readiness('youtube').ok, true);
+    assert.equal(auto.readiness('youtube').browser, true);
+    // Por API sí se respetan los bloqueos de cada plataforma.
+    auto.saveConfig({ networks: { youtube: { method: 'api' }, tiktok: { method: 'api' } } });
     assert.equal(auto.readiness('youtube').ok, false);
     assert.match(auto.readiness('youtube').reason, /auditor/);
     assert.equal(auto.readiness('tiktok').ok, true, 'el modo borrador no necesita auditoría');
     auto.saveConfig({ networks: { tiktok: { mode: 'direct' } } });
     assert.equal(auto.readiness('tiktok').ok, false);
+    assert.throws(() => auto.saveConfig({ networks: { facebook: { groupUrl: 'https://evil.example/groups/x' } } }), /groups/);
+    auto.saveConfig({ networks: { facebook: { groupUrl: 'https://web.facebook.com/groups/11contra11/', groupEnabled: true } } });
+    assert.equal(auto.config().networks.facebook.groupUrl, 'https://www.facebook.com/groups/11contra11');
     assert.throws(() => auto.saveConfig({ networks: { instagram: { hours: '25:00' } } }), /12:30/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -86,7 +96,7 @@ test('programa los videos aprobados en los horarios libres y nunca repite conten
     // Dos días de horizonte × 2 horarios, pero solo hay 3 videos distintos: cada uno una sola vez.
     assert.equal(ig.length, 3);
     assert.equal(new Set(ig.map(job => job.sha256)).size, 3);
-    assert.ok(ig.every(job => job.auto && Date.parse(job.dueAt) > start));
+    assert.ok(ig.every(job => job.auto && job.method === 'browser' && Date.parse(job.dueAt) > start));
     assert.equal(new Date(ig[0].dueAt).getHours(), 12);
     // Facebook: el mismo video puede ir a otra red, pero también una sola vez allí.
     const fb = jobs.filter(job => job.network === 'facebook');
@@ -164,4 +174,49 @@ test('Facebook publica un Short de hasta 90 s como Reel de la página en tres fa
     global.fetch = original;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('la cola publica por navegador sin cuenta por API, espera si el navegador está ocupado y no reintenta tras pulsar Publicar', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nav-'));
+  store.ensureRoot(root);
+  const replies = [{ busy: true }, { id: null, url: 'https://youtu.be/abcdefghijk', note: 'Publicado desde el navegador.' }];
+  const calls = [];
+  const platform = { verifyAccount: async () => ({ id: 'x', label: 'x' }),
+    browserPublish: async (network, context) => {
+      calls.push({ network, title: context.metadata.title });
+      const reply = replies.shift();
+      if (reply instanceof Error) throw reply;
+      return reply;
+    } };
+  try {
+    const publishing = createPublishing(root, vault, platform);
+    const video = approvedShort(root, 'Récord por navegador');
+    // Sin ninguna cuenta conectada por API.
+    await publishing.enqueue({ target: video.target, network: 'youtube', confirmed: true, method: 'browser',
+      metadata: { title: 'Récord por navegador', description: '', tags: ['Shorts'], privacy: 'public' } });
+    await publishing.tick();
+    let [job] = publishing.jobsRaw();
+    assert.equal(job.status, 'pendiente', 'navegador ocupado: se reprograma sin contar como fallo');
+    assert.ok(Date.parse(job.nextAt) > Date.now() + 4 * 60000);
+    job.nextAt = new Date(Date.now() - 1000).toISOString();
+    production.writeState(root, 'cola-publicacion', [job]);
+    await publishing.tick();
+    [job] = publishing.jobsRaw();
+    assert.equal(job.status, 'publicado');
+    assert.equal(job.url, 'https://youtu.be/abcdefghijk');
+    assert.equal(job.externalId, 'abcdefghijk');
+    assert.equal(calls.length, 2);
+
+    const second = approvedShort(root, 'Segundo récord');
+    const after = Object.assign(Error('Instagram no confirmó la publicación'), { submitted: true, screenshot: '/tmp/fallo.png' });
+    replies.push(after);
+    await publishing.enqueue({ target: second.target, network: 'instagram', confirmed: true, method: 'browser',
+      metadata: { title: 'Segundo récord', description: '', tags: [] } });
+    await publishing.tick();
+    const failed = publishing.jobsRaw().find(item => item.network === 'instagram');
+    assert.equal(failed.status, 'revisar', 'tras pulsar Publicar no se reintenta solo');
+    assert.equal(failed.screenshot, '/tmp/fallo.png');
+    await publishing.tick();
+    assert.equal(calls.length, 3, 'no vuelve a intentarlo');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

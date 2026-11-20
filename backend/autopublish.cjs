@@ -30,13 +30,15 @@ const REQUIREMENTS = {
     title: 100, description: 4700, hashtags: 15, daily: 6,
     notes: ['Shorts: video vertical o cuadrado de hasta 3 minutos; Studio añade #Shorts.',
       'Videos largos: horizontal 16:9, título de hasta 100 caracteres.',
-      'Un proyecto de Google sin auditar deja los videos subidos por API bloqueados como privados.']
+      'Por navegador se publica desde YouTube Studio con tu sesión, como si lo subieras tú.',
+      'Por API, un proyecto de Google sin auditar deja los videos bloqueados como privados.']
   },
   tiktok: {
     short: { min: 3, max: 600 }, long: { min: 3, max: 600 },
     title: 100, description: 1950, hashtags: 6, daily: 15,
     notes: ['Texto de hasta 2.200 caracteres; la duración máxima depende de tu cuenta (normalmente 10 min).',
-      'Sin auditoría de TikTok, la API solo publica en privado y en cuentas privadas: usa el modo borrador o Ayrshare.',
+      'Por navegador se publica desde TikTok Studio con tu sesión.',
+      'Por API, sin auditoría de TikTok solo se publica en privado: usa el modo borrador o Ayrshare.',
       'TikTok limita las publicaciones por API a unas 15 al día por cuenta.']
   },
   instagram: {
@@ -51,7 +53,8 @@ const REQUIREMENTS = {
     title: 100, description: 4700, hashtags: 5, daily: 25,
     notes: ['Reels de página: vertical 9:16, de 3 a 90 segundos (más largos se publican como video).',
       'Videos de página: horizontal, hasta 4 horas.',
-      'Solo páginas: Meta retiró en 2024 la publicación por API en grupos.',
+      'Por navegador se publica desde Meta Business Suite y, si lo activas, también en tu grupo.',
+      'Por API solo páginas: Meta retiró en 2024 la publicación por API en grupos.',
       'Facebook permite 30 Reels por API cada 24 horas; Studio usa como máximo 25.']
   }
 };
@@ -66,10 +69,11 @@ const CLOSING = {
 const DEFAULTS = {
   enabled: false, authorized: false, horizonDays: 2, gapMinutes: 90, hashtags: '#futbol #records',
   networks: {
-    youtube: { enabled: false, hours: ['12:30', '19:30'], formats: ['short', 'long'], privacy: 'public', audited: false, closing: CLOSING.youtube },
-    tiktok: { enabled: false, hours: ['13:00', '20:00'], formats: ['short'], privacy: 'PUBLIC_TO_EVERYONE', mode: 'inbox', audited: false, closing: CLOSING.tiktok },
-    instagram: { enabled: false, hours: ['12:00', '19:00'], formats: ['short'], closing: CLOSING.instagram },
-    facebook: { enabled: false, hours: ['12:15', '19:15'], formats: ['short', 'long'], closing: CLOSING.facebook }
+    youtube: { enabled: false, method: 'browser', hours: ['12:30', '19:30'], formats: ['short', 'long'], privacy: 'public', audited: false, closing: CLOSING.youtube },
+    tiktok: { enabled: false, method: 'browser', hours: ['13:00', '20:00'], formats: ['short'], privacy: 'PUBLIC_TO_EVERYONE', mode: 'inbox', audited: false, closing: CLOSING.tiktok },
+    instagram: { enabled: false, method: 'browser', hours: ['12:00', '19:00'], formats: ['short'], closing: CLOSING.instagram },
+    facebook: { enabled: false, method: 'browser', hours: ['12:15', '19:15'], formats: ['short', 'long'], closing: CLOSING.facebook,
+      groupEnabled: false, groupUrl: '' }
   }
 };
 
@@ -137,6 +141,19 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
         target.privacy = value.privacy;
       }
       if (value.mode !== undefined && network === 'tiktok') target.mode = value.mode === 'direct' ? 'direct' : 'inbox';
+      if (value.method !== undefined) target.method = value.method === 'api' ? 'api' : 'browser';
+      if (network === 'facebook' && value.groupUrl !== undefined) {
+        const url = String(value.groupUrl || '').trim();
+        if (url) {
+          let parsed;
+          try { parsed = new URL(url); } catch { throw Error('Escribe la dirección completa del grupo, por ejemplo https://www.facebook.com/groups/11contra11'); }
+          if (parsed.protocol !== 'https:' || !/(^|\.)facebook\.com$/.test(parsed.hostname) || !/^\/groups\/[\w.-]+\/?$/.test(parsed.pathname)) {
+            throw Error('La dirección del grupo debe ser https://www.facebook.com/groups/…');
+          }
+          target.groupUrl = 'https://www.facebook.com' + parsed.pathname.replace(/\/$/, '');
+        } else target.groupUrl = '';
+      }
+      if (network === 'facebook' && value.groupEnabled !== undefined) target.groupEnabled = value.groupEnabled === true;
     }
     if (next.enabled && !next.authorized) throw Error('Marca la autorización antes de activar la publicación automática');
     production.writeState(root, STATE, next);
@@ -145,6 +162,9 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
 
   /** ¿Puede esta red publicar sola hoy? */
   function readiness(network, cfg = config(), accounts = publishing.accountDetails()) {
+    if (cfg.networks[network].method !== 'api') {
+      return { ok: true, browser: true, note: 'Publica desde la web de ' + NAMES[network] + ' con la sesión del lector de navegador. Inicia sesión allí una vez.' };
+    }
     const account = accounts[network];
     if (!account) return { ok: false, reason: 'Conecta la cuenta en Estadísticas → Conexiones.' };
     const settings = cfg.networks[network];
@@ -189,8 +209,8 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
     const rows = publishing.stats();
     const result = {};
     for (const network of NETWORKS) {
-      const identity = accounts[network]?.id;
-      const own = jobs.filter(job => job.network === network && (!identity || job.identity?.id === identity));
+      // Una cuenta por red: lo enviado por API o por navegador cuenta igual para no repetir.
+      const own = jobs.filter(job => job.network === network);
       result[network] = {
         jobs: own,
         active: own.filter(job => job.status !== 'cancelado'),
@@ -290,7 +310,8 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
         skip.add(next.sha256);
         try {
           const job = await publishing.enqueue({ target: next.target, network, dueAt: slot.toISOString(), confirmed: true,
-            metadata: adapt(next, network, cfg), auto: true });
+            metadata: adapt(next, network, cfg), auto: true, method: settings.method,
+            groupUrl: network === 'facebook' && settings.groupEnabled ? settings.groupUrl : '' });
           created.push({ network, title: next.title, dueAt: job.dueAt });
           used[network].sha.add(next.sha256);
           used[network].files.add(next.target.kind + ':' + next.target.file);
@@ -327,11 +348,12 @@ function createAutopublish(root, publishing, now = () => Date.now()) {
     }));
     const upcoming = publishing.jobsRaw().filter(job => ['pendiente', 'programado', 'procesando', 'enviando'].includes(job.status))
       .sort((a, b) => String(a.dueAt).localeCompare(String(b.dueAt))).slice(0, 30)
-      .map(job => ({ id: job.id, network: job.network, title: job.metadata?.title, dueAt: job.dueAt, status: job.status, auto: Boolean(job.auto), target: job.target }));
+      .map(job => ({ id: job.id, network: job.network, title: job.metadata?.title, dueAt: job.dueAt, status: job.status, auto: Boolean(job.auto),
+        method: job.method || 'api', group: Boolean(job.groupUrl), target: job.target }));
     const recent = publishing.jobsRaw().filter(job => ['publicado', 'fallo', 'revisar'].includes(job.status))
       .sort((a, b) => String(b.updatedAt || b.dueAt).localeCompare(String(a.updatedAt || a.dueAt))).slice(0, 15)
       .map(job => ({ id: job.id, network: job.network, title: job.metadata?.title, at: job.publishedAt || job.updatedAt, status: job.status,
-        url: job.url, message: job.message, auto: Boolean(job.auto) }));
+        url: job.url, message: job.message, auto: Boolean(job.auto), method: job.method || 'api', screenshot: job.screenshot || null }));
     return { config: cfg, requirements: REQUIREMENTS, readiness: ready, accounts: Object.fromEntries(NETWORKS.map(n => [n, accounts[n] ? { label: accounts[n].label, provider: accounts[n].provider } : null])),
       rows, upcoming, recent };
   }

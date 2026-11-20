@@ -14,9 +14,20 @@ const {command} = require('./media.cjs');
  * options.signal permite cancelar en cualquier momento.
  */
 const STAGES = new Set(['login', 'navigate', 'listing', 'details']);
+const NETWORKS = ['youtube','tiktok','instagram','facebook'];
 
-async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, signal} = {}) {
-  if (!['youtube','tiktok','instagram','facebook'].includes(network)) throw Error('Red desconocida');
+// Un solo navegador a la vez: el lector y el publicador comparten el perfil de cada red.
+let busy = null;
+function acquireBrowser(owner) {
+  if (busy) return false;
+  busy = owner;
+  return true;
+}
+function releaseBrowser(owner) { if (busy === owner) busy = null; }
+const browserBusy = () => busy;
+
+/** Prepara (la primera vez) Python y Playwright; devuelve las rutas para lanzar los scripts. */
+async function preparePython(app, {onStatus = () => {}, signal} = {}) {
   const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const cache = path.join(app.getPath('userData'),'estadisticas-navegador');
   fs.mkdirSync(cache,{recursive:true});
@@ -39,6 +50,18 @@ async function readBrowser(app, network, save, {onStatus = () => {}, onAccount =
     } finally {fs.rmSync(stage,{recursive:true,force:true});}
   }
   aborted();
+  return {base, cache, python, packages};
+}
+
+async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, signal} = {}) {
+  if (!NETWORKS.includes(network)) throw Error('Red desconocida');
+  if (!acquireBrowser('lector')) throw Error('El navegador está publicando un video. Inténtalo en unos minutos.');
+  try { return await runReader(app, network, save, {onStatus, onAccount, signal}); }
+  finally { releaseBrowser('lector'); }
+}
+
+async function runReader(app, network, save, {onStatus, onAccount, signal}) {
+  const {base, cache, python, packages} = await preparePython(app, {onStatus, signal});
   onStatus('opening', {message:'Abriendo el navegador…'});
   const child = spawn(python,['-u',path.join(base,'browser-stats','reader.py'),network,path.join(cache,'perfil-'+network)],
     {windowsHide:true,env:{...process.env,PYTHONPATH:packages,PYTHONIOENCODING:'utf-8'}});
@@ -80,4 +103,4 @@ async function readBrowser(app, network, save, {onStatus = () => {}, onAccount =
     signal?.removeEventListener('abort',stop);
   }
 }
-module.exports={readBrowser};
+module.exports={readBrowser, preparePython, acquireBrowser, releaseBrowser, browserBusy, NETWORKS};
