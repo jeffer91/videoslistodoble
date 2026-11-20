@@ -6,12 +6,16 @@ const readline = require('node:readline');
 const {command} = require('./media.cjs');
 
 /**
- * Lectura supervisada desde el navegador.
+ * Lectura automática desde el navegador.
+ * El usuario solo inicia sesión la primera vez; Studio abre cada listado, lo recorre
+ * y lee las cifras de cada video.
  * options.onStatus(stage, data) informa cada etapa para que la interfaz la muestre:
- *   python → playwright → opening → ready → listing → details → (fin)
+ *   python → playwright → opening → login → navigate → listing → details → (fin)
  * options.signal permite cancelar en cualquier momento.
  */
-async function readBrowser(app, network, confirm, save, {onStatus = () => {}, signal} = {}) {
+const STAGES = new Set(['login', 'navigate', 'listing', 'details']);
+
+async function readBrowser(app, network, save, {onStatus = () => {}, signal} = {}) {
   if (!['youtube','tiktok','instagram','facebook'].includes(network)) throw Error('Red desconocida');
   const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const cache = path.join(app.getPath('userData'),'estadisticas-navegador');
@@ -47,7 +51,7 @@ async function readBrowser(app, network, confirm, save, {onStatus = () => {}, si
   app.once('before-quit',stop);
   signal?.addEventListener('abort',stop,{once:true});
   child.stdin.on('error',()=>{});
-  let count=0, summary, failure, canceled=false;
+  let count=0, summary, failure;
   const closed = new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',resolve)});
   closed.catch(()=>{});
   let diagnostics='';
@@ -57,21 +61,18 @@ async function readBrowser(app, network, confirm, save, {onStatus = () => {}, si
       let event;
       try { event=JSON.parse(line); } catch { continue; }
       if (Number.isSafeInteger(event.browserPid)) browserPid = event.browserPid;
-      if (event.ready) {
-        onStatus('ready', {message:'Navegador abierto. Inicia sesión y abre tu listado de videos.'});
-        canceled=!(await confirm());
-        child.stdin.end(canceled?'cancel\n':'scan\n');
-        if (!canceled) onStatus('listing', {message:'Recorriendo el listado…', found:0});
+      if (event.ready) onStatus('opening', {message:'Navegador abierto. Comprobando la sesión…'});
+      if (STAGES.has(event.stage)) {
+        const {stage, message, found, index, total} = event;
+        onStatus(stage, Object.fromEntries(Object.entries({message, found, index, total}).filter(([, v]) => v !== undefined)));
       }
-      if (event.stage==='listing') onStatus('listing', {message:'Recorriendo el listado…', found:event.found});
-      if (event.stage==='details') onStatus('details', {message:'Leyendo las cifras de cada video…', index:event.index, total:event.total});
       if (event.video) {save(event.video); count++; onStatus('details', {count});}
       if (event.done) summary=event;
       if (event.error) failure=event.error;
     }
     if (signal?.aborted) throw Error('Lectura cancelada');
-    if (await closed || (!summary && !canceled)) throw Error(failure || diagnostics || 'El navegador se cerró antes de terminar');
-    return {count,missing:summary?.missing||0,canceled};
+    if (await closed || !summary) throw Error(failure || diagnostics || 'El navegador se cerró antes de terminar');
+    return {count,missing:summary.missing||0,canceled:false};
   } finally {
     stop();
     app.removeListener('before-quit',stop);

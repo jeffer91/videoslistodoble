@@ -546,16 +546,17 @@
   /* ---------- Lector de navegador ---------- */
 
   const BROWSER_TIPS = {
-    youtube: 'Abre YouTube Studio → Contenido. Lee por separado las pestañas Videos y Shorts.',
-    instagram: 'Abre tu perfil y entra en la pestaña Reels.',
-    facebook: 'Abre Meta Business Suite → Contenido → Publicado y elige tu página.',
-    tiktok: 'Abre TikTok Studio → Contenido y baja hasta tus publicaciones más antiguas.'
+    youtube: 'Lee Contenido → Videos y Shorts de YouTube Studio, con vistas, me gusta, comentarios y retención de cada video.',
+    instagram: 'Lee la pestaña Reels de tu perfil y las estadísticas de cada Reel.',
+    facebook: 'Lee Contenido publicado de Meta Business Suite para tu página.',
+    tiktok: 'Lee TikTok Studio → Contenido con las cifras de cada publicación.'
   };
 
-  const READER_STEPS = [['preparing', 'Preparar'], ['opening', 'Abrir navegador'], ['ready', 'Iniciar sesión'], ['listing', 'Leer listado'], ['details', 'Leer cifras']];
+  const READER_STEPS = [['preparing', 'Preparar'], ['opening', 'Abrir navegador'], ['login', 'Sesión'], ['listing', 'Recorrer videos'], ['details', 'Leer cifras']];
 
   function readerStep(stage) {
     if (stage === 'python' || stage === 'playwright') return 0;
+    if (stage === 'navigate') return 3;
     const index = READER_STEPS.findIndex(([id]) => id === stage);
     return index < 0 ? READER_STEPS.length : index;
   }
@@ -577,15 +578,15 @@
     const steps = '<ol class="st-reader-steps">' + READER_STEPS.map(([, label], i) =>
       '<li class="' + (i < current ? 'done' : i === current ? 'now' : '') + '">' + esc(label) + '</li>').join('') + '</ol>';
     let body;
-    if (reader.stage === 'ready') {
-      body = '<p class="st-reader-big">El navegador está abierto. Si no lo ves, búscalo en la barra de tareas.</p>' +
-        '<ol class="st-plain"><li>Inicia sesión tú mismo y elige la cuenta correcta. Es una ventana normal de Edge o Chrome con un perfil propio de Studio: la sesión queda guardada para la próxima vez.</li><li>' + esc(BROWSER_TIPS[reader.network]) + '</li>' +
-        '<li>Selecciona todo el período disponible y vuelve aquí.</li></ol>' +
-        '<div class="row wrap">' + action('st-reader-scan', 'Leer videos', '', '') + action('st-reader-stop', 'Cancelar', '') + '</div>';
+    if (reader.stage === 'login') {
+      body = '<p class="st-reader-big">Inicia sesión en la ventana del navegador. Si no la ves, búscala en la barra de tareas.</p>' +
+        '<p class="st-note">Es una ventana normal de Edge o Chrome con un perfil propio de Studio. Solo hace falta la primera vez: ' +
+        'en cuanto entres, Studio abrirá tu contenido y leerá cada video por sí solo.</p>' +
+        '<div class="row wrap">' + action('st-reader-stop', 'Cancelar', '') + '</div>';
     } else {
       const detail = reader.stage === 'details' && reader.total
         ? 'Video ' + number(reader.index) + ' de ' + number(reader.total) + ' · ' + number(reader.count) + ' con cifras'
-        : reader.stage === 'listing' ? number(reader.found) + ' videos encontrados' : '';
+        : reader.stage === 'listing' ? number(reader.found) + ' videos encontrados hasta ahora' : '';
       const progress = reader.stage === 'details' && reader.total
         ? '<div class="st-bar"><div style="width:' + (100 * reader.index / reader.total).toFixed(1) + '%"></div></div>' : '<div class="st-bar st-bar-busy"><div></div></div>';
       body = '<p class="st-reader-big">' + esc(reader.message || 'Trabajando…') + '</p>' + progress +
@@ -623,12 +624,12 @@
       'Se abre un navegador propio de Studio, inicias sesión una vez y la sesión queda guardada por red.</p>' +
       '<div class="st-connections">' + Object.entries(NETWORKS).map(([id]) =>
         '<article class="st-connection st-' + id + '"><header>' + badge(id) + '</header><p>' + esc(BROWSER_TIPS[id]) + '</p>' +
-        action('st-browser', 'Abrir lector de ' + NETWORKS[id].name, id, '') .replace('<button', '<button' + (busy ? ' disabled' : '')) +
+        action('st-browser', 'Leer ' + NETWORKS[id].name + ' automáticamente', id, '') .replace('<button', '<button' + (busy ? ' disabled' : '')) +
         '</article>').join('') + '</div>' +
       '<section class="panel st-panel"><h2>Cómo funciona</h2><ol class="st-plain">' +
-      '<li>Pulsa el botón de la red: se abre una ventana normal de Edge o Chrome con un perfil propio de Studio, separado de tu navegador habitual. La primera vez Studio prepara Python y Playwright.</li>' +
-      '<li>Inicia sesión, elige la cuenta y abre el listado indicado con todo el período disponible.</li>' +
-      '<li>Vuelve a Studio y pulsa <strong>Leer videos</strong> en el panel que aparece arriba. Verás el avance video por video.</li></ol>' +
+      '<li>Pulsa el botón de la red: se abre una ventana normal de Edge o Chrome con un perfil propio de Studio, separado de tu navegador habitual.</li>' +
+      '<li>La primera vez inicia sesión. La sesión queda guardada y las siguientes lecturas no te la piden.</li>' +
+      '<li>Studio hace el resto solo: abre tu contenido (en YouTube, Videos y Shorts), recorre todas las páginas y lee las cifras de cada video. Verás el avance aquí arriba.</li></ol>' +
       '<p class="st-note">Si un video ya llegó por API, la lectura se suma a la misma ficha y se indica el origen de cada cifra. Las cifras abreviadas («1,2 K») se guardan con su texto original. Los cambios de diseño de cada red pueden afectar a la lectura.</p></section>';
   }
 
@@ -710,9 +711,9 @@
       render();
       return watchReader();
     }
-    if (name === 'st-reader-scan' || name === 'st-reader-stop') {
+    if (name === 'st-reader-stop') {
       element.disabled = true;
-      reader = await flow(name === 'st-reader-scan' ? 'statistics.browser.decide' : 'statistics.browser.stop', { scan: true }) || reader;
+      reader = await flow('statistics.browser.stop') || reader;
       return render();
     }
     if (name === 'st-reader-clear') { reader = null; return render(); }

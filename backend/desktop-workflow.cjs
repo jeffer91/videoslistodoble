@@ -172,13 +172,11 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     'statistics.refresh': () => publishing.refreshStats(),
     'statistics.browser': ({ network }) => {
       if (browserSession && !browserSession.finished) throw Error('Ya hay una lectura desde el navegador en curso');
-      let decide;
       const controller = new AbortController();
       const session = { id: Date.now(), network, stage: 'preparing', message: 'Preparando el lector…', count: 0,
         found: 0, index: 0, total: 0, finished: false, result: null, error: '' };
-      const decision = new Promise(resolve => { decide = resolve; });
-      browserSession = { session, decide, controller };
-      require('./browser-statistics.cjs').readBrowser(app, network, () => decision,
+      browserSession = { session, controller };
+      require('./browser-statistics.cjs').readBrowser(app, network,
         video => { publishing.browserReading(network, video); },
         { signal: controller.signal, onStatus: (stage, data) => Object.assign(session, { stage }, data) })
         .then(result => Object.assign(session, { finished: true, stage: result.canceled ? 'canceled' : 'done', result }))
@@ -187,14 +185,8 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       return { ...session };
     },
     'statistics.browser.state': () => browserSession ? { ...browserSession.session } : null,
-    'statistics.browser.decide': ({ scan }) => {
-      if (!browserSession || browserSession.session.stage !== 'ready') throw Error('El navegador todavía no está listo');
-      browserSession.decide(scan === true);
-      return { ...browserSession.session };
-    },
     'statistics.browser.stop': () => {
       if (!browserSession || browserSession.session.finished) return null;
-      browserSession.decide(false);
       browserSession.controller.abort();
       return { ...browserSession.session };
     },

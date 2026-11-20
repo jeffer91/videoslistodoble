@@ -32,25 +32,82 @@ def allowed(url, network):
     return u.scheme == "https" and (u.hostname == domain or (u.hostname or "").endswith("." + domain))
 
 
-def scan(page, network):
-    parsed = urlparse(page.url)
-    listing = {
+# Cookie que indica que la sesión está iniciada en cada red.
+SESSION = {
+    "youtube": ("youtube.com", {"SAPISID", "__Secure-3PAPISID", "LOGIN_INFO"}),
+    "tiktok": ("tiktok.com", {"sessionid", "sessionid_ss"}),
+    "instagram": ("instagram.com", {"sessionid"}),
+    "facebook": ("facebook.com", {"c_user"}),
+}
+
+PROFILE_LINK = """() => {
+  const skip = new Set(['explore', 'reels', 'direct', 'accounts', 'stories', 'p', 'reel']);
+  for (const a of document.querySelectorAll('a[href]')) {
+    const alt = (a.querySelector('img')?.alt || '').toLowerCase();
+    const path = (a.getAttribute('href') || '').replace(/^https?:\\/\\/[^/]+/, '').split(/[?#]/)[0];
+    const match = path.match(/^\\/([\\w.]+)\\/$/);
+    if (match && !skip.has(match[1]) && /perfil|profile/.test(alt)) return match[1];
+  }
+  return null;
+}"""
+
+
+def is_listing(url, network):
+    parsed = urlparse(url)
+    return allowed(url, network) and {
         "youtube": parsed.hostname == "studio.youtube.com" and "/videos" in parsed.path,
         "tiktok": "/tiktokstudio/" in parsed.path or parsed.path.startswith("/creator-center/"),
         "facebook": parsed.hostname == "business.facebook.com",
         "instagram": bool(re.fullmatch(r"/[\w.]+/reels/?", parsed.path)),
-    }
-    if not allowed(page.url, network) or not listing[network]:
-        raise ValueError({"youtube":"Abre Contenido en YouTube Studio.",
-                          "instagram":"Abre tu perfil y selecciona la pestaña Reels.",
-                          "tiktok":"Abre Contenido en TikTok Studio.",
-                          "facebook":"Abre Contenido publicado en Meta Business Suite."}[network])
-    discovered = {}
+    }[network]
+
+
+def logged_in(context, network):
+    domain, names = SESSION[network]
+    return any(c["name"] in names and c["domain"].lstrip(".").endswith(domain) for c in context.cookies())
+
+
+def wait_for_login(context, network, minutes=15):
+    if logged_in(context, network):
+        return
+    emit(stage="login", message="Inicia sesión en la ventana del navegador. Studio continuará solo.")
+    deadline = time.time() + minutes * 60
+    while time.time() < deadline:
+        time.sleep(2)
+        if logged_in(context, network):
+            time.sleep(3)  # deja que la red termine de redirigir tras el inicio de sesión
+            return
+    raise ValueError("No se detectó el inicio de sesión. Vuelve a abrir el lector cuando quieras intentarlo.")
+
+
+def targets(page, network):
+    """Listados que Studio abre por sí solo: (dirección, formato, nombre visible)."""
+    if network == "youtube":
+        page.goto("https://studio.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+        try:
+            page.wait_for_url(re.compile(r"/channel/UC[\w-]+"), timeout=45000)
+        except BrowserError:
+            pass
+        match = re.search(r"/channel/(UC[\w-]+)", page.url)
+        if not match:
+            raise ValueError("No se encontró tu canal en YouTube Studio.")
+        base = f"https://studio.youtube.com/channel/{match.group(1)}/videos"
+        return [(base + "/upload", "long", "Contenido → Videos"), (base + "/short", "short", "Contenido → Shorts")]
+    if network == "instagram":
+        page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(4000)
+        user = page.evaluate(PROFILE_LINK)
+        return [(f"https://www.instagram.com/{user}/reels/" if user else None, "short", "Perfil → Reels")]
+    label = "TikTok Studio → Contenido" if network == "tiktok" else "Contenido publicado"
+    return [(START[network], None, label)]
+
+
+def collect(page, network, discovered):
     visited = set()
     idle = 0
     for _ in range(1000):
         if not allowed(page.url, network):
-            raise ValueError("Abre el listado de videos en la plataforma seleccionada.")
+            raise ValueError("El navegador salió de la página de contenido.")
         rows = page.evaluate(READ, network)
         signature = tuple(dict.fromkeys(row["externalId"] for row in rows))
         fresh = signature not in visited
@@ -72,15 +129,39 @@ def scan(page, network):
         page.wait_for_timeout(1000)
         idle = 0 if fresh else idle + 1
         if fresh:
-            emit(stage="listing", found=len(discovered))
+            emit(stage="listing", message="Recorriendo el listado…", found=len(discovered))
         if idle >= 3:
             break
+
+
+def scan(page, network):
+    discovered = {}
+    for url, fmt, label in targets(page, network):
+        if url:
+            emit(stage="navigate", message=f"Abriendo {label}…")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
+        else:
+            emit(stage="navigate", message=f"Abre {label} en el navegador. Studio continuará solo.")
+            deadline = time.time() + 600
+            while not is_listing(page.url, network):
+                if time.time() > deadline:
+                    raise ValueError(f"No se abrió {label}.")
+                page.wait_for_timeout(1500)
+            page.wait_for_timeout(3000)
+        if not is_listing(page.url, network):
+            raise ValueError(f"No se pudo abrir {label}. Comprueba que la cuenta tenga acceso.")
+        before = set(discovered)
+        collect(page, network, discovered)
+        if fmt:
+            for key in set(discovered) - before:
+                discovered[key]["format"] = fmt
 
     details = page.context.new_page()
     missing = 0
     total = len(discovered)
     for index, (key, row) in enumerate(discovered.items(), start=1):
-        emit(stage="details", index=index, total=total)
+        emit(stage="details", message="Leyendo las cifras de cada video…", index=index, total=total)
         url = row["url"]
         if network == "youtube":
             url = f"https://studio.youtube.com/video/{key}/analytics/tab-overview/period-lifetime"
@@ -111,6 +192,7 @@ def scan(page, network):
             emit(video=row)
         else:
             missing += 1
+    details.close()
     emit(done=True, discovered=len(discovered), missing=missing)
 
 
@@ -178,9 +260,9 @@ def main():
             except BrowserError:
                 pass
             emit(ready=True)
-            if sys.stdin.readline().strip() == "scan":
-                pages = [p for p in context.pages if allowed(p.url, network)]
-                scan(pages[-1] if pages else context.pages[-1], network)
+            wait_for_login(context, network)
+            pages = [p for p in context.pages if allowed(p.url, network)]
+            scan(pages[-1] if pages else context.pages[-1], network)
         finally:
             try:
                 browser.close()

@@ -187,6 +187,7 @@ function classify(row) {
   if (row?.target?.kind === 'week') return 'long';
   if (/\/(shorts|reels?)\//.test(String(row?.url || ''))) return 'short';
   const format = String(row?.format || '').toLowerCase();
+  if (format === 'short' || format === 'long') return format;
   if (format === 'reels' || format === 'video_reels') return 'short';
   const length = seconds(row?.duration);
   if (length != null) return length <= SHORT_LIMIT ? 'short' : 'long';
