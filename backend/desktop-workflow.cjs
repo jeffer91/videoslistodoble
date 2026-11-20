@@ -7,6 +7,8 @@ const delivery = require('./delivery.cjs');
 const { createPublishing, safeLink } = require('./publishing.cjs');
 const clients = require('./network-clients.cjs');
 const store = require('./store.cjs');
+const { createCloud } = require('./cloud-sync.cjs');
+const { buildCentral } = require('./insights.cjs');
 
 // Páginas oficiales que abre el asistente de conexión de Estadísticas.
 const GUIDES = Object.freeze({
@@ -24,6 +26,10 @@ const GUIDES = Object.freeze({
 
 function installWorkflow({ app, shell, dialog, safeStorage, root, window, register, runMedia, send }) {
   const publishing = createPublishing(root, safeStorage);
+  const cloud = createCloud(root, safeStorage);
+  // Copia en Firebase después de cada lectura; un fallo queda en el estado de la nube.
+  const cloudSync = () => cloud.sync({ rows: publishing.stats(), growth: publishing.growth(), accounts: publishing.accounts() });
+  const cloudQuiet = () => cloudSync().catch(() => {});
   let browserSession = null;
   let backupTask = null;
   let oauthTask = null;
@@ -169,7 +175,20 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       return shell.openExternal(GUIDES[key]);
     },
     'statistics.list': () => publishing.stats(),
-    'statistics.refresh': () => publishing.refreshStats(),
+    'statistics.refresh': async () => {
+      const result = await publishing.refreshStats();
+      cloudQuiet();
+      return result;
+    },
+    'statistics.central': () => buildCentral(publishing.stats(), publishing.growth()),
+    'cloud.status': () => cloud.status(),
+    'cloud.connect': async data => {
+      const result = await cloud.connect(data);
+      await cloudSync().catch(() => {});
+      return result.connected ? cloud.status() : result;
+    },
+    'cloud.disconnect': () => cloud.disconnect(),
+    'cloud.sync': async () => { await cloudSync(); return cloud.status(); },
     'statistics.browser': ({ network }) => {
       if (browserSession && !browserSession.finished) throw Error('Ya hay una lectura desde el navegador en curso');
       const controller = new AbortController();
@@ -178,8 +197,13 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       browserSession = { session, controller };
       require('./browser-statistics.cjs').readBrowser(app, network,
         video => { publishing.browserReading(network, video); },
-        { signal: controller.signal, onStatus: (stage, data) => Object.assign(session, { stage }, data) })
-        .then(result => Object.assign(session, { finished: true, stage: result.canceled ? 'canceled' : 'done', result }))
+        { signal: controller.signal, onStatus: (stage, data) => Object.assign(session, { stage }, data),
+          onAccount: account => { try { publishing.accountReading(network, account); session.followers = account.followers; } catch { /* cifra no válida */ } } })
+        .then(result => {
+          publishing.snapshotAccounts();
+          cloudQuiet();
+          return Object.assign(session, { finished: true, stage: result.canceled ? 'canceled' : 'done', result });
+        })
         .catch(error => Object.assign(session, { finished: true, stage: controller.signal.aborted ? 'canceled' : 'error',
           error: String(error?.message || error).slice(0, 400) }));
       return { ...session };
@@ -227,7 +251,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     if (now - lastStatsAttempt >= 60 * 60000 &&
       (!synced.at || now - Date.parse(synced.at) >= 7 * 86400000) && Object.values(publishing.accounts()).some(Boolean)) {
       lastStatsAttempt = now;
-      publishing.refreshStats().catch(() => {});
+      publishing.refreshStats().then(cloudQuiet).catch(() => {});
     }
     if (app.isPackaged && process.platform === 'win32' && now - lastUpdateAttempt >= 86400000 &&
         production.readState(root, 'actualizaciones', { automatic: true }).automatic) {

@@ -52,6 +52,65 @@ PROFILE_LINK = """() => {
 }"""
 
 
+FOLLOWERS = r"""() => {
+  const text = document.body ? document.body.innerText : '';
+  const patterns = [
+    /suscriptores actuales\s*\n\s*(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)/i,
+    /current subscribers\s*\n\s*(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)/i,
+    /(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)\s*(?:seguidores|followers)\b/i,
+    /(?:seguidores|followers)\s*\n\s*(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)/i,
+  ];
+  for (const pattern of patterns) { const match = text.match(pattern); if (match) return match[1].trim(); }
+  return null;
+}"""
+
+
+def parse_count(raw):
+    match = re.fullmatch(r"(\d[\d.,\s]*?)\s*(mil|mill\.?|k|m)?", (raw or "").strip().lower())
+    if not match:
+        return None
+    value, unit = match.group(1).replace(" ", ""), match.group(2)
+    if unit:
+        value = value.replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}([.,]\d{3})+", value):
+        value = re.sub(r"[.,]", "", value)
+    elif re.search(r"[.,]", value):
+        return None
+    try:
+        number = float(value) * {"k": 1e3, "mil": 1e3, "m": 1e6, "mill": 1e6, "mill.": 1e6}.get(unit, 1)
+    except ValueError:
+        return None
+    return round(number)
+
+
+def read_followers(page, reported):
+    """Seguidores de la cuenta, leídos una sola vez por lectura."""
+    if reported:
+        return True
+    try:
+        raw = page.evaluate(FOLLOWERS)
+    except BrowserError:
+        return False
+    followers = parse_count(raw)
+    if followers is None:
+        return False
+    emit(account={"followers": followers, "raw": raw})
+    return True
+
+
+def detail_urls(network, key, row):
+    if network == "youtube":
+        return [f"https://studio.youtube.com/video/{key}/analytics/tab-overview/period-lifetime"]
+    if network == "tiktok":
+        candidates = [row.get("analyticsUrl"), f"https://www.tiktok.com/tiktokstudio/analytics/{key}", row["url"]]
+    else:
+        candidates = [row.get("analyticsUrl"), row["url"]]
+    return list(dict.fromkeys(url for url in candidates if url))
+
+
+INSIGHTS = re.compile(r"^(ver estadísticas|ver estadísticas y anuncios|estadísticas|view insights|see insights|insights)$", re.I)
+
+
 def is_listing(url, network):
     parsed = urlparse(url)
     return allowed(url, network) and {
@@ -89,6 +148,8 @@ def targets(page, network):
         except BrowserError:
             pass
         match = re.search(r"/channel/(UC[\w-]+)", page.url)
+        page.wait_for_timeout(3000)
+        read_followers(page, False)
         if not match:
             raise ValueError("No se encontró tu canal en YouTube Studio.")
         base = f"https://studio.youtube.com/channel/{match.group(1)}/videos"
@@ -136,6 +197,7 @@ def collect(page, network, discovered):
 
 def scan(page, network):
     discovered = {}
+    followers = network == "youtube"  # YouTube ya lo leyó en el panel del canal
     for url, fmt, label in targets(page, network):
         if url:
             emit(stage="navigate", message=f"Abriendo {label}…")
@@ -151,6 +213,7 @@ def scan(page, network):
             page.wait_for_timeout(3000)
         if not is_listing(page.url, network):
             raise ValueError(f"No se pudo abrir {label}. Comprueba que la cuenta tenga acceso.")
+        followers = read_followers(page, followers)
         before = set(discovered)
         collect(page, network, discovered)
         if fmt:
@@ -162,32 +225,34 @@ def scan(page, network):
     total = len(discovered)
     for index, (key, row) in enumerate(discovered.items(), start=1):
         emit(stage="details", message="Leyendo las cifras de cada video…", index=index, total=total)
-        url = row["url"]
-        if network == "youtube":
-            url = f"https://studio.youtube.com/video/{key}/analytics/tab-overview/period-lifetime"
-        try:
-            details.goto(url, wait_until="domcontentloaded", timeout=18000)
-            if allowed(details.url, network):
-                details.wait_for_timeout(1200)
-                insights = details.get_by_text(re.compile(r"^(ver estadísticas|view insights|see insights)$", re.I), exact=True)
-                opened = insights.count() == 1 and insights.is_visible()
-                if opened:
-                    insights.click(timeout=4000)
-                    details.wait_for_timeout(900)
+        for url in detail_urls(network, key, row):
+            try:
+                details.goto(url, wait_until="domcontentloaded", timeout=20000)
                 if not allowed(details.url, network):
-                    continue_reading = []
-                else:
-                    continue_reading = details.evaluate(READ, {"network": network, "openedId": key if opened else None})
-                for item in continue_reading:
-                    if item["externalId"] == key:
-                        if item.get("period") and not re.search(r"lifetime|desde siempre|desde la publicación|since published", item["period"], re.I):
-                            continue
-                        row["metrics"].update(item["metrics"])
-                        row["rawMetrics"].update(item["rawMetrics"])
-                        for field in ["publishedAt", "title", "dateText"]:
-                            row[field] = row.get(field) or item.get(field)
-        except BrowserError:
-            pass
+                    continue
+                details.wait_for_timeout(1500)
+                insights = details.get_by_text(INSIGHTS, exact=True)
+                opened = insights.count() >= 1 and insights.first.is_visible()
+                if opened:
+                    insights.first.click(timeout=4000)
+                    details.wait_for_timeout(1200)
+                if not allowed(details.url, network):
+                    continue
+                found = False
+                for item in details.evaluate(READ, {"network": network, "openedId": key if opened else None}):
+                    if item["externalId"] != key:
+                        continue
+                    if item.get("period") and not re.search(r"lifetime|desde siempre|desde la publicación|since published", item["period"], re.I):
+                        continue
+                    found = found or bool(item["metrics"])
+                    row["metrics"].update(item["metrics"])
+                    row["rawMetrics"].update(item["rawMetrics"])
+                    for field in ["publishedAt", "title", "dateText", "duration"]:
+                        row[field] = row.get(field) or item.get(field)
+                if found:
+                    break
+            except BrowserError:
+                continue
         if row["metrics"]:
             emit(video=row)
         else:

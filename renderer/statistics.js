@@ -17,7 +17,7 @@
     tiktok: { name: 'TikTok', short: 'Videos cortos', long: 'Videos largos', minutes: 20 }
   };
   const FORMATS = { short: 'Shorts y Reels', long: 'Videos largos' };
-  const TABS = [['summary', 'Resumen'], ['videos', 'Videos'], ['connections', 'Conexiones'], ['browser', 'Lector de navegador']];
+  const TABS = [['summary', 'Resumen'], ['central', 'Central de datos'], ['videos', 'Videos'], ['connections', 'Conexiones'], ['browser', 'Lector de navegador']];
   const PERIODS = [['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['90', 'Últimos 90 días'], ['365', 'Último año'], ['', 'Todo el historial']];
   const METRIC_LABELS = {
     views: 'Vistas', likes: 'Me gusta', comments: 'Comentarios', shares: 'Compartidos', followers: 'Seguidores de la cuenta',
@@ -34,6 +34,7 @@
   const view = { tab: 'summary', network: '', format: '', period: '', tag: '', search: '', sort: 'publishedAt', desc: true };
   let rows = [], status = {}, accounts = {}, loaded = false;
   let reader = null, readerTimer = null, readerSeen = '';
+  let central = null, cloud = {}, growthMetric = 'percent';
 
   const flow = (action, data) => StudioWorkflow.flow(action, data);
 
@@ -133,8 +134,9 @@
   /* ---------- datos ---------- */
 
   async function load() {
-    [rows, status, accounts, reader] = await Promise.all([
-      flow('statistics.list'), flow('statistics.status'), flow('statistics.accounts'), flow('statistics.browser.state')
+    [rows, status, accounts, reader, central, cloud] = await Promise.all([
+      flow('statistics.list'), flow('statistics.status'), flow('statistics.accounts'), flow('statistics.browser.state'),
+      flow('statistics.central'), flow('cloud.status')
     ]);
     loaded = true;
     if (reader && !reader.finished) watchReader();
@@ -171,7 +173,7 @@
       '" aria-selected="' + (view.tab === id) + '">' + esc(label) +
       (id === 'connections' ? ' <small>' + connectedCount() + '/4</small>' : '') +
       (id === 'browser' && reader && !reader.finished ? ' <small class="st-live">en curso</small>' : '') + '</button>').join('') + '</nav>';
-    const body = view.tab === 'videos' ? videosTab() : view.tab === 'connections' ? connectionsTab()
+    const body = view.tab === 'central' ? centralTab() : view.tab === 'videos' ? videosTab() : view.tab === 'connections' ? connectionsTab()
       : view.tab === 'browser' ? browserTab() : summaryTab();
     return '<div class="st">' + header + syncBar() + tabs + body + '</div>';
   }
@@ -326,6 +328,158 @@
       '<p class="st-note">Etiqueta tus récords en la ficha (tipo, jugadores) para ver qué temas atraen más vistas.</p>') + '</section>';
   }
 
+  /* ---------- Central de datos ---------- */
+
+  const COLORS = { youtube: '#ff5a52', instagram: '#e8578f', facebook: '#4d8df5', tiktok: '#3ee6e0' };
+  const WEEKDAY_NAMES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+  function centralTab() {
+    if (!central || !central.totals.videos) {
+      return empty('La central se llena con tus lecturas', 'Sincroniza por API o usa el lector de navegador. Cada lectura guarda una foto del día: con dos o más verás cómo crece cada red.',
+        '<div class="row wrap st-center">' + action('st-tab', 'Conectar mis redes', 'connections', '') + action('st-tab', 'Usar el lector', 'browser') + '</div>');
+    }
+    return insightCards() + networkTable() + '<div class="st-grid-2">' + growthChart() + crossTable() + '</div>' +
+      '<div class="st-grid-2">' + calendarBars('Mejor día para publicar', central.weekdays, WEEKDAY_NAMES,
+        'Rendimiento de cada día frente a la mediana de su red (1× = normal).') +
+      calendarBars('Mejor hora para publicar', central.hours, central.hours.map(h => String(h.index)),
+        'Solo videos con hora exacta (API). Hora de tu equipo.') + '</div>' +
+      '<div class="st-grid-2">' + videoList('Videos que despegaron', central.outliers, item => times(item.ratio) + ' la mediana',
+        'Aparecen cuando una red tiene al menos 5 videos medidos.') +
+      videoList('En subida ahora', central.risers, item => '+' + compact(item.perDay) + ' vistas/día',
+        'Comparan las dos últimas lecturas de cada video.') + '</div>' + themesPanel();
+  }
+
+  function times(n) { return number(n, 1) + '×'; }
+
+  function insightCards() {
+    if (!central.insights.length) return '<p class="st-lead">Todavía hay pocos datos para sacar conclusiones. Con más videos y lecturas en distintos días aparecerán aquí.</p>';
+    const card = item => '<article class="st-insight st-insight-' + item.kind + '"' +
+      (item.id ? ' data-action="st-detail" data-id="' + esc(item.id) + '" role="button" tabindex="0"' : '') + '><h3>' + esc(item.title) + '</h3><p>' +
+      esc(item.text) + '</p></article>';
+    const first = central.insights.slice(0, 8), rest = central.insights.slice(8);
+    return '<div class="st-insights">' + first.map(card).join('') + '</div>' + (rest.length ? '<details class="st-details st-more"><summary>Ver ' +
+      rest.length + ' conclusiones más</summary><div class="st-insights">' + rest.map(card).join('') + '</div></details>' : '');
+  }
+
+  function change(value) {
+    if (!value) return '<span class="st-note">—</span>';
+    const up = value.change >= 0;
+    return '<span class="st-delta ' + (up ? 'up' : 'down') + '">' + (up ? '▲ ' : '▼ ') + compact(Math.abs(value.change)) +
+      (value.percent != null ? ' · ' + (up ? '+' : '−') + number(Math.abs(value.percent), 1) + ' %' : '') + '</span><small>' + value.days + ' días</small>';
+  }
+
+  function networkTable() {
+    const list = central.networks;
+    const best = key => Math.max(...list.map(n => n[key] ?? -Infinity));
+    const cell = (n, key, text) => '<td class="' + (list.length > 1 && n[key] != null && n[key] === best(key) ? 'st-top-cell' : '') + '">' + text + '</td>';
+    return '<section class="panel st-panel"><h2>Comparativa por red</h2><div class="workflow-table st-table"><table><thead><tr>' +
+      ['Red', 'Videos', 'Vistas', 'Promedio', 'Mediana', 'Interacción', 'Retención', 'Tiempo medio', 'Shorts (prom.)', 'Largos (prom.)', 'Seguidores', 'Seguidores · 30 días']
+        .map(h => '<th>' + h + '</th>').join('') + '</tr></thead><tbody>' + list.map(n => '<tr><th>' + badge(n.network) + '</th>' +
+        '<td>' + number(n.videos) + '</td>' + cell(n, 'views', compact(n.views)) + cell(n, 'average', compact(n.average)) +
+        cell(n, 'median', compact(n.median)) + cell(n, 'engagement', percent(n.engagement)) + cell(n, 'retention', percent(n.retention)) +
+        '<td>' + (n.averageWatchTime != null ? number(n.averageWatchTime, 1) + ' s' : '—') + '</td>' +
+        '<td>' + compact(n.shorts.average) + ' <small>· ' + n.shorts.videos + '</small></td>' +
+        '<td>' + compact(n.long.average) + ' <small>· ' + n.long.videos + '</small></td>' +
+        '<td>' + compact(n.followers) + '</td><td>' + change(n.followers30) + '</td></tr>').join('') +
+      '</tbody></table></div><p class="st-note">En verde, la mejor red en cada columna.</p></section>';
+  }
+
+  function growthChart() {
+    const mode = growthMetric, key = mode === 'views' ? 'views' : 'followers';
+    const series = Object.entries(central.growth || {}).map(([network, list]) => {
+      const points = (list || []).filter(p => p[key] != null).map(p => ({ t: Date.parse(p.day), v: p[key] }));
+      // En % todas las redes parten de 0 y se comparan aunque tengan tamaños muy distintos.
+      return [network, mode === 'percent' && points[0]?.v ? points.map(p => ({ t: p.t, v: 100 * (p.v / points[0].v - 1), raw: p.v })) : points];
+    }).filter(([, points]) => points.length);
+    const show = p => mode === 'percent' ? (p.v >= 0 ? '+' : '') + number(p.v, 1) + ' % (' + number(p.raw) + ')' : number(p.v);
+    const toggle = '<div class="st-segment">' + [['percent', '% de crecimiento'], ['followers', 'Seguidores'], ['views', 'Vistas acumuladas']].map(([id, label]) =>
+      '<button data-action="st-growth" data-id="' + id + '" class="' + (mode === id ? 'active' : '') + '">' + label + '</button>').join('') + '</div>';
+    const head = '<section class="panel st-panel"><div class="row between wrap"><h2>Crecimiento</h2>' + toggle + '</div>';
+    if (!series.some(([, points]) => points.length >= 2)) {
+      return head + '<p class="st-note">Studio guarda una foto por día en cada lectura. Desde la segunda lectura en otro día verás aquí la curva de cada red.</p>' +
+        (series.length ? '<ul class="st-rank">' + series.map(([n, points]) => '<li><span>' + badge(n) + '</span><strong>' + compact(points.at(-1).v) + '</strong></li>').join('') + '</ul>' : '') + '</section>';
+    }
+    const all = series.flatMap(([, points]) => points);
+    const minT = Math.min(...all.map(p => p.t)), maxT = Math.max(...all.map(p => p.t)) || minT + 1;
+    let minV = Math.min(...all.map(p => p.v)), maxV = Math.max(...all.map(p => p.v));
+    if (maxV - minV < 1e-9) { minV -= 1; maxV += 1; }
+    const pad = (maxV - minV) * .08; minV -= pad; maxV += pad;
+    const W = 560, H = 190, P = 6;
+    const x = t => P + (W - 2 * P) * (t - minT) / Math.max(1, maxT - minT), y = v => H - P - (H - 2 * P) * (v - minV) / (maxV - minV);
+    const zero = mode === 'percent' && minV < 0 && maxV > 0 ? '<line x1="0" x2="' + W + '" y1="' + y(0).toFixed(1) + '" y2="' + y(0).toFixed(1) + '" class="st-zero"/>' : '';
+    const lines = series.map(([n, points]) => '<polyline fill="none" stroke="' + COLORS[n] + '" stroke-width="2.4" stroke-linejoin="round" points="' +
+      points.map(p => x(p.t).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ') + '"/>' +
+      points.map(p => '<circle cx="' + x(p.t).toFixed(1) + '" cy="' + y(p.v).toFixed(1) + '" r="2.6" fill="' + COLORS[n] + '"><title>' +
+        esc(NETWORKS[n].name + ' · ' + day(p.t) + ': ' + show(p)) + '</title></circle>').join('') +
+      '<text x="' + (W - P - 2) + '" y="' + (y(points.at(-1).v) - 6).toFixed(1) + '" text-anchor="end" fill="' + COLORS[n] + '" class="st-end">' +
+      esc(mode === 'percent' ? (points.at(-1).v >= 0 ? '+' : '') + number(points.at(-1).v, 1) + ' %' : compact(points.at(-1).v)) + '</text>').join('');
+    return head + '<div class="st-legend">' + series.map(([n]) => '<span class="st-dot" style="background:' + COLORS[n] + '"></span>' + esc(NETWORKS[n].name)).join('') + '</div>' +
+      '<svg class="st-line" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Crecimiento por red">' +
+      '<line x1="0" x2="' + W + '" y1="' + (H - P) + '" y2="' + (H - P) + '" class="st-axis"/>' + zero + lines + '</svg>' +
+      '<div class="row between st-note"><span>' + esc(day(minT)) + '</span><span>' + (mode === 'percent' ? 'Cambio desde la primera lectura de cada red' : 'Escala ajustada a los datos') +
+      '</span><span>' + esc(day(maxT)) + '</span></div></section>';
+  }
+
+  function crossTable() {
+    const order = ['youtube', 'tiktok', 'instagram', 'facebook'];
+    const head = '<section class="panel st-panel"><h2>Mismo récord en varias redes</h2>';
+    if (!central.crossPosts.length) return head + '<p class="st-note">Cuando un mismo récord aparezca en dos o más redes (mismo proyecto o título parecido) verás aquí dónde rindió más.</p></section>';
+    return head + '<div class="workflow-table st-table"><table><thead><tr><th>Récord</th>' + order.map(n => '<th>' + esc(NETWORKS[n].name) + '</th>').join('') +
+      '</tr></thead><tbody>' + central.crossPosts.slice(0, 12).map(group => '<tr><th><span class="st-clip">' + esc(group.title) + '</span></th>' +
+        order.map(n => {
+          const item = group.networks[n];
+          return '<td class="' + (group.winner === n ? 'st-top-cell' : '') + '">' + (item ? '<button class="st-link" data-action="st-detail" data-id="' +
+            esc(item.id) + '">' + compact(item.views) + '</button>' + (group.winner === n ? ' 🏆' : '') : '—') + '</td>';
+        }).join('') + '</tr>').join('') + '</tbody></table></div></section>';
+  }
+
+  function calendarBars(title, groups, labels, note) {
+    const max = Math.max(1.5, ...groups.map(g => g.average || 0));
+    const bestValue = Math.max(...groups.filter(g => g.videos >= 3).map(g => g.average || 0));
+    return '<section class="panel st-panel"><h2>' + esc(title) + '</h2><div class="st-cal">' + groups.map((g, i) =>
+      '<div class="st-cal-col" title="' + esc(labels[i] + ': ' + g.videos + ' videos · ' + (g.average ? times(g.average) : 'sin datos')) + '">' +
+      '<div class="st-cal-bar"><div class="' + (g.videos >= 3 && g.average === bestValue ? 'best' : g.videos < 3 ? 'few' : '') +
+      '" style="height:' + (100 * (g.average || 0) / max).toFixed(1) + '%"></div><i style="bottom:' + (100 / max).toFixed(1) + '%"></i></div>' +
+      '<small>' + esc(labels[i]) + '</small></div>').join('') + '</div><p class="st-note">' + esc(note) + ' Barras tenues: menos de 3 videos.</p></section>';
+  }
+
+  function videoList(title, items, measure, note) {
+    return '<section class="panel st-panel"><h2>' + esc(title) + '</h2>' + (items.length ? '<ol class="st-top">' + items.map(item =>
+      '<li><button class="st-link" data-action="st-detail" data-id="' + esc(item.id) + '">' + esc(item.title) + '</button>' +
+      '<span>' + badge(item.network) + formatBadge(item.format) + '</span><strong>' + esc(measure(item)) + '</strong></li>').join('') + '</ol>'
+      : '<p class="st-note">' + esc(note) + '</p>') + '</section>';
+  }
+
+  function themesPanel() {
+    if (!central.themes.length) return '';
+    return '<section class="panel st-panel"><h2>Temas, jugadores y competiciones</h2><p class="st-note">Índice frente a la mediana de cada red: 1× es lo normal; más de 1× rinde mejor.</p>' +
+      '<ul class="st-rank st-themes">' + central.themes.map(t => '<li><span>' + esc(t.tag) + ' <small>· ' + esc(t.field) + ' · ' + t.videos + ' videos</small></span>' +
+      '<span class="st-index"><i style="width:' + Math.min(100, 50 * t.index).toFixed(0) + '%" class="' + (t.index >= 1 ? 'up' : 'down') + '"></i><strong>' + times(t.index) + '</strong></span></li>').join('') + '</ul></section>';
+  }
+
+  /* ---------- Firebase ---------- */
+
+  function cloudPanel() {
+    const rulesBox = '<details class="st-details"' + (cloud.connected ? '' : ' open') + '><summary>Reglas de seguridad para Realtime Database</summary><p class="st-note">Firebase → Realtime Database → Reglas: borra lo que haya, pega esto y pulsa Publicar. Así solo tu usuario puede leer y escribir tus datos.</p>' +
+      '<pre class="st-code">' + esc(cloud.rules || '') + '</pre>' + action('st-copy-rules', 'Copiar reglas', '') + '</details>';
+    if (cloud.connected) {
+      return '<section class="panel st-panel st-cloud"><div class="row between wrap"><h2>Base de datos en la nube · Firebase</h2><span class="st-status on">Conectada</span></div>' +
+        '<p>' + esc(cloud.email) + ' <small>· proyecto ' + esc(cloud.projectId) + '</small></p>' +
+        '<p class="st-note">Última copia: ' + esc(cloud.lastSyncAt ? moment(cloud.lastSyncAt) : 'pendiente') + (cloud.lastCount ? ' · ' + number(cloud.lastCount) + ' datos enviados' : '') + '. Studio sube los datos solo después de cada lectura.</p>' +
+        (cloud.lastError ? '<p class="st-error">' + esc(cloud.lastError) + '</p>' : '') +
+        '<div class="row wrap">' + action('st-cloud-sync', 'Subir ahora', '', '') + action('st-cloud-off', 'Desconectar', '', 'outline') + '</div>' + rulesBox + '</section>';
+    }
+    return '<section class="panel st-panel st-cloud"><div class="row between wrap"><h2>Base de datos en la nube · Firebase</h2><span class="st-status off">Sin conectar</span></div>' +
+      '<p class="st-note">Guarda una copia de todas tus estadísticas e historial en tu Realtime Database, protegida con tu usuario.</p>' +
+      '<ol class="st-steps st-steps-compact">' +
+      '<li><span class="st-step-n">1</span><div><h4>Activa el inicio de sesión por correo</h4><p>Firebase → Authentication → Comenzar → Método de acceso → Correo electrónico/contraseña → Habilitar.</p></div></li>' +
+      '<li><span class="st-step-n">2</span><div><h4>Protege la base de datos</h4><p>Tus reglas actuales dejan la base abierta a cualquiera. Reemplázalas por estas:</p>' + rulesBox + '</div></li>' +
+      '<li class="st-step-final"><span class="st-step-n">3</span><div><h4>Conecta Studio</h4>' +
+      field('Configuración de Firebase (pega el bloque firebaseConfig completo)', '<textarea id="st-fb-config" rows="5" spellcheck="false" placeholder="const firebaseConfig = { apiKey: ..., databaseURL: ..., projectId: ... }"></textarea>') +
+      '<div class="st-form-grid">' + text('st-fb-email', 'Correo') + secret('st-fb-pass', 'Contraseña (mínimo 6 caracteres)') + '</div>' +
+      '<div class="row wrap">' + action('st-cloud-connect', 'Crear cuenta y conectar', 'create', '') + action('st-cloud-connect', 'Ya tengo cuenta: iniciar sesión', 'login') + '</div></div></li></ol></section>';
+  }
+
   /* ---------- Videos ---------- */
 
   function sortValue(row, key) {
@@ -464,6 +618,7 @@
           (id === 'tiktok' && !account ? '<p class="st-note">¿Prefieres no crear una app? Usa el <button class="st-link" data-action="st-tab" data-id="browser">lector de navegador</button>.</p>' : '') +
           '</article>';
       }).join('') + '</div>' +
+      cloudPanel() +
       '<section class="panel st-panel st-why"><h2>¿Por qué la conexión oficial?</h2><ul>' +
       '<li><strong>Cifras exactas</strong>: 1.234 vistas, no «1,2 K».</li>' +
       '<li><strong>Todo el catálogo</strong>: incluye los videos publicados fuera de Studio.</li>' +
@@ -609,7 +764,7 @@
       if (!reader || reader.finished) {
         clearInterval(readerTimer);
         readerTimer = null;
-        rows = await flow('statistics.list');
+        [rows, central, cloud] = await Promise.all([flow('statistics.list'), flow('statistics.central'), flow('cloud.status')]);
         if (reader?.stage === 'done') notice('Lectura terminada: ' + reader.result.count + ' videos con cifras', !reader.result.count);
         if (reader?.stage === 'error') notice(reader.error, true);
       }
@@ -717,6 +872,36 @@
       return render();
     }
     if (name === 'st-reader-clear') { reader = null; return render(); }
+    if (name === 'st-growth') { growthMetric = id; return render(); }
+    if (name === 'st-copy-rules') {
+      try { await navigator.clipboard.writeText(cloud.rules); }
+      catch { return notice('No se pudo copiar: selecciona el texto de las reglas y cópialo a mano.', true); }
+      return notice('Reglas copiadas. Pégalas en Firebase → Realtime Database → Reglas y pulsa Publicar.');
+    }
+    if (name === 'st-cloud-connect') {
+      element.disabled = true;
+      const label = element.textContent;
+      element.textContent = 'Conectando…';
+      try {
+        cloud = await flow('cloud.connect', { config: $('#st-fb-config')?.value || '', email: value('st-fb-email'),
+          password: $('#st-fb-pass')?.value || '', create: id === 'create' });
+        notice(cloud.lastError ? 'Conectado, pero la primera copia falló: ' + cloud.lastError : 'Firebase conectado. Tus estadísticas ya están en la nube.', Boolean(cloud.lastError));
+        return render();
+      } finally { element.disabled = false; element.textContent = label; }
+    }
+    if (name === 'st-cloud-sync') {
+      element.disabled = true;
+      element.textContent = 'Subiendo…';
+      try { cloud = await flow('cloud.sync'); notice('Copia en Firebase actualizada'); }
+      catch (error) { cloud = await flow('cloud.status'); throw error; }
+      finally { render(); }
+      return;
+    }
+    if (name === 'st-cloud-off') {
+      cloud = await flow('cloud.disconnect');
+      notice('Firebase desconectado. Los datos que ya estaban en la nube se conservan.');
+      return render();
+    }
   }
 
   document.addEventListener('click', event => {

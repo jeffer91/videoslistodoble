@@ -14,6 +14,8 @@ const VAULT = 'cuentas-cifradas';
 const NETWORKS = delivery.NETWORKS;
 const ACCOUNT_NETWORKS = [...NETWORKS, 'facebook'];
 const INVENTORY = 'catalogo-estadistico';
+const GROWTH = 'crecimiento-cuentas';
+const BROWSER_ACCOUNTS = 'cuentas-navegador';
 const WAIT = 45000;
 const PROVIDERS = new Set(['direct', 'ayrshare', 'instagram-login']);
 // Instagram no permite renovar un token ya vencido: se renueva con una semana de margen.
@@ -369,6 +371,46 @@ function createPublishing(root, vault, platform = clients) {
     return key;
   }
 
+  /** Seguidores leídos desde el navegador (perfil o panel del canal). */
+  function accountReading(network, { followers }) {
+    accountName(network);
+    if (!Number.isSafeInteger(followers) || followers < 0) throw Error('Cifra de seguidores inválida');
+    const saved = production.readState(root, BROWSER_ACCOUNTS, {});
+    saved[network] = { followers, at: new Date().toISOString() };
+    production.writeState(root, BROWSER_ACCOUNTS, saved);
+    return snapshotAccounts();
+  }
+
+  /**
+   * Una foto diaria por red con seguidores, vistas acumuladas y número de videos.
+   * Es la base para ver cómo crece cada cuenta en el tiempo.
+   */
+  function snapshotAccounts(now = new Date()) {
+    const rows = stats();
+    const growth = production.readState(root, GROWTH, {});
+    const browser = production.readState(root, BROWSER_ACCOUNTS, {});
+    const identities = accounts();
+    const day = now.toISOString().slice(0, 10);
+    for (const network of ACCOUNT_NETWORKS) {
+      const own = rows.filter(row => row.network === network && row.metrics);
+      const fromRows = own.filter(row => row.metrics.followers != null)
+        .sort((a, b) => String(b.metricsAt || '').localeCompare(String(a.metricsAt || '')))[0];
+      const candidates = [
+        fromRows && { followers: fromRows.metrics.followers, at: fromRows.metricsAt },
+        browser[network], identities[network]?.followers != null && { followers: identities[network].followers, at: '' }
+      ].filter(Boolean).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+      if (!own.length && !candidates.length) continue;
+      const total = key => own.reduce((sum, row) => sum + (Number(row.metrics[key]) || 0), 0);
+      const entry = { day, at: now.toISOString(), followers: candidates[0]?.followers ?? null,
+        views: total('views'), likes: total('likes'), comments: total('comments'), videos: own.length };
+      const list = (growth[network] || []).filter(item => item.day !== day);
+      list.push(entry);
+      growth[network] = list.sort((a, b) => a.day.localeCompare(b.day)).slice(-1000);
+    }
+    production.writeState(root, GROWTH, growth);
+    return growth;
+  }
+
   function browserReading(network,video) {
     const inventory=production.readState(root,INVENTORY,{});
     recordReading(inventory,network,{id:'navegador',label:'Navegador'},video,'navegador',new Date().toISOString());
@@ -433,6 +475,7 @@ function createPublishing(root, vault, platform = clients) {
         }
       }
       production.writeState(root, 'sincronizacion', { at: new Date().toISOString(), count, errors:[...new Set(errors)] });
+      snapshotAccounts();
       return { count, errors };
     } finally {
       refreshing = false;
@@ -469,7 +512,7 @@ function createPublishing(root, vault, platform = clients) {
     return file;
   }
 
-  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, refreshStats, stats, exportStats };
+  return { syncStatus:()=>production.readState(root,'sincronizacion',{}), accounts, accountDetails, testAccount, connect, disconnect, accountFor, jobsFor, enqueue, recover, tick, changeJob, addLink, manualStats, browserReading, accountReading, snapshotAccounts, growth: () => production.readState(root, GROWTH, {}), refreshStats, stats, exportStats };
 }
 
 module.exports = { createPublishing, safeLink };

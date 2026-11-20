@@ -15,7 +15,7 @@ const {command} = require('./media.cjs');
  */
 const STAGES = new Set(['login', 'navigate', 'listing', 'details']);
 
-async function readBrowser(app, network, save, {onStatus = () => {}, signal} = {}) {
+async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, signal} = {}) {
   if (!['youtube','tiktok','instagram','facebook'].includes(network)) throw Error('Red desconocida');
   const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const cache = path.join(app.getPath('userData'),'estadisticas-navegador');
@@ -67,6 +67,7 @@ async function readBrowser(app, network, save, {onStatus = () => {}, signal} = {
         onStatus(stage, Object.fromEntries(Object.entries({message, found, index, total}).filter(([, v]) => v !== undefined)));
       }
       if (event.video) {save(event.video); count++; onStatus('details', {count});}
+      if (event.account && Number.isSafeInteger(event.account.followers)) onAccount(event.account);
       if (event.done) summary=event;
       if (event.error) failure=event.error;
     }

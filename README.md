@@ -64,6 +64,7 @@ La línea de tiempo permite reordenar los récords y grabar introducción y cier
 | Pestaña | Para qué sirve |
 | --- | --- |
 | **Resumen** | Vistas, publicaciones, promedio por video, interacción y seguidores. Compara **Shorts y Reels** con **videos largos**, muestra las vistas por semana, una tarjeta por red, los videos con más vistas y qué temas y jugadores funcionan mejor. |
+| **Central de datos** | Conclusiones automáticas (red más fuerte, quién crece, Shorts frente a largos, videos que despegaron o no arrancan, mejor día y hora, temas que más atraen), comparativa por red, curva de crecimiento de seguidores y vistas, el mismo récord en las cuatro redes, y videos en subida. |
 | **Videos** | Tabla de todas las publicaciones con búsqueda, orden por cualquier columna y detalle con el historial de cada medición. |
 | **Conexiones** | Asistente paso a paso para conectar cada red por su API oficial, con enlaces a cada página, prueba de conexión y estado del acceso. |
 | **Lector de navegador** | Lectura supervisada de YouTube Studio, TikTok Studio, Instagram y Meta Business Suite para completar lo que la API no entrega. |
@@ -84,6 +85,18 @@ Cada red se configura una sola vez desde **Estadísticas → Conexiones → Cone
 **Sincronizar ahora** recorre todas las páginas de resultados de cada cuenta, incluidos los videos publicados fuera de Studio. Con la app abierta se sincroniza sola una vez por semana. Cada lectura añade una medición fechada: un cero válido se conserva y un campo ausente no borra el último valor conocido. **Exportar para Claude** genera un JSON con las fechas, las métricas y su procedencia.
 
 El **lector de navegador** abre Edge o Chrome con un perfil propio por red y prepara Python y Playwright la primera vez. Inicia sesión, abre el listado indicado y pulsa **Leer videos**. Si un video ya llegó por API, la lectura se suma a la misma ficha. Los cambios de diseño de cada red pueden afectar a la lectura y las cifras abreviadas («1,2 K») se guardan con su texto original.
+
+Cada lectura (API o navegador) guarda una **foto diaria por red** con seguidores, vistas acumuladas y número de videos: es la base de las curvas de crecimiento. El lector de navegador recorre solo el contenido de cada red, abre la analítica de cada video y usa un diccionario común (por ejemplo, «Reacciones» = me gusta, «Favoritos» = guardados) para que las cuatro redes guarden las mismas métricas: vistas, me gusta, comentarios, compartidos, guardados, alcance, tiempo medio visto, % que vio el video completo y seguidores nuevos.
+
+### Copia en Firebase
+
+**Estadísticas → Conexiones → Base de datos en la nube** sube una copia a Firebase Realtime Database después de cada lectura:
+
+1. En Firebase → Authentication, habilita **Correo electrónico/contraseña**.
+2. En Realtime Database → Reglas, pega las reglas que muestra Studio (solo tu usuario puede leer y escribir `users/<uid>`). Las reglas de «modo de prueba» dejan la base abierta a cualquiera.
+3. Pega el bloque `firebaseConfig` de la consola, escribe correo y contraseña y pulsa **Crear cuenta y conectar**.
+
+La sesión se guarda cifrada en el equipo. Los datos quedan en `users/<uid>/videos`, `mediciones` (historial con fecha), `crecimiento` (foto diaria por red) y `cuentas`. Los datos locales siguen siendo la fuente principal.
 
 El alcance y las pruebas de aceptación del módulo están en [Requisitos de Estadísticas](REQUISITOS_ESTADISTICAS.md).
 
