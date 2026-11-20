@@ -36,7 +36,7 @@ async function setup(platformExtras = {}) {
   const publishing = createPublishing(root, vault, platform);
   for (const network of ['instagram', 'facebook', 'youtube', 'tiktok']) await publishing.connect(network, { accessToken: 'token-' + network, profileId: '123' });
   // Un día fijo a las 08:00 para que los horarios sean predecibles.
-  const start = new Date(2026, 10, 20, 8, 0, 0).getTime();
+  const start = new Date(2031, 2, 12, 8, 0, 0).getTime(); // en el futuro: la cola compara con la hora real
   const auto = createAutopublish(root, publishing, () => start);
   return { root, publishing, auto, start };
 }
