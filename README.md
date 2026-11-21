@@ -57,6 +57,28 @@ La compilación semanal propone los récords con Short exportado que aún no se 
 
 La línea de tiempo permite reordenar los récords y grabar introducción y cierre. El render recompone el material original en 1920 × 1080 y vuelve a leer los cambios de las escenas. Desde la exportación puedes consultar los capítulos con sus tiempos. También se guardan en un TXT junto al MP4.
 
+## Videos largos directos
+
+Este apartado sirve para documentales, historias y análisis de varios minutos grabados directamente con la cámara. Es independiente de los Shorts y de las compilaciones. Ábrelo desde **Videos largos directos** en el menú.
+
+1. Crea un proyecto. Se guarda en **D:\11-Records-Studio\Directos** y puedes retomarlo otro día.
+2. Sube tu guion o pégalo. Se admiten PDF, Word (.docx), .txt, .md, el texto completo o un solo fragmento. Studio reconoce `━━━` y `SECCIÓN 01 · TÍTULO` y crea una sección por cada una. Los separadores no pasan al teleprompter.
+3. Graba cada sección en formato cuadrado con el teleprompter:
+   - **A · Automático**: con velocidad, pausa, retroceso y avance.
+   - **B · Seguimiento por voz**: avanza mientras hablas. Con Whisper instalado, recoloca la posición también cuando repites una frase.
+   Cada sección guarda una sola toma. Si grabas otra, la anterior se conserva hasta que la nueva queda verificada.
+4. En **Edición**, cambia la distribución en cualquier momento de la toma:
+   - A · presentador grande;
+   - B · presentador e imagen;
+   - C · presentador en una esquina;
+   - D · imagen a pantalla completa;
+   - E · fondo deportivo.
+   **Proponer composición** analiza la narración y sugiere cambios editables. **Detectar menciones** busca fotos con licencia libre en Wikimedia Commons; también puedes subir las tuyas. Configura además la transición de cada sección.
+5. En **Música y efectos**, elige la música de cada sección. Studio crea la música y los efectos en tu equipo y añade ducking automático. En **Subtítulos**, transcribe con Whisper, corrige el texto y elige si quieres el .srt o los subtítulos integrados.
+6. En **Exportar y publicar**, genera una vista previa rápida o el MP4 final de 1920 × 1080 con los capítulos calculados. Después puedes publicarlo en YouTube con la autorización oficial de Google.
+
+Detalles técnicos, funciones locales o con internet y pruebas: [Requisitos de Videos largos directos](REQUISITOS_VIDEOS_LARGOS_DIRECTOS.md).
+
 ## Estadísticas
 
 **Estadísticas** es una sección propia, separada de la producción, con cuatro pestañas:
