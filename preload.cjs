@@ -6,7 +6,8 @@ const allowed = new Set([
   'global:list','global:import','global:paste','global:rename','global:delete','global:from-project','global:to-project',
   'templates:list','templates:import','templates:paste','templates:set-default','templates:rename','templates:delete',
   'music:import','media:analyze','media:metadata','media:waveform','media:preview','media:timeline','review:status','review:rendered','review:export','render:short','render:weekly','render:cancel',
-  'studio:flow','mobile:link','mobile:copy','mobile:record','weekly:list','weekly:create','weekly:get','weekly:save','system:open-path'
+  'studio:flow','mobile:link','mobile:copy','mobile:record','weekly:list','weekly:create','weekly:get','weekly:save','system:open-path',
+  'direct:call'
 ]);
 contextBridge.exposeInMainWorld('studio', {
   call: (name,args) => {
@@ -18,5 +19,12 @@ contextBridge.exposeInMainWorld('studio', {
     const cb = (_event,detail) => callback(detail);
     ipcRenderer.on('render:progress',cb);
     return () => ipcRenderer.removeListener('render:progress',cb);
+  },
+  // Progreso del apartado «Videos largos directos».
+  onDirectProgress: callback => {
+    if(typeof callback!=='function') return () => {};
+    const cb = (_event,detail) => callback(detail);
+    ipcRenderer.on('direct:progress',cb);
+    return () => ipcRenderer.removeListener('direct:progress',cb);
   }
 });

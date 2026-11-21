@@ -14,6 +14,7 @@ const logos = require('./backend/logo.cjs');
 const workflow = require('./backend/desktop-workflow.cjs');
 const delivery = require('./backend/delivery.cjs');
 const mobileRecording = require('./backend/mobile-recording.cjs');
+const directLong = require('./backend/direct-long.cjs');
 let win = null;
 let activeJob = null;
 const ROOT = process.env.RECORDS_TEST_ROOT || (process.platform === 'win32' ? 'D:\\11-Records-Studio' : path.join(os.homedir(),'11-Records-Studio'));
@@ -45,6 +46,7 @@ app.whenReady().then(()=>{
   protocol.handle('records',async request=>{
     try{
       const u=new URL(request.url);
+      if(u.hostname==='direct')return directLong.serve(ROOT,request,u);
       if(['preview','review','output','rendered','take','thumbnail','audio-sample'].includes(u.hostname)){
         const pieces=u.pathname.split('/').filter(Boolean).map(decodeURIComponent);
         let file;
@@ -255,6 +257,8 @@ app.whenReady().then(()=>{
   }));
   mobileRecording.install({app,root:ROOT,register,safeStorage,clipboard});
   workflow.installWorkflow({app,shell,dialog,safeStorage,root:ROOT,window:()=>win,register,runMedia,send:broadcast});
+  // Apartado 3 · Videos largos directos (módulo independiente).
+  directLong.install({app,root:ROOT,register,dialog,shell,clipboard,safeStorage,window:()=>win});
 
   register('review:export',async x=>{
     if(activeJob)throw Error('Hay otra operación multimedia en curso');

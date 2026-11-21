@@ -1,6 +1,6 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "private": true,
   "description": "Estudio local para crear, revisar y publicar videos de 11 Récords",
   "main": "main.cjs",
@@ -14,14 +14,16 @@
     "prestart": "node scripts/ensure-deps.cjs",
     "studio": "node scripts/studio.cjs",
     "test:desktop": "node tests/studio-desktop.cjs",
+    "test:direct": "node tests/direct-desktop.cjs",
     "predist:win": "python scripts/build-animation.py"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
-    "sharp": "^0.34.4",
-    "electron-updater": "^6.6.2",
-    "gsap": "^3.13.0"
+    "gsap": "^3.13.0",
+    "pdfjs-dist": "^4.10.38",
+    "sharp": "^0.34.4"
   },
   "devDependencies": {
     "electron": "^34.3.0",
@@ -36,7 +38,8 @@
       "node_modules/ffmpeg-static/**",
       "node_modules/ffprobe-static/**",
       "node_modules/sharp/**",
-      "node_modules/@img/**"
+      "node_modules/@img/**",
+      "node_modules/pdfjs-dist/**"
     ],
     "files": [
       "main.cjs",

@@ -54,6 +54,8 @@ jobs:
           $env:RECORDS_DESKTOP_EXECUTABLE = $installed.FullName
           npm run test:desktop
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:direct
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publicar instalador como artefacto
         uses: actions/upload-artifact@v4
         with:

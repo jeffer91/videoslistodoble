@@ -2,7 +2,7 @@
 <html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' records: data: blob:; img-src 'self' records: data: blob:; media-src 'self' records: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' records: wss://0.peerjs.com;">
-<title>11 Récords Studio Desktop</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./statistics.css"><link rel="stylesheet" href="../grabador/frame.css">
+<title>11 Récords Studio Desktop</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./statistics.css"><link rel="stylesheet" href="../grabador/frame.css"><link rel="stylesheet" href="./direct-long.css">
 </head><body>
 <div id="app" class="shell">
 <aside id="sidebar">
@@ -11,6 +11,7 @@
   <button data-action="dashboard" class="nav active">Inicio</button>
   <button data-action="home" class="nav">▦ &nbsp; Mis récords</button>
   <button data-action="weeks" class="nav">▣ &nbsp; Videos largos</button>
+  <button data-action="direct-long" class="nav">Videos largos directos</button>
   <button data-action="statistics" class="nav">Estadísticas</button>
   <button data-action="autopublish" class="nav">Publicación automática</button>
   <details><summary>Más herramientas</summary>
@@ -24,7 +25,7 @@
  <div id="sidebar-project" class="sidebar-project" hidden><small>PROYECTO ACTUAL</small><strong id="sidebar-project-title"></strong><button data-action="record-card" class="nav">▤ &nbsp; Ficha y guion</button><button data-action="project-library" class="nav">▦ &nbsp; Biblioteca del proyecto</button><button data-action="open-current-project" class="nav">▣ &nbsp; Volver al editor</button></div>
  <div class="asidefoot"><strong>Almacenamiento local</strong><span>Disco D: · 11-Records-Studio</span><small>Los originales se guardan dentro del proyecto.</small></div>
 </aside>
-<main id="main"><div id="studio-activity" class="panel" role="status" hidden></div><div id="view" aria-live="polite"></div></main>
+<main id="main"><div id="studio-activity" class="panel" role="status" hidden></div><div id="view" aria-live="polite"></div><div id="direct-view" hidden></div></main>
 </div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <div id="modal-root" hidden></div>
@@ -44,4 +45,8 @@
 <script defer src="./app.js"></script>
 <script defer src="./visual-director.js"></script>
 <script defer src="./live-review.js"></script>
+<script defer src="./direct-layout.js"></script>
+<script defer src="./direct-teleprompter.js"></script>
+<script defer src="./direct-editor.js"></script>
+<script defer src="./direct-long.js"></script>
 </body></html>
