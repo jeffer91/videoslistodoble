@@ -112,10 +112,89 @@
     return String(word || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ]/g, '');
   }
 
+  // ── Marcas del guion: [IMAGEN: …], [DATO: …], [MÚSICA: …], [PREGUNTA: …], [CTA: …] ─
+  const MARK_TYPES = { imagen: 'imagen', foto: 'imagen', dato: 'dato', estadistica: 'dato', musica: 'musica', pregunta: 'pregunta', cta: 'cta', llamado: 'cta',
+    composicion: 'composicion', plano: 'composicion', transicion: 'transicion' };
+  const MARK = /\[\s*([A-Za-zÁÉÍÓÚáéíóúÑñ]+)\s*:\s*([^\]\n]{1,200})\]/g;
+  const fold = value => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  /** Separa las marcas del texto narrable. `word` es el número de palabras narrables previas. */
+  function marks(text) {
+    const raw = String(text || '');
+    const list = [];
+    let clean = '', last = 0, match;
+    MARK.lastIndex = 0;
+    while ((match = MARK.exec(raw))) {
+      const type = MARK_TYPES[fold(match[1])];
+      if (!type) continue;
+      clean += raw.slice(last, match.index);
+      last = MARK.lastIndex;
+      list.push({ type, value: match[2].trim(), word: countWords(clean) });
+    }
+    clean += raw.slice(last);
+    return { clean: clean.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n'), marks: list };
+  }
+  function countWords(text) { return (String(text).match(/\S+/g) || []).filter(w => normalize(w)).length; }
+  function stripMarks(text) { return marks(text).clean; }
+
+  // ── Cortes no destructivos ─────────────────────────────────────────────────
+  const q = value => Math.round(Math.max(0, Number(value) || 0) * FPS) / FPS;
+  /** Tramos conservados de la toma (en segundos de la toma original, en la rejilla de 1/30 s). */
+  function kept(cuts, duration) {
+    const list = (cuts || []).filter(c => c.enabled !== false && c.end > c.start).map(c => ({ start: q(c.start), end: Math.min(q(c.end), q(duration)) }))
+      .filter(c => c.end - c.start >= 1 / FPS).sort((a, b) => a.start - b.start);
+    const out = [];
+    let at = 0;
+    for (const cut of list) {
+      if (cut.start > at) out.push({ start: at, end: cut.start });
+      at = Math.max(at, cut.end);
+    }
+    if (q(duration) > at) out.push({ start: at, end: q(duration) });
+    return out.filter(r => r.end - r.start >= 1 / FPS);
+  }
+  function keptDuration(cuts, duration) { return kept(cuts, duration).reduce((n, r) => n + r.end - r.start, 0); }
+  /** Tiempo de la toma → tiempo en el video (los cortes desaparecen). */
+  function mapTime(ranges, t) {
+    let out = 0;
+    for (const r of ranges) {
+      if (t < r.start) return out;
+      if (t <= r.end) return out + t - r.start;
+      out += r.end - r.start;
+    }
+    return out;
+  }
+  /** Si t cae en un corte, devuelve dónde continúa la reproducción. */
+  function skip(ranges, t) {
+    for (const r of ranges) { if (t < r.start) return r.start; if (t < r.end) return t; }
+    return ranges.length ? ranges.at(-1).end : t;
+  }
+  /** Piezas de render: cada tramo de composición recortado por los tramos conservados. */
+  function pieces(segments, ranges) {
+    const out = [];
+    for (const [index, segment] of segments.entries()) {
+      for (const r of ranges) {
+        const start = Math.max(q(segment.start), r.start), end = Math.min(q(segment.end), r.end);
+        const frames = Math.round((end - start) * FPS);
+        if (frames > 0) out.push({ ...segment, index, srcStart: start, srcEnd: start + frames / FPS, frames });
+      }
+    }
+    return out;
+  }
+
+  /** Posición del llamado a la acción: del lado contrario al presentador, arriba, sin tapar subtítulos. */
+  function ctaBox(segment, hasImage, type) {
+    const box = boxes(segment, hasImage);
+    const w = 470, h = type === 'comentar' ? 250 : 136;
+    const presenterRight = box.presenter && box.presenter.x + box.presenter.size / 2 > W / 2;
+    const right = box.presenter ? !presenterRight : false;
+    return { x: right ? W - 44 - w : 44, y: 150, w, h, from: right ? W : -w };
+  }
+
   function tokens(text) {
     const list = [];
     const re = /\S+/g;
     let match;
+    text = stripMarks(text);
     while ((match = re.exec(String(text || '')))) {
       const norm = normalize(match[0]);
       if (norm) list.push({ word: norm, index: match.index, length: match[0].length });
@@ -170,5 +249,5 @@
     return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(r).padStart(2, '0');
   }
 
-  return { W, H, FPS, NAMES, BACKGROUND_NAMES, effective, boxes, cover, fill, frames, at, normalize, tokens, similar, align, stamp };
+  return { W, H, FPS, NAMES, BACKGROUND_NAMES, effective, boxes, cover, fill, frames, at, normalize, tokens, similar, align, stamp, marks, stripMarks, kept, keptDuration, mapTime, skip, pieces, ctaBox };
 });

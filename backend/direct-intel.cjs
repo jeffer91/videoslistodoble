@@ -120,7 +120,7 @@ function sentences(section) {
 
 function estimateWords(section) {
   const duration = section.take?.duration || 0;
-  const raw = String(section.text || '').split(/\s+/).filter(Boolean);
+  const raw = Layout.stripMarks(section.text).split(/\s+/).filter(Boolean);
   if (!duration || !raw.length) return [];
   const weights = raw.map(w => w.length + 2 + (/[.!?…]$/.test(w) ? 6 : /[,;:]$/.test(w) ? 3 : 0));
   const total = weights.reduce((a, b) => a + b, 0);
@@ -217,7 +217,7 @@ function statistics(section) {
     const stat = classify(sentence.text).includes('stat') && statistic(sentence.text);
     if (stat) found.set(stat.value + '|' + stat.label, stat);
   }
-  if (!found.size) for (const line of String(section.text || '').split(/(?<=[.!?])\s+/)) {
+  if (!found.size) for (const line of Layout.stripMarks(section.text).split(/(?<=[.!?])\s+/)) {
     const stat = statistic(line);
     if (stat) found.set(stat.value + '|' + stat.label, stat);
   }

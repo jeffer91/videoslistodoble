@@ -17,7 +17,7 @@ const SCRIPT = [
   'SECCIÓN 01 · EL COMIENZO',
   '━━━━━━━━━━━━━━━━━━',
   '',
-  'Durante años, Harry Kane fue el gran goleador del Tottenham. Marcó 280 goles con el club.',
+  'Durante años, [IMAGEN: Harry Kane Tottenham] Harry Kane fue el gran goleador del Tottenham. Marcó 280 goles con el club.',
   '',
   '━━━━━━━━━━━━━━━━━━',
   'SECCIÓN 02 · EL ASCENSO',
@@ -59,21 +59,24 @@ async function run() {
     const texts = await page.locator('.dl-script-sec textarea').evaluateAll(list => list.map(i => i.value).join('\n'));
     assert.ok(!texts.includes('━') && !texts.includes('SECCIÓN 0'), 'Separadores y encabezados fuera del texto narrable');
 
-    // Grabación: una toma por sección, con teleprompter.
+    // Grabación seguida: al detener, la toma se guarda y tras 3 s empieza la siguiente sección.
+    // (El piloto automático se prueba en tests/direct-auto.test.cjs; aquí se desactiva para no exportar dos veces.)
+    await page.evaluate(() => window.DirectLong.call('settings.save', { id: window.DirectLong.state.project.id,
+      settings: { autopilot: { enabled: false }, recording: { continuous: true, autoStop: false } } }).then(p => { window.DirectLong.state.project = p; }));
     await page.getByRole('button', { name: '2 · Grabación' }).click();
+    await page.getByText('Piloto automático desactivado').waitFor();
+    await page.locator('#dl-prompter-host .dl-prompter-text').waitFor();
+    const prompt = await page.locator('#dl-prompter-host').innerText();
+    assert.ok(!prompt.includes('━') && !prompt.includes('SECCIÓN') && !prompt.includes('IMAGEN'), 'El teleprompter solo muestra texto narrable');
+    await page.getByRole('button', { name: 'Activar cámara y micrófono' }).click();
+    await page.waitForFunction(() => document.querySelector('#dl-camera')?.videoWidth > 0);
+    await page.getByRole('button', { name: '● Iniciar grabación' }).click();
     for (let index = 0; index < 3; index++) {
-      await page.locator('#dl-prompter-host .dl-prompter-text').waitFor();
-      const prompt = await page.locator('#dl-prompter-host').innerText();
-      assert.ok(!prompt.includes('━') && !prompt.includes('SECCIÓN'), 'El teleprompter solo muestra texto narrable');
-      if (await page.getByRole('button', { name: 'Activar cámara y micrófono' }).isVisible()) await page.getByRole('button', { name: 'Activar cámara y micrófono' }).click();
-      await page.waitForFunction(() => document.querySelector('#dl-camera')?.videoWidth > 0);
-      await page.getByRole('button', { name: '● Iniciar grabación' }).click();
       await page.getByText(/Guardando en disco/).waitFor({ timeout: 25000 });
       await page.waitForTimeout(2600);
       await page.getByRole('button', { name: '■ Detener' }).click();
-      await page.locator('#dl-reviewbar:not([hidden])').waitFor({ timeout: 30000 });
-      await page.getByRole('button', { name: /Guardar esta toma|Reemplazar la toma activa/ }).click();
-      await page.getByText(/Toma guardada/).first().waitFor({ timeout: 30000 });
+      await page.waitForFunction(n => window.DirectLong.state.project.sections.filter(s => s.take).length === n, index + 1, { timeout: 30000 });
+      if (index < 2) await page.locator('#dl-countdown').waitFor();
     }
     const state = await page.evaluate(() => window.DirectLong.state.project.sections.map(s => ({ take: Boolean(s.take), duration: s.take?.duration })));
     assert.ok(state.every(s => s.take && s.duration > 1), 'Las tres secciones tienen su toma');

@@ -20,6 +20,7 @@ El apartado es un módulo nuevo. Los cambios en archivos existentes son solo de 
 - `renderer/index.html`: un botón de menú, un contenedor `#direct-view`, una hoja de estilos y cuatro scripts nuevos.
 - `preload.cjs`: el canal `direct:call` y el evento `direct:progress`.
 - `main.cjs`: la ruta `records://direct/…` y la instalación del módulo (`directLong.install`).
+- `backend/network-clients.cjs`: `googleOAuth` acepta una lista de permisos opcional. Sin ella sigue pidiendo los mismos que antes.
 - `package.json`: dependencia `pdfjs-dist`, script `test:direct` y versión 0.12.0. `windows-build.yml` ejecuta también la prueba de extremo a extremo del apartado.
 
 Los proyectos se guardan en una carpeta propia (`Directos/`), separada de `Proyectos/` (Shorts) y `Compilaciones/` (videos largos por unión). Todas las pruebas previas siguen pasando.
@@ -96,7 +97,24 @@ No hay claves privadas en la interfaz. El cliente OAuth de escritorio se guarda 
 - **Imágenes recientes.** Commons tiene pocas fotos de agencia del último partido. La búsqueda prioriza lo más reciente disponible con licencia libre.
 - **Música.** La música generada es sencilla (pads, percusión y arpegios). Para producciones con música orquestal, importa pistas de la Biblioteca de audio de YouTube.
 
-## 6. Criterios de aceptación y pruebas
+## 6. Automatización: «paso el guion, grabo y el video queda listo»
+
+| Función | Cómo funciona |
+| --- | --- |
+| **Piloto automático** (`backend/direct-long.cjs`) | Se activa al guardar cada toma. Prepara la copia MP4, transcribe con Whisper, corta errores, busca imágenes, crea los gráficos de los datos, compone la sección y aplica la música y la transición pedidas. Cuando todas las secciones están listas, rellena los datos de YouTube, exporta el MP4 final con su revisión y, si se activa, lo publica. Respeta las composiciones hechas a mano. Botón «Procesar ahora» para repetirlo. |
+| **Corte de errores** (`backend/direct-auto.cjs`) | Alinea el guion con lo dicho: quita silencios de más de 0,8 s (deja un respiro), muletillas («eh», «mmm») e intentos fallidos. Si una frase se empieza y se repite, se conserva el último intento. Los cortes son no destructivos: aparecen en la pista «Cortes» y un clic los anula. La exportación une los tramos con fundidos de 8 ms y desplaza subtítulos, llamados y capítulos. |
+| **Guion con marcas** | `[IMAGEN: …]`, `[DATO: 44 goles]`, `[MÚSICA: …]`, `[TRANSICIÓN: …]`, `[COMPOSICIÓN: A–E]`, `[PREGUNTA: …]`, `[CTA: …]`. No se leen en el teleprompter. Se sitúan en el tiempo según la palabra en la que van. El botón «Copiar instrucciones para pedir el guion a Claude» da el formato listo para usar. |
+| **Voz con calidad de estudio** | Reutiliza la limpieza con IA de Studio (DeepFilterNet, se descarga verificada una vez) y los perfiles de voz existentes (natural, locutor, podcast…). Sin IA aplica filtros clásicos. |
+| **Biblioteca de fotos** (`backend/direct-library.cjs`) | Fotos etiquetadas por jugador, club o estadio, compartidas entre proyectos. El piloto las usa antes que internet. Las descargadas de Commons y las etiquetadas en un proyecto se guardan solas en la biblioteca. |
+| **Grabación seguida** | Al detener, la toma se guarda y, tras una cuenta atrás de 3 s (que se puede pausar), empieza la siguiente sección. Opcionalmente se detiene sola cuando el teleprompter llega al final y hay 2 s sin voz. |
+| **Llamados a la acción** | Tarjetas animadas «Suscríbete» con campana, «Dale like» y «Comenta» con tu pregunta, con un clic sonoro. Salen cuando dices «suscríbete», «like» o «comenta», en las marcas `[CTA]` y `[PREGUNTA]`, en recordatorios automáticos (hacia 1:30 y al final, sin repetir) o donde las añadas. Se colocan arriba, del lado contrario al presentador, sin tapar los subtítulos. Cada una se puede quitar desde la pista «Llamados». |
+| **Pantalla final** | De 5 a 20 s, con espacio para el video recomendado y el botón de suscripción. YouTube no permite colocar esos elementos por la API: se añaden en YouTube Studio. |
+| **YouTube automático** | Título, descripción (gancho, pregunta, llamado y hashtags), etiquetas por entidades y primer comentario con la pregunta. Publicación programada (`publishAt`). El comentario se publica cuando el video es público; si es programado, queda pendiente y se envía al comprobar el estado. Fijarlo arriba solo es posible desde YouTube. |
+| **Revisión final** | Picos de audio, silencios largos, capítulos, secciones sin grabar o sin subtítulos, llamados presentes, imágenes repetidas, secciones monótonas, duración (8 min para anuncios intermedios) y largo del título. |
+
+Para publicar el comentario, YouTube exige el permiso `youtube.force-ssl`. La conexión de este apartado lo solicita. Si el canal se conectó antes desde Estadísticas, hay que volver a conectarlo aquí.
+
+## 7. Criterios de aceptación y pruebas
 
 | Criterio | Comprobación |
 | --- | --- |
@@ -114,6 +132,8 @@ No hay claves privadas en la interfaz. El cliente OAuth de escritorio se guarda 
 | Subtítulos sincronizados | `direct-long.test.cjs`: SRT desplazado tras la transición; ASS integrado |
 | MP4 final reproducible | `direct-long.test.cjs`: 1920 × 1080, H.264 + AAC, duración verificada |
 | Publicación en YouTube | `direct-long.test.cjs`: subida reanudable por bloques con corte de red simulado, capítulos y aviso de privacidad |
+| Automatización completa | `direct-auto.test.cjs`: marcas, corte de errores, llamados a la acción, metadatos, biblioteca, publicación programada con comentario, y el piloto automático de toma guardada a MP4 final revisado |
+| Grabación seguida | `tests/direct-desktop.cjs`: tres secciones encadenadas con una sola pulsación de «Iniciar grabación» |
 
 Ejecución local:
 

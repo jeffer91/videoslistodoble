@@ -41,7 +41,8 @@
   function mount(container, text) {
     unmount();
     state.root = container;
-    state.text = String(text || '');
+    // Las marcas del guion ([IMAGEN: …], [DATO: …]…) no se leen en voz alta.
+    state.text = L.stripMarks(String(text || ''));
     state.tokens = L.tokens(state.text);
     state.scroll = 0;
     state.cursor = 0;
@@ -110,6 +111,16 @@
   }
 
   function reset() { state.scroll = 0; state.cursor = 0; paint(); }
+
+  /** ¿Se llegó al final del texto? (para detener la grabación automáticamente). */
+  function atEnd() {
+    if (!state.tokens.length) return false;
+    if (state.mode === 'voice') return state.cursor >= state.tokens.length - 1;
+    const text = el('.dl-prompter-text');
+    if (!text) return false;
+    const max = Math.max(0, text.scrollHeight - text.parentElement.clientHeight * 0.35);
+    return state.scroll >= max - 2;
+  }
 
   function setSize(px) {
     state.size = Math.max(24, Math.min(110, Number(px) || 46));
@@ -237,5 +248,5 @@
     } finally { v.pending = false; }
   }
 
-  window.DirectPrompter = { mount, unmount, start, stop, toggle, jump, reset, setSize, setSpeed, setOpacity, setMode, state: () => ({ mode: state.mode, running: state.running, speed: state.speed, size: state.size, opacity: state.opacity, cursor: state.cursor, words: state.tokens.length }), wav };
+  window.DirectPrompter = { mount, unmount, start, stop, toggle, jump, reset, atEnd, setSize, setSpeed, setOpacity, setMode, state: () => ({ mode: state.mode, running: state.running, speed: state.speed, size: state.size, opacity: state.opacity, cursor: state.cursor, words: state.tokens.length }), wav };
 })();

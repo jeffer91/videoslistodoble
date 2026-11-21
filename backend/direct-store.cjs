@@ -64,7 +64,7 @@ function newSection(input = {}, index = 0) {
   return {
     id: uid(), number: Number.isFinite(Number(input.number)) ? Number(input.number) : index + 1,
     title, text: text(input.text, 200000), intro: input.intro === true,
-    take: null, transcript: null, layouts: [], imageIds: [],
+    take: null, transcript: null, layouts: [], imageIds: [], cuts: [], ctas: [], ctaOff: [], auto: null,
     transition: defaultTransition(),
     audio: { musicId: null, mood: 'auto', volume: null }
   };
@@ -76,13 +76,20 @@ function defaults() {
     subtitles: { enabled: true, burn: false, style: 'impacto', size: 58, position: 'bottom', highlight: true },
     music: { enabled: true, volume: 0.22, ducking: true, defaultMood: 'epica' },
     transitions: { enabled: true, duration: 4 },
-    voice: { gain: 1 }
+    voice: { gain: 1, profile: 'natural' },
+    autopilot: { enabled: true, export: true, publish: false, images: true, cuts: true },
+    cta: { enabled: true, reminders: true, endscreen: true, endscreenDuration: 20 },
+    recording: { continuous: true, autoStop: true }
   };
 }
 
 function read(root, id) {
   const project = store.readJSON(projectFile(root, id));
   project.settings = mergeSettings(defaults(), project.settings || {});
+  for (const section of project.sections || []) {
+    section.cuts ||= []; section.ctas ||= []; section.ctaOff ||= [];
+    if (section.auto === undefined) section.auto = null;
+  }
   return project;
 }
 
@@ -213,6 +220,18 @@ function updateSection(root, { id, sectionId, patch = {} }) {
     s.audio = { musicId: a.musicId && project.audio.some(x => x.id === a.musicId) ? a.musicId : null,
       mood: pick(a.mood, ['auto', 'ninguna', ...MOODS], 'auto'), volume: a.volume === null || a.volume === '' ? null : clamp(a.volume, 0, 1, null) };
   }
+  if (patch.cuts !== undefined) {
+    if (!Array.isArray(patch.cuts)) throw Error('Cortes inválidos');
+    const end = s.take?.duration || 0;
+    s.cuts = patch.cuts.slice(0, 2000).map(c => ({ id: store.safeId(c.id) ? c.id : uid(), start: frame(Math.min(end, c.start)), end: frame(Math.min(end, c.end)),
+      reason: text(c.reason, 160), enabled: c.enabled !== false, auto: c.auto === true })).filter(c => c.end - c.start >= FRAME * 3).sort((a, b) => a.start - b.start);
+  }
+  if (patch.ctas !== undefined) {
+    if (!Array.isArray(patch.ctas)) throw Error('Llamados inválidos');
+    s.ctas = patch.ctas.slice(0, 50).map(c => ({ id: store.safeId(c.id) ? c.id : 'manual-' + uid(), type: pick(c.type, ['suscribir', 'like', 'comentar'], 'suscribir'),
+      start: clamp(c.start, 0, s.take?.duration || 7200, 0), text: text(c.text, 140) }));
+  }
+  if (patch.ctaOff !== undefined) s.ctaOff = (Array.isArray(patch.ctaOff) ? patch.ctaOff : []).map(x => text(x, 120)).slice(0, 200);
   if (patch.transcript !== undefined) {
     if (!s.take || patch.transcript?.takeId !== s.take.id) throw Error('La toma cambió. Vuelve a transcribir.');
     s.transcript = { takeId: s.take.id, words: normalizeWords(patch.transcript.words, s.take.duration), edited: true, engine: s.transcript?.engine || 'manual' };
@@ -272,15 +291,28 @@ function saveSettings(root, { id, settings = {}, youtube }) {
     s.music = { enabled: x.enabled !== false, volume: clamp(x.volume, 0, 1, 0.22), ducking: x.ducking !== false, defaultMood: pick(x.defaultMood, MOODS, 'epica') };
   }
   if (settings.transitions) s.transitions = { enabled: settings.transitions.enabled !== false, duration: clamp(settings.transitions.duration, 2, 8, 4) };
-  if (settings.voice) s.voice = { gain: clamp(settings.voice.gain, 0.3, 3, 1) };
+  if (settings.voice) { const x = { ...s.voice, ...settings.voice }; s.voice = { gain: clamp(x.gain, 0.3, 3, 1), profile: pick(x.profile, ['original', 'natural', 'locutor', 'limpia', 'podcast', 'exterior'], 'natural') }; }
+  if (settings.autopilot) { const x = { ...s.autopilot, ...settings.autopilot }; s.autopilot = { enabled: x.enabled !== false, export: x.export !== false, publish: x.publish === true, images: x.images !== false, cuts: x.cuts !== false }; }
+  if (settings.cta) { const x = { ...s.cta, ...settings.cta }; s.cta = { enabled: x.enabled !== false, reminders: x.reminders !== false, endscreen: x.endscreen !== false, endscreenDuration: clamp(x.endscreenDuration, 5, 20, 20) }; }
+  if (settings.recording) { const x = { ...s.recording, ...settings.recording }; s.recording = { continuous: x.continuous !== false, autoStop: x.autoStop !== false }; }
   if (youtube) {
     project.youtube = { ...project.youtube, title: text(youtube.title ?? project.youtube.title, 100).trim(),
       description: text(youtube.description ?? project.youtube.description, 5000).replace(/[<>]/g, ''),
       privacy: pick(youtube.privacy, ['private', 'unlisted', 'public'], project.youtube.privacy || 'private'),
       tags: Array.isArray(youtube.tags) ? youtube.tags.map(t => text(t, 60).trim()).filter(Boolean).slice(0, 30) : project.youtube.tags,
-      madeForKids: youtube.madeForKids === true, thumbnail: youtube.thumbnail === null ? null : project.youtube.thumbnail || null };
+      madeForKids: youtube.madeForKids === true, thumbnail: youtube.thumbnail === null ? null : project.youtube.thumbnail || null,
+      comment: youtube.comment !== undefined ? text(youtube.comment, 500).trim() : project.youtube.comment || '',
+      publishAt: youtube.publishAt !== undefined ? futureDate(youtube.publishAt) : project.youtube.publishAt || null };
   }
   return write(root, project);
+}
+
+function futureDate(value) {
+  if (!value) return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) throw Error('Fecha de publicación inválida');
+  if (time < Date.now() + 15 * 60000) throw Error('Programa la publicación al menos 15 minutos en el futuro');
+  return new Date(time).toISOString();
 }
 
 // ── Espacio en disco ────────────────────────────────────────────────────────
@@ -397,6 +429,9 @@ async function commitTake(root, { id, takeId }, media = require('./media.cjs')) 
   target.take = { id: takeId, original: relative, master: null, duration: frame(info.duration), width: info.width, height: info.height,
     size: copied, recordedAt: draft.at };
   if (target.transcript?.takeId !== takeId) target.transcript = null;
+  target.cuts = [];
+  target.ctaOff = [];
+  target.auto = null;
   target.layouts = target.layouts.length ? normalizeLayouts(target.layouts.map(l => ({ ...l })), target.take.duration) : [];
   if (target.layouts.length) target.layouts.at(-1).end = target.take.duration;
   write(root, project);

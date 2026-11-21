@@ -112,7 +112,7 @@ function tokenExpiration(seconds) {
   return new Date(Date.now() + (Number(seconds) || 3600) * 1000).toISOString();
 }
 
-async function googleOAuth({ clientId, clientSecret }, open) {
+async function googleOAuth({ clientId, clientSecret, scopes }, open) {
   if (!String(clientId || '').endsWith('.apps.googleusercontent.com')) throw Error('Usa un cliente OAuth de escritorio de Google');
   const state = randomBytes(24).toString('base64url');
   const verifier = randomBytes(48).toString('base64url');
@@ -139,7 +139,7 @@ async function googleOAuth({ clientId, clientSecret }, open) {
     const redirect = 'http://127.0.0.1:' + server.address().port + '/oauth';
     const link = urlFor('https://accounts.google.com/o/oauth2/v2/auth', {
       client_id: clientId, redirect_uri: redirect, response_type: 'code', access_type: 'offline',
-      prompt: 'consent', scope: SCOPES.join(' '), state, code_challenge: challenge, code_challenge_method: 'S256'
+      prompt: 'consent', scope: (Array.isArray(scopes) && scopes.length ? scopes : SCOPES).join(' '), state, code_challenge: challenge, code_challenge_method: 'S256'
     });
     await open(link.href);
     timer = setTimeout(() => settle(null), AUTH_TIMEOUT);

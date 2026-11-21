@@ -228,4 +228,45 @@ function statCard(root, { value, label, context = '' }) {
   });
 }
 
-module.exports = { background, imageBackground, mask, foreground, titleCard, sweep, statCard, backgroundSvg, PAN_W, PAN_H, cacheDir };
+const BELL = '<path d="M0 -26c-11 0-19 9-19 20v13l-7 9h52l-7-9V-6c0-11-8-20-19-20z" fill="currentColor"/><circle cy="20" r="6" fill="currentColor"/>';
+const THUMB = '<path d="M-22 -2h10v28h-10zM-8 -2l12-24c6 0 9 4 8 10l-3 12h17c6 0 9 5 8 10l-5 18c-1 5-5 7-9 7h-28z" fill="currentColor"/>';
+const BUBBLE = '<path d="M-26 -20h52a8 8 0 0 1 8 8v26a8 8 0 0 1-8 8h-30l-16 13v-13h-6a8 8 0 0 1-8-8v-26a8 8 0 0 1 8-8z" fill="currentColor"/>';
+
+/** Tarjeta animable de llamado a la acción (estado normal o «pulsado»). */
+function ctaCard(root, { type, pressed = false, text = '' }) {
+  return cached(root, ['cta', type, pressed, text], () => {
+    const w = 470, h = type === 'comentar' ? 250 : 136;
+    let body;
+    if (type === 'comentar') {
+      body = '<rect x="3" y="3" width="' + (w - 6) + '" height="' + (h - 6) + '" rx="22" fill="#06120b" fill-opacity=".9" stroke="' + GOLD + '" stroke-width="4"/>' +
+        '<g transform="translate(62,70)" color="' + GREEN + '">' + BUBBLE + '</g>' +
+        '<text x="112" y="82" font-family="' + FONT + '" font-size="36" letter-spacing="3" fill="' + GOLD_LIGHT + '">COMENTA</text>' +
+        textLines(text || '¿Qué opinas? Te leo en los comentarios', 36, 148, 30, w - 72, FONT_TEXT, '#ffffff', 3);
+    } else if (type === 'like') {
+      body = '<rect x="3" y="3" width="' + (w - 6) + '" height="' + (h - 6) + '" rx="' + (h / 2 - 3) + '" fill="' + (pressed ? '#2b2410' : '#06120b') + '" fill-opacity=".92" stroke="' + GOLD + '" stroke-width="4"/>' +
+        '<g transform="translate(78,' + (h / 2 - 4) + ') scale(1.15)" color="' + (pressed ? GOLD_LIGHT : '#ffffff') + '">' + THUMB + '</g>' +
+        '<text x="140" y="' + (h / 2 + 16) + '" font-family="' + FONT + '" font-size="44" fill="' + (pressed ? GOLD_LIGHT : '#ffffff') + '">' + (pressed ? '¡GRACIAS!' : 'DALE LIKE') + '</text>';
+    } else {
+      body = '<rect x="3" y="3" width="' + (w - 6) + '" height="' + (h - 6) + '" rx="' + (h / 2 - 3) + '" fill="' + (pressed ? '#3a4440' : '#c0263a') + '" stroke="' + (pressed ? '#9aa7a0' : '#ffd7dc') + '" stroke-width="3"/>' +
+        '<text x="36" y="' + (h / 2 + 13) + '" font-family="' + FONT + '" font-size="37" fill="#ffffff">' + (pressed ? 'SUSCRITO ✓' : 'SUSCRÍBETE') + '</text>' +
+        '<g transform="translate(' + (w - 72) + ',' + (h / 2 + 2) + ')"><circle r="46" fill="' + (pressed ? GOLD : '#ffffff') + '"/><g transform="scale(1.05)" color="' + (pressed ? '#1b1407' : '#c0263a') + '">' + BELL + '</g>' +
+        (pressed ? '<path d="M-58 -22q-8 22 0 44M58 -22q8 22 0 44" stroke="' + GOLD_LIGHT + '" stroke-width="5" fill="none" stroke-linecap="round"/>' : '') + '</g>';
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' + body + '</svg>';
+  });
+}
+
+/** Pantalla final con espacio libre para los elementos de YouTube (video recomendado y suscripción). */
+function endscreen(root, { title }) {
+  return cached(root, ['endscreen', title], () => {
+    const box = (x, y, bw, bh) => '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + bh + '" rx="18" fill="#000" fill-opacity=".35" stroke="' + GOLD + '" stroke-opacity=".35" stroke-width="3"/>';
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '"><rect width="' + W + '" height="' + H + '" fill="#000" fill-opacity=".35"/>' +
+      badge(170, 170, 58) + '<text x="252" y="140" font-family="' + FONT_TEXT + '" font-weight="800" font-size="28" letter-spacing="10" fill="' + GREEN + '">ONCE RECORDS</text>' +
+      '<text x="250" y="222" font-family="' + FONT + '" font-size="60" fill="#ffffff">GRACIAS POR VER</text>' +
+      textLines(String(title || '').toUpperCase(), 120, 330, 40, 760, FONT_TEXT, GOLD_LIGHT, 2) +
+      box(1030, 250, 760, 428) + box(1030, 720, 370, 208) + '<circle cx="380" cy="760" r="150" fill="#000" fill-opacity=".35" stroke="' + GOLD + '" stroke-opacity=".35" stroke-width="3"/>' +
+      '<text x="380" y="955" text-anchor="middle" font-family="' + FONT_TEXT + '" font-weight="800" font-size="34" fill="#ffffff">Suscríbete</text></svg>';
+  });
+}
+
+module.exports = { ctaCard, endscreen, background, imageBackground, mask, foreground, titleCard, sweep, statCard, backgroundSvg, PAN_W, PAN_H, cacheDir };

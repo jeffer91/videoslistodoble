@@ -17,6 +17,7 @@ const audio = require('./direct-audio.cjs');
 const captions = require('./direct-captions.cjs');
 const intel = require('./direct-intel.cjs');
 const directStore = require('./direct-store.cjs');
+const auto = require('./direct-auto.cjs');
 
 const FPS = Layout.FPS;
 const QUALITY = {
@@ -48,8 +49,12 @@ function plan(project) {
     if (!section.take) { missing.push(section.title); return; }
     const transition = project.settings.transitions.enabled && section.transition.enabled;
     if (transition) pieces.push({ kind: 'transition', section, style: styles[index], duration: section.transition.duration || project.settings.transitions.duration });
-    pieces.push({ kind: 'section', section, duration: section.take.duration });
+    pieces.push({ kind: 'section', section, duration: Layout.keptDuration(section.cuts, section.take.duration) });
   });
+  const cta = project.settings.cta || {};
+  if (pieces.length && cta.enabled !== false && cta.endscreen !== false) {
+    pieces.push({ kind: 'endscreen', section: pieces.at(-1).section, duration: cta.endscreenDuration || 20 });
+  }
   return { pieces, missing };
 }
 
@@ -77,6 +82,17 @@ async function renderTransition(ctx, piece, output) {
   return frames;
 }
 
+async function renderEndscreen(ctx, piece, output) {
+  const { root, media, signal, quality, project } = ctx;
+  const frames = Math.round(piece.duration * FPS);
+  const bg = await graphics.background(root, 'estadio');
+  const card = await graphics.endscreen(root, { title: project.title });
+  const graph = '[0:v]scale=2016:1134,zoompan=z=\'1+0.04*on/' + frames + '\':x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':d=' + (frames + 5) + ':s=1920x1080:fps=' + FPS + '[bg];' +
+    '[1:v]loop=loop=-1:size=1:start=0,setpts=N/' + FPS + '/TB,format=rgba,fade=t=in:st=0.2:d=0.6:alpha=1[card];[bg][card]overlay=0:0,fade=t=in:st=0:d=0.4,fade=t=out:st=' + (frames / FPS - 0.6).toFixed(3) + ':d=0.6[v]' + finish('v', quality);
+  await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-i', bg, '-i', card, '-filter_complex', graph, '-map', '[out]', ...videoArgs(quality, frames), output], signal);
+  return frames;
+}
+
 function imageFile(root, project, imageId) {
   const image = project.images.find(i => i.id === imageId);
   return image ? directStore.resolveFile(root, project.id, image.file) : null;
@@ -88,20 +104,21 @@ async function backgroundFor(root, project, segment) {
   return own && fs.existsSync(own) ? graphics.imageBackground(root, own) : graphics.background(root, style);
 }
 
-async function renderSegment(ctx, section, segment, index, output) {
+async function renderSegment(ctx, section, segment, index, output, outStart = null, ctas = []) {
   const { root, project, media, signal, quality, temp } = ctx;
   const image = segment.imageId ? imageFile(root, project, segment.imageId) : null;
   const hasImage = Boolean(image && fs.existsSync(image));
   const box = Layout.boxes(segment, hasImage);
   const master = directStore.resolveFile(root, project.id, section.take.master);
-  const start = segment.startFrame / FPS, length = segment.frames / FPS;
+  const start = segment.srcStart ?? segment.startFrame / FPS, length = segment.frames / FPS;
+  const phase = outStart ?? start;
   const inputs = [], graph = [];
   const add = (args) => { inputs.push(...args); return inputs.filter(x => x === '-i').length - 1; };
   // Las imágenes fijas se decodifican una sola vez y se repiten con el filtro loop.
   const still = (file, before = '') => '[' + add(['-i', file]) + ':v]' + (before ? before + ',' : '') + 'loop=loop=-1:size=1:start=0,setpts=N/' + FPS + '/TB';
   const bg = await backgroundFor(root, project, segment);
   // Paneo lento y continuo del fondo (la fase depende del tiempo de la sección).
-  graph.push(still(bg, 'scale=2016:1134') + ',crop=1920:1080:x=\'48+44*sin((t+' + start.toFixed(3) + ')*0.21)\':y=\'27+24*cos((t+' + start.toFixed(3) + ')*0.17)\'[base]');
+  graph.push(still(bg, 'scale=2016:1134') + ',crop=1920:1080:x=\'48+44*sin((t+' + phase.toFixed(3) + ')*0.21)\':y=\'27+24*cos((t+' + phase.toFixed(3) + ')*0.17)\'[base]');
   let last = 'base';
   if (box.image && hasImage) {
     const w = box.image.w, h = box.image.h;
@@ -133,6 +150,20 @@ async function renderSegment(ctx, section, segment, index, output) {
     graph.push('[' + last + ']ass=' + name + '[subbed]');
     last = 'subbed';
   }
+  // Llamados a la acción: entran deslizándose, se «pulsan» a los 2,2 s y salen.
+  for (const [n, cta] of ctas.entries()) {
+    const a = cta.localStart, b = cta.localEnd;
+    const pos = Layout.ctaBox(segment, hasImage, cta.type);
+    const x = '\'' + pos.x + '+(' + (pos.from - pos.x) + ')*(max(0,1-(t-(' + a.toFixed(3) + '))/0.35)+max(0,(t-(' + (b - 0.35).toFixed(3) + '))/0.35))\'';
+    const normal = await graphics.ctaCard(root, { type: cta.type, text: cta.text });
+    graph.push(still(normal) + ',format=rgba[cta' + n + ']', '[' + last + '][cta' + n + ']overlay=x=' + x + ':y=' + pos.y + ':eval=frame:enable=\'between(t,' + a.toFixed(3) + ',' + b.toFixed(3) + ')\'[ctal' + n + ']');
+    last = 'ctal' + n;
+    if (cta.type !== 'comentar') {
+      const pressed = await graphics.ctaCard(root, { type: cta.type, pressed: true });
+      graph.push(still(pressed) + ',format=rgba[ctp' + n + ']', '[' + last + '][ctp' + n + ']overlay=x=' + x + ':y=' + pos.y + ':eval=frame:enable=\'between(t,' + (a + 2.2).toFixed(3) + ',' + b.toFixed(3) + ')\'[ctpl' + n + ']');
+      last = 'ctpl' + n;
+    }
+  }
   await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', ...inputs,
     '-filter_complex', graph.join(';') + finish(last, quality), '-map', '[out]', ...videoArgs(quality, segment.frames), output], signal, null, temp);
 }
@@ -148,10 +179,23 @@ async function renderAudio(ctx, timeline, total, output) {
     if (item.kind === 'transition') {
       voices.push('[sil' + voices.length + ']');
       graph.push('anullsrc=r=48000:cl=stereo,atrim=0:' + item.duration.toFixed(4) + ',asetpts=N/SR/TB[sil' + (voices.length - 1) + ']');
+    } else if (item.kind === 'endscreen') {
+      voices.push('[sil' + voices.length + ']');
+      graph.push('anullsrc=r=48000:cl=stereo,atrim=0:' + item.duration.toFixed(4) + ',asetpts=N/SR/TB[sil' + (voices.length - 1) + ']');
     } else {
-      const index = add(['-i', directStore.resolveFile(root, project.id, item.section.take.master)]);
+      // Voz limpia (IA si está disponible, si no filtros clásicos) y solo los tramos conservados.
+      const profile = project.settings.voice.profile || 'natural';
+      const master = directStore.resolveFile(root, project.id, item.section.take.master);
+      const cleaned = profile === 'original' ? { file: master, fallback: false } : await require('./voice-audio.cjs').cleanVoice(root, master, profile, signal).catch(() => ({ file: master, fallback: true }));
+      const chain = require('./editing.cjs').voiceFilter(profile, cleaned.fallback);
+      const index = add(['-i', cleaned.file]);
       const label = 'voz' + voices.length;
-      graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:' + item.duration.toFixed(4) + ',apad=whole_dur=' + item.duration.toFixed(4) + ',asetpts=N/SR/TB,volume=' + gain + '[' + label + ']');
+      const ranges = item.ranges;
+      const parts = ranges.map((r, k) => label + 'r' + k);
+      graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo' + (parts.length > 1 ? ',asplit=' + parts.length : '') + parts.map(x => '[' + x + 'in]').join(''));
+      ranges.forEach((r, k) => graph.push('[' + parts[k] + 'in]atrim=start=' + r.start.toFixed(4) + ':duration=' + (r.frames / FPS).toFixed(4) + ',asetpts=N/SR/TB,apad=whole_dur=' + (r.frames / FPS).toFixed(4) +
+        (ranges.length > 1 ? ',afade=t=in:d=0.008,afade=t=out:st=' + Math.max(0, r.frames / FPS - 0.01).toFixed(4) + ':d=0.008' : '') + '[' + parts[k] + ']'));
+      graph.push(parts.map(x => '[' + x + ']').join('') + (parts.length > 1 ? 'concat=n=' + parts.length + ':v=0:a=1,' : '') + 'anull' + chain + ',volume=' + gain + ',atrim=0:' + item.duration.toFixed(4) + ',apad=whole_dur=' + item.duration.toFixed(4) + '[' + label + ']');
       voices.push('[' + label + ']');
     }
   }
@@ -203,6 +247,13 @@ async function renderAudio(ctx, timeline, total, output) {
     const index = add(['-i', file]);
     const offset = Math.round(item.start * 1000);
     graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo,volume=' + Number(item.section.transition.volume).toFixed(3) + ',adelay=' + offset + '|' + offset + '[fx' + effects.length + ']');
+    effects.push('[fx' + effects.length + ']');
+  }
+  for (const click of ctx.clicks || []) {
+    const file = await audio.ensure(root, 'sfx', 'clic', media);
+    const index = add(['-i', file]);
+    const offset = Math.round(click * 1000);
+    graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo,volume=0.7,adelay=' + offset + '|' + offset + '[fx' + effects.length + ']');
     effects.push('[fx' + effects.length + ']');
   }
   const mixInputs = ['[voice]'];
@@ -264,32 +315,56 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
     const files = [];
     const timeline = [];
     let frames = 0;
-    const work = fresh.reduce((n, p) => n + (p.kind === 'section' ? Layout.frames(Layout.fill(p.section.layouts, p.section.take.duration), p.section.take.duration).length : 1), 0);
+    const work = fresh.reduce((n, p) => n + (p.kind === 'section' ? Layout.pieces(Layout.fill(p.section.layouts, p.section.take.duration), Layout.kept(p.section.cuts, p.section.take.duration)).length : 1), 0);
     let done = 0;
     const step = message => send({ stage: 'video', percent: Math.round(5 + 75 * done / work), message });
+    // Tiempos de salida previstos (para los recordatorios automáticos de los llamados a la acción).
+    const outputStarts = {};
+    let cursor = 0;
     for (const piece of fresh) {
-      if (piece.kind === 'transition') {
-        step('Transición · ' + piece.section.title);
+      if (piece.kind === 'section') outputStarts[piece.section.id] = cursor;
+      cursor += piece.kind === 'section' ? piece.duration : Math.round(piece.duration * FPS) / FPS;
+    }
+    const plannedCtas = auto.plannedCtas(project, outputStarts);
+    ctx.clicks = [];
+    let ctaCount = 0;
+    for (const piece of fresh) {
+      if (piece.kind === 'transition' || piece.kind === 'endscreen') {
+        step(piece.kind === 'transition' ? 'Transición · ' + piece.section.title : 'Pantalla final');
         const file = path.join(temp, 'p' + files.length + '.mp4');
-        const count = await renderTransition(ctx, piece, file);
+        const count = piece.kind === 'transition' ? await renderTransition(ctx, piece, file) : await renderEndscreen(ctx, piece, file);
         files.push(file);
-        timeline.push({ kind: 'transition', section: piece.section, start: frames / FPS, duration: count / FPS });
+        timeline.push({ kind: piece.kind, section: piece.section, start: frames / FPS, duration: count / FPS });
         frames += count;
         done++;
         continue;
       }
       const section = piece.section;
-      const segments = Layout.frames(Layout.fill(section.layouts, section.take.duration), section.take.duration);
+      const ranges = Layout.kept(section.cuts, section.take.duration);
+      const parts = Layout.pieces(Layout.fill(section.layouts, section.take.duration), ranges);
       const sectionStart = frames;
-      for (const [index, segment] of segments.entries()) {
-        step('Sección «' + section.title + '» · tramo ' + (index + 1) + ' de ' + segments.length);
+      // Llamados a la acción en tiempo de salida de la sección.
+      const ctas = (plannedCtas[section.id] || []).map(c => {
+        const startOut = Layout.mapTime(ranges, c.start);
+        const length = c.end - c.start;
+        return { ...c, outStart: startOut, outEnd: startOut + length };
+      });
+      for (const c of ctas) { ctx.clicks.push(sectionStart / FPS + c.outStart + (c.type === 'comentar' ? 0.1 : 2.2)); ctaCount++; }
+      let local = 0;
+      for (const [index, part] of parts.entries()) {
+        step('Sección «' + section.title + '» · tramo ' + (index + 1) + ' de ' + parts.length);
         const file = path.join(temp, 'p' + files.length + '.mp4');
-        await renderSegment(ctx, section, segment, index, file);
+        const length = part.frames / FPS;
+        const visible = ctas.filter(c => c.outEnd > local && c.outStart < local + length).map(c => ({ ...c, localStart: c.outStart - local, localEnd: c.outEnd - local }));
+        await renderSegment(ctx, section, part, part.index, file, sectionStart / FPS + local, visible);
         files.push(file);
-        frames += segment.frames;
+        frames += part.frames;
+        local += length;
         done++;
       }
-      timeline.push({ kind: 'section', section, start: sectionStart / FPS, duration: (frames - sectionStart) / FPS });
+      // Rangos de audio con los mismos fotogramas que el video.
+      const audioRanges = ranges.map(r => ({ start: r.start, frames: parts.filter(p => p.srcStart >= r.start - 1e-6 && p.srcEnd <= r.end + 1e-6).reduce((n, p) => n + p.frames, 0) })).filter(r => r.frames > 0);
+      timeline.push({ kind: 'section', section, start: sectionStart / FPS, duration: (frames - sectionStart) / FPS, ranges: audioRanges });
     }
     const total = frames / FPS;
     ctx.sectionsOnTimeline = [];
@@ -323,8 +398,11 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
     fs.renameSync(partial, destination);
     const chapters = chapterList(timeline, project);
     fs.writeFileSync(destination.replace(/\.mp4$/, '.capitulos.txt'), chapters.text + '\n', 'utf8');
-    const blocks = timeline.filter(t => t.kind === 'section' && t.section.transcript?.takeId === t.section.take.id)
-      .map(t => ({ offset: t.start, words: t.section.transcript.words }));
+    const blocks = timeline.filter(t => t.kind === 'section' && t.section.transcript?.takeId === t.section.take.id).map(t => {
+      const ranges = Layout.kept(t.section.cuts, t.section.take.duration);
+      const inside = w => ranges.some(r => w.start >= r.start - 0.05 && w.start < r.end);
+      return { offset: t.start, words: t.section.transcript.words.filter(inside).map(w => ({ ...w, start: Layout.mapTime(ranges, w.start), end: Layout.mapTime(ranges, w.end) })) };
+    });
     let srtRel = null;
     if (blocks.length) {
       srtRel = relative.replace(/\.mp4$/, '.srt');
@@ -332,7 +410,12 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
     }
     const entry = { file: relative, srt: srtRel, at: new Date().toISOString(), quality, duration: info.duration, width: info.width, height: info.height,
       size: fs.statSync(destination).size, chapters: chapters.chapters.map(({ sectionId, ...c }) => c), chaptersText: chapters.text, chaptersValid: chapters.valid,
-      chapterProblems: chapters.problems, missing, burnedSubtitles: Boolean(project.settings.subtitles.enabled && project.settings.subtitles.burn) };
+      chapterProblems: chapters.problems, missing, burnedSubtitles: Boolean(project.settings.subtitles.enabled && project.settings.subtitles.burn),
+      ctas: ctaCount, pieces: timeline.map(t => ({ kind: t.kind, sectionId: t.section.id, start: t.start, duration: t.duration })) };
+    if (quality === 'final') {
+      send({ stage: 'review', percent: 98, message: 'Revisión final del video' });
+      entry.review = await auto.review(root, directStore.read(root, id), entry, destination, media).catch(error => ({ ok: true, items: [{ level: 'info', text: 'No se pudo completar la revisión: ' + error.message }] }));
+    }
     const latest = directStore.read(root, id);
     latest.exports = [...(latest.exports || []), entry].slice(-20);
     directStore.write(root, latest);
@@ -343,4 +426,4 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
   }
 }
 
-module.exports = { exportProject, plan, chapterList, renderTransition, renderSegment, renderAudio, QUALITY, safeName };
+module.exports = { exportProject, plan, chapterList, renderTransition, renderSegment, renderEndscreen, renderAudio, QUALITY, safeName };

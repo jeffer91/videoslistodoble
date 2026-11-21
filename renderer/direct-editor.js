@@ -9,9 +9,9 @@
   const L = window.DirectLayout;
   let S = null, api = null;
   const E = { segment: null, playing: false, frame: 0, video: null, canvas: null, ctx: null, pps: 40, undo: [], images: new Map(), layers: new Map(), pendingLayers: new Map(),
-    saveTimer: 0, transition: null, drag: null };
+    saveTimer: 0, transition: null, drag: null, ctaPlan: {}, ctaLayers: new Map() };
   const ACTIONS = new Set(['ed-play', 'ed-split', 'ed-delete', 'ed-layout', 'ed-side', 'ed-corner', 'ed-propose', 'ed-apply', 'ed-discard', 'ed-undo', 'ed-entities', 'ed-search', 'ed-entity',
-    'ed-use-image', 'ed-own-images', 'ed-paste-image', 'ed-remove-image', 'ed-transition-preview', 'ed-seg', 'ed-zoom-in', 'ed-zoom-out', 'ed-transcribe', 'ed-open-source', 'ed-select-image', 'ed-tag']);
+    'ed-use-image', 'ed-own-images', 'ed-paste-image', 'ed-remove-image', 'ed-transition-preview', 'ed-seg', 'ed-zoom-in', 'ed-zoom-out', 'ed-transcribe', 'ed-open-source', 'ed-select-image', 'ed-tag', 'ed-cut', 'ed-cta', 'ed-cta-add', 'ed-cuts-auto']);
   const COLORS = { A: '#2fbf6b', B: '#d4b15f', C: '#55d3c2', D: '#c46be0', E: '#e0784a' };
 
   const esc = v => window.DirectLong.esc(v);
@@ -40,7 +40,8 @@
     const seg = current();
     const stage = '<section class="dl-ed-main"><div class="dl-canvas-wrap"><canvas id="ed-canvas" width="960" height="540"></canvas><video id="ed-video" preload="auto" playsinline hidden></video></div>' +
       '<div class="dl-row wrap dl-transport">' + btn('ed-play', '▶ Reproducir', '', 'id="ed-play"') + '<input type="range" id="ed-scrub" min="0" max="' + duration() + '" step="0.033" value="' + S.time + '">' +
-      '<span id="ed-time" class="dl-time">' + clock(S.time) + ' / ' + clock(duration()) + '</span>' + btn('ed-split', '✂ Dividir aquí', 'secondary') + btn('ed-zoom-out', '－', 'secondary', 'title="Alejar"') + btn('ed-zoom-in', '＋', 'secondary', 'title="Acercar"') + '</div>' +
+      '<span id="ed-time" class="dl-time">' + clock(S.time) + ' / ' + clock(duration()) + ((section().cuts || []).some(c => c.enabled) ? ' · final ' + clock(L.keptDuration(section().cuts, duration())) : '') + '</span>' + btn('ed-split', '✂ Dividir aquí', 'secondary') + btn('ed-cuts-auto', 'Detectar cortes', 'secondary', 'title="Silencios, muletillas y frases repetidas"') +
+      '<select id="ed-cta-type" aria-label="Llamado a la acción"><option value="suscribir">Suscríbete</option><option value="like">Dale like</option><option value="comentar">Comenta</option></select>' + btn('ed-cta-add', '＋ Llamado aquí', 'secondary') + btn('ed-zoom-out', '－', 'secondary', 'title="Alejar"') + btn('ed-zoom-in', '＋', 'secondary', 'title="Acercar"') + '</div>' +
       timeline() + '</section>';
     return '<div class="dl-editor">' + list + stage + '<div class="dl-ed-side">' + inspector(seg) + smart() + imagesPanel() + transitionPanel() + '</div></div>';
   }
@@ -55,7 +56,7 @@
     for (let t = 0; t <= d; t += step) ticks.push('<span style="left:' + px(t) + 'px">' + clock(t) + '</span>');
     const cues = s.transcript?.takeId === s.take.id ? groupCues(s.transcript.words) : [];
     const styles = S.project.sections.map(x => x.id === s.id);
-    return '<div class="dl-timeline" id="ed-timeline"><div class="dl-tl-labels"><span>Tiempo</span><span>Transición</span><span>Composición</span><span>Imágenes</span><span>Subtítulos</span><span>Voz</span><span>Música</span></div>' +
+    return '<div class="dl-timeline" id="ed-timeline"><div class="dl-tl-labels"><span>Tiempo</span><span>Transición</span><span>Composición</span><span>Imágenes</span><span>Subtítulos</span><span>Voz</span><span>Música</span><span>Cortes</span><span>Llamados</span></div>' +
       '<div class="dl-tl-scroll"><div class="dl-tl-inner" style="width:' + width + 'px">' +
       '<div class="dl-tl-ruler">' + ticks.join('') + '</div>' +
       '<div class="dl-tl-track">' + (S.project.settings.transitions.enabled && s.transition.enabled ? '<span class="dl-tl-block trans" style="left:0;width:' + Math.min(width, 120) + 'px" title="Entra antes de la sección">◆ ' + esc(s.transition.style === 'auto' ? 'Automática' : L.BACKGROUND_NAMES[s.transition.style]) + ' · ' + s.transition.duration + ' s</span>' : '<span class="dl-tl-empty">Sin transición</span>') + '</div>' +
@@ -65,6 +66,9 @@
       '<div class="dl-tl-track">' + (cues.length ? cues.map(c => '<span class="dl-tl-block sub" style="left:' + px(c.start) + 'px;width:' + px(Math.max(0.2, c.end - c.start)) + 'px" title="' + esc(c.text) + '">' + esc(c.text) + '</span>').join('') : '<span class="dl-tl-empty">' + btn('ed-transcribe', 'Transcribir para generar subtítulos', 'link') + '</span>') + '</div>' +
       '<div class="dl-tl-track"><span class="dl-tl-block voice" style="left:0;width:' + px(d) + 'px">🎙 Toma única · ' + clock(d) + '</span></div>' +
       '<div class="dl-tl-track"><span class="dl-tl-block music" style="left:0;width:' + px(d) + 'px">♫ ' + esc(s.audio.musicId ? 'Pista propia' : s.audio.mood === 'auto' ? 'Música automática' : s.audio.mood) + (S.project.settings.music.ducking ? ' · ducking' : '') + '</span></div>' +
+      '<div class="dl-tl-track">' + ((s.cuts || []).length ? s.cuts.map(c => '<button data-dl="ed-cut" data-id="' + esc(c.id) + '" class="dl-tl-block cut ' + (c.enabled ? '' : 'off') + '" style="left:' + px(c.start) + 'px;width:' + px(Math.max(0.15, c.end - c.start)) + 'px" title="' + esc(c.reason + (c.enabled ? ' · clic para conservar este tramo' : ' · clic para volver a cortarlo')) + '">✂</button>').join('') :
+        '<span class="dl-tl-empty">Sin cortes · ' + clock(d) + ' finales</span>') + '</div>' +
+      '<div class="dl-tl-track">' + (E.ctaPlan[s.id] || []).map(c => '<button data-dl="ed-cta" data-id="' + esc(c.id) + '" data-source="' + esc(c.source) + '" class="dl-tl-block cta" style="left:' + px(c.start) + 'px;width:' + px(c.end - c.start) + 'px" title="' + esc(c.source + ' · clic para quitarlo') + '">' + ({ suscribir: '🔔 Suscríbete', like: '👍 Like', comentar: '💬 Comenta' }[c.type]) + '</button>').join('') + '</div>' +
       '<div class="dl-tl-playhead" id="ed-playhead" style="left:' + px(S.time) + 'px"></div>' +
       '</div></div></div>' + (styles ? '' : '');
   }
@@ -153,6 +157,19 @@
     E.video.addEventListener('ended', () => { E.playing = false; updatePlay(); });
     bindTimeline();
     draw();
+    loadCtas();
+  }
+
+  async function loadCtas() {
+    try { E.ctaPlan = await api.call('cta.plan', { id: project().id }); } catch { E.ctaPlan = {}; }
+    const tl = q('#ed-timeline');
+    if (tl) { const scroll = tl.querySelector('.dl-tl-scroll')?.scrollLeft || 0; tl.outerHTML = timeline(); bindTimeline(); const nt = q('#ed-timeline .dl-tl-scroll'); if (nt) nt.scrollLeft = scroll; }
+  }
+
+  function ctaLayer(cta) {
+    const key = cta.type + '|' + (cta.text || '');
+    if (!E.ctaLayers.has(key)) { E.ctaLayers.set(key, null); api.call('cta.layer', { type: cta.type, text: cta.text }).then(r => { E.ctaLayers.set(key, r); draw(); }).catch(() => {}); }
+    return E.ctaLayers.get(key);
   }
 
   function stop() {
@@ -238,6 +255,14 @@
     }
     const fg = lay && image(lay.foreground);
     if (fg) ctx.drawImage(fg, 0, 0, L.W, L.H);
+    for (const cta of (E.ctaPlan[section().id] || []).filter(c => t >= c.start && t <= c.end)) {
+      const layer = ctaLayer(cta);
+      const pos = L.ctaBox(seg, hasImage(seg), cta.type);
+      const enter = Math.max(0, 1 - (t - cta.start) / 0.35), leave = Math.max(0, (t - (cta.end - 0.35)) / 0.35);
+      const x = pos.x + (pos.from - pos.x) * (enter + leave);
+      const img = layer && image(cta.type !== 'comentar' && t >= cta.start + 2.2 && layer.pressed ? layer.pressed : layer.normal);
+      if (img) ctx.drawImage(img, x, pos.y);
+    }
     drawSubtitle(ctx, t);
     ctx.restore();
     const head = q('#ed-playhead');
@@ -298,6 +323,12 @@
   }
 
   function tick() {
+    const ranges = L.kept(section()?.cuts, duration());
+    if (E.video && E.playing && ranges.length) {
+      const t = E.video.currentTime, to = L.skip(ranges, t);
+      if (to - t > 0.04) E.video.currentTime = to;
+      if (t >= ranges.at(-1).end - 0.02) { E.video.pause(); E.playing = false; updatePlay(); }
+    }
     draw();
     if (E.playing) E.frame = requestAnimationFrame(tick);
   }
@@ -483,6 +514,36 @@
         audio.play().catch(() => {});
       }
       return drawTransition();
+    }
+    if (action === 'ed-cut') {
+      const cuts = s.cuts.map(c => c.id === target.dataset.id ? { ...c, enabled: !c.enabled } : c);
+      const saved = await api.call('section.update', { id: p.id, sectionId: s.id, patch: { cuts } });
+      s.cuts = saved.sections.find(x => x.id === s.id).cuts;
+      await loadCtas();
+      return rerender();
+    }
+    if (action === 'ed-cuts-auto') {
+      const saved = await api.call('cuts.auto', { id: p.id, sectionId: s.id });
+      s.cuts = saved.sections.find(x => x.id === s.id).cuts;
+      api.toast(s.cuts.length ? s.cuts.length + ' cortes propuestos · haz clic en uno para conservar ese tramo' : 'No se encontraron silencios ni repeticiones');
+      await loadCtas();
+      return rerender();
+    }
+    if (action === 'ed-cta-add') {
+      const ctas = [...(s.ctas || []), { type: q('#ed-cta-type').value, start: S.time }];
+      const saved = await api.call('section.update', { id: p.id, sectionId: s.id, patch: { ctas } });
+      s.ctas = saved.sections.find(x => x.id === s.id).ctas;
+      await loadCtas();
+      return rerender();
+    }
+    if (action === 'ed-cta') {
+      const id = target.dataset.id;
+      const patch = target.dataset.source === 'manual' ? { ctas: (s.ctas || []).filter(c => c.id !== id) } : { ctaOff: [...(s.ctaOff || []), id] };
+      const saved = await api.call('section.update', { id: p.id, sectionId: s.id, patch });
+      Object.assign(s, { ctas: saved.sections.find(x => x.id === s.id).ctas, ctaOff: saved.sections.find(x => x.id === s.id).ctaOff });
+      await loadCtas();
+      api.toast('Llamado a la acción quitado');
+      return rerender();
     }
     if (action === 'ed-zoom-in' || action === 'ed-zoom-out') { E.pps = Math.max(8, Math.min(160, E.pps * (action === 'ed-zoom-in' ? 1.5 : 1 / 1.5))); return rerender(); }
     if (action === 'ed-transcribe') {

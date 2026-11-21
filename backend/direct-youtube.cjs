@@ -10,6 +10,8 @@ const directStore = require('./direct-store.cjs');
 const intel = require('./direct-intel.cjs');
 
 const GOOGLE = 'https://www.googleapis.com';
+// Los mismos permisos que Estadísticas más «force-ssl», necesario para publicar el comentario.
+const SCOPES = ['https://www.googleapis.com/auth/youtube', 'https://www.googleapis.com/auth/yt-analytics.readonly', 'https://www.googleapis.com/auth/youtube.force-ssl'];
 const CHUNK = 16 * 1024 * 1024; // múltiplo de 256 KiB, como exige YouTube
 const RETRIES = 6;
 
@@ -34,7 +36,7 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
 
   async function connect({ clientId, clientSecret }) {
     if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(String(clientId || '').trim())) throw Error('Pega el ID de cliente OAuth de escritorio (termina en .apps.googleusercontent.com)');
-    const secrets = await oauth({ clientId: String(clientId).trim(), clientSecret: String(clientSecret || '').trim() }, open);
+    const secrets = await oauth({ clientId: String(clientId).trim(), clientSecret: String(clientSecret || '').trim(), scopes: SCOPES }, open);
     await publishing.connect('youtube', secrets);
     return status();
   }
@@ -77,6 +79,7 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
     const title = String(project.youtube.title || project.title).trim().slice(0, 100);
     if (!title) throw Error('Escribe el título del video');
     const size = fs.statSync(path).size;
+    const schedule = project.youtube.publishAt && Date.parse(project.youtube.publishAt) > Date.now() + 60000 ? project.youtube.publishAt : null;
     active = { progress: { id, sent: 0, size, percent: 0, stage: 'iniciando', message: 'Preparando la subida' } };
     const report = (patch) => { Object.assign(active.progress, patch); send({ ...active.progress }); };
     try {
@@ -87,7 +90,8 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
           method: 'POST', headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Length': String(size), 'X-Upload-Content-Type': 'video/mp4' },
           body: JSON.stringify({
             snippet: { title, description: description(project, entry), tags: project.youtube.tags || [], categoryId: '17', defaultLanguage: 'es', defaultAudioLanguage: 'es' },
-            status: { privacyStatus: project.youtube.privacy || 'private', selfDeclaredMadeForKids: project.youtube.madeForKids === true }
+            status: { privacyStatus: schedule ? 'private' : project.youtube.privacy || 'private', selfDeclaredMadeForKids: project.youtube.madeForKids === true,
+              ...(schedule ? { publishAt: schedule } : {}) }
           })
         });
         if (!init.ok) throw await failure(init, 'YouTube no aceptó la subida');
@@ -141,13 +145,23 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
         try { await setThumbnail(videoId, thumbnail); }
         catch (error) { warnings.push('Miniatura: ' + error.message); }
       }
-      const requested = project.youtube.privacy || 'private';
+      const requested = schedule ? 'private' : project.youtube.privacy || 'private';
       const actual = result.status?.privacyStatus || requested;
       if (actual !== requested) warnings.push('YouTube dejó el video como «' + actual + '». Los proyectos de Google Cloud sin auditoría solo pueden subir videos privados.');
+      if (schedule && !result.status?.publishAt) warnings.push('YouTube no aceptó la programación; publícalo desde YouTube Studio.');
+      // Primer comentario con la pregunta del video (YouTube no permite fijarlo por la API).
+      let comment = null;
+      const text = String(project.youtube.comment || '').trim();
+      if (text) {
+        if (actual === 'public') {
+          try { comment = await postComment(videoId, text); }
+          catch (error) { warnings.push('Comentario: ' + error.message); }
+        } else warnings.push('El comentario se publicará cuando el video sea público: pulsa «Comprobar estado» después del estreno.');
+      }
       const latest = directStore.read(root, id);
       delete latest.youtube.session;
       latest.youtube.lastUpload = { id: videoId, url: 'https://www.youtube.com/watch?v=' + videoId, studio: 'https://studio.youtube.com/video/' + videoId + '/edit',
-        at: new Date().toISOString(), privacy: actual, file: entry.file, title, warnings };
+        at: new Date().toISOString(), privacy: actual, publishAt: schedule, file: entry.file, title, warnings, comment, pendingComment: text && !comment ? text : '' };
       directStore.write(root, latest);
       report({ stage: 'listo', message: 'Publicado en YouTube' });
       return latest.youtube.lastUpload;
@@ -172,6 +186,20 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
     return response.ok ? response.json() : null;
   }
 
+  async function postComment(videoId, text) {
+    const response = await call(GOOGLE + '/youtube/v3/commentThreads?part=snippet', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snippet: { videoId, topLevelComment: { snippet: { textOriginal: text.slice(0, 1000) } } } }) });
+    if (response.status === 403) {
+      const data = await response.json().catch(() => null);
+      const reason = data?.error?.errors?.[0]?.reason || '';
+      if (/insufficient|scope/i.test(reason + JSON.stringify(data || ''))) throw Error('vuelve a conectar YouTube en este apartado para permitir comentarios');
+      throw Error('YouTube no permitió comentar (' + (reason || 'HTTP 403') + ')');
+    }
+    if (!response.ok) throw await failure(response, 'YouTube no publicó el comentario');
+    const data = await response.json();
+    return { id: data.id, at: new Date().toISOString() };
+  }
+
   async function setThumbnail(videoId, file) {
     const ext = String(file).toLowerCase().split('.').pop();
     if (!['jpg', 'jpeg', 'png'].includes(ext)) throw Error('La miniatura debe ser JPG o PNG');
@@ -193,7 +221,12 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
     if (!item) return { ...last, processing: 'YouTube aún no muestra el video' };
     const processing = { processed: 'Procesado', uploaded: 'Procesando en YouTube', failed: 'Falló el procesamiento', rejected: 'Rechazado por YouTube', deleted: 'Eliminado' }[item.status?.uploadStatus] || item.status?.uploadStatus;
     const latest = directStore.read(root, id);
-    latest.youtube.lastUpload = { ...last, privacy: item.status?.privacyStatus || last.privacy, processing };
+    const update = { ...last, privacy: item.status?.privacyStatus || last.privacy, processing };
+    if (update.pendingComment && update.privacy === 'public') {
+      try { update.comment = await postComment(last.id, update.pendingComment); update.pendingComment = ''; }
+      catch (error) { update.warnings = [...(last.warnings || []).filter(w => !w.startsWith('Comentario')), 'Comentario: ' + error.message]; }
+    }
+    latest.youtube.lastUpload = update;
     directStore.write(root, latest);
     return latest.youtube.lastUpload;
   }
@@ -201,4 +234,4 @@ function createYouTube(root, publishing, { fetcher = fetch, open = () => {}, oau
   return { status, connect, upload, check, description: (project, entry) => description(project, entry) };
 }
 
-module.exports = { createYouTube, description, CHUNK };
+module.exports = { createYouTube, description, CHUNK, SCOPES };

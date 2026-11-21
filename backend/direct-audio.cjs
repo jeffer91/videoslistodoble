@@ -27,7 +27,8 @@ const SOUNDS = {
   estadio: { label: 'Sonido de estadio', seconds: 4.5 },
   multitud: { label: 'Multitud que celebra', seconds: 4.5 },
   cinematico: { label: 'Efecto cinematográfico', seconds: 3.6 },
-  musica: { label: 'Música deportiva breve', seconds: 3.2 }
+  musica: { label: 'Música deportiva breve', seconds: 3.2 },
+  clic: { label: 'Clic de suscripción', seconds: 0.6 }
 };
 
 const f = x => x.toFixed(3);
@@ -86,6 +87,7 @@ function soundGraph(name, seconds) {
   if (name === 'estadio') return { expr: '(random(1)*2-1)*(0.55+0.25*sin(2*PI*0.37*t)+0.2*sin(2*PI*1.3*t))*min(1,t/0.8)*min(1,(' + d + '-t)/1.2)', filter: 'lowpass=f=1600,highpass=f=120,equalizer=f=700:t=q:w=1:g=5,aecho=0.8:0.7:90|160:0.3|0.25' };
   if (name === 'multitud') return { expr: '((random(1)*2-1)*0.6+if(lt(random(2),0.025),(random(3)*2-1)*2,0))*min(1,t/0.4)*min(1,(' + d + '-t)/1.4)*(0.7+0.3*sin(2*PI*0.5*t))', filter: 'bandpass=f=1500:width_type=o:w=2.4,aecho=0.8:0.7:60|130:0.35|0.25' };
   if (name === 'cinematico') return { expr: 'if(lt(t,2.2),sin(2*PI*(110+380*pow(t/2.2,2))*t)*pow(t/2.2,2)*0.35+(random(1)*2-1)*pow(t/2.2,3)*0.25,0.95*sin(2*PI*(36+120*exp(-9*(t-2.2)))*(t-2.2))*exp(-2.4*(t-2.2)))', filter: 'lowpass=f=7000,aecho=0.8:0.6:80|170:0.35|0.2' };
+  if (name === 'clic') return { expr: '(sin(2*PI*1800*t)*0.6+sin(2*PI*2600*t)*0.3)*exp(-38*t)+(random(1)*2-1)*exp(-120*t)*0.4', filter: 'highpass=f=300,aecho=0.6:0.4:30:0.2' };
   // Música deportiva breve: golpe de metales con timbal.
   const stab = [N.D3, N.A3, N.D4, N.F4].map(n => '(' + tone(note(n), [1, 0.6, 0.4, 0.25, 0.15]) + ')').join('+');
   return { expr: '(' + stab + ')*exp(-2.2*t)*0.09*min(1,t/0.02)+0.8*sin(2*PI*(42+110*exp(-12*t))*t)*exp(-3*t)', filter: 'lowpass=f=8000,aecho=0.8:0.6:60|120:0.3|0.2' };

@@ -15,6 +15,9 @@ const graphics = require('./direct-graphics.cjs');
 const audio = require('./direct-audio.cjs');
 const render = require('./direct-render.cjs');
 const { createYouTube } = require('./direct-youtube.cjs');
+const auto = require('./direct-auto.cjs');
+const Layout = require('../renderer/direct-layout.js');
+const library = require('./direct-library.cjs');
 
 const TYPES = { '.webm': 'video/webm', '.mp4': 'video/mp4', '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.aac': 'audio/aac',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.srt': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8' };
@@ -91,6 +94,183 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
     return { map, project: directStore.read(root, project.id) };
   }
 
+  async function transcribeSection(id, sectionId) {
+    const project = directStore.read(root, id);
+    const section = project.sections.find(s => s.id === sectionId);
+    if (!section?.take) return false;
+    const file = directStore.resolveFile(root, id, section.take.master || section.take.original);
+    const words = await intel.transcribeFile(root, file, new AbortController().signal, media);
+    const latest = directStore.read(root, id);
+    const current = latest.sections.find(s => s.id === sectionId);
+    if (current?.take?.id !== section.take.id) return false;
+    current.transcript = { takeId: section.take.id, words: directStore.normalizeWords(words, section.take.duration + 1), edited: false, engine: 'whisper.cpp' };
+    directStore.write(root, latest);
+    return true;
+  }
+
+  /** Copia una foto de la biblioteca al proyecto (una sola vez). */
+  async function fromLibrary(id, item, tags) {
+    const project = directStore.read(root, id);
+    const existing = project.images.find(i => i.libraryId === item.id);
+    if (existing) return existing;
+    const saved = await directStore.saveImage(root, id, library.resolve(root, item.id), { name: item.name, source: item.source });
+    const latest = saved.project;
+    const image = latest.images.find(i => i.id === saved.image.id);
+    image.libraryId = item.id;
+    image.tags = [...new Set([...(item.tags || []), ...tags])];
+    directStore.write(root, latest);
+    library.used(root, item.id);
+    return image;
+  }
+
+  /** Busca una imagen para un nombre: primero la biblioteca propia, después Wikimedia Commons. */
+  async function imageFor(id, query, notes) {
+    const project = directStore.read(root, id);
+    const tagged = auto.imageTagged(project, query);
+    if (tagged) return tagged;
+    const own = library.find(root, query, project.images.map(i => i.libraryId).filter(Boolean))[0];
+    if (own) return fromLibrary(id, own, [query]);
+    try {
+      const found = await intel.searchImages(query, { limit: 3 });
+      const best = found.results[0];
+      if (!best) { notes.push('Sin foto libre para «' + query + '»'); return null; }
+      const { buffer, item } = await intel.downloadImage({ title: best.title });
+      const source = { provider: item.provider, title: item.title, pageUrl: item.pageUrl, author: item.author, license: item.license, licenseUrl: item.licenseUrl,
+        restrictions: item.restrictions, attribution: intel.attribution(item), query, year: item.year };
+      const entry = await library.add(root, buffer, { name: item.title, tags: [query], source }).catch(() => null);
+      const saved = await directStore.saveImage(root, id, buffer, { name: item.title, source });
+      const latest = saved.project;
+      const image = latest.images.find(i => i.id === saved.image.id);
+      image.tags = [query];
+      if (entry) image.libraryId = entry.id;
+      directStore.write(root, latest);
+      return image;
+    } catch (error) {
+      notes.push('Imágenes de internet no disponibles (' + String(error.message).slice(0, 80) + ')');
+      return null;
+    }
+  }
+
+  // ── Piloto automático ───────────────────────────────────────────────────
+  const pilot = { queue: [], running: false, current: null };
+  function queuePilot(id, sectionId) {
+    if (!pilot.queue.some(x => x.id === id && x.sectionId === sectionId)) pilot.queue.push({ id, sectionId });
+    if (pilot.running) return;
+    pilot.running = true;
+    (async () => {
+      while (pilot.queue.length) {
+        const next = pilot.queue.shift();
+        pilot.current = next;
+        try { await autopilotSection(next.id, next.sectionId); }
+        catch (error) {
+          try {
+            const p = directStore.read(root, next.id);
+            const s = p.sections.find(x => x.id === next.sectionId);
+            if (s) { s.auto = { state: 'error', at: new Date().toISOString(), notes: [String(error.message || error).slice(0, 300)] }; directStore.write(root, p); }
+          } catch { /* proyecto eliminado */ }
+          send({ kind: 'auto', id: next.id, sectionId: next.sectionId, state: 'error', message: 'Piloto automático: ' + String(error.message || error).slice(0, 200) });
+        }
+        if (!pilot.queue.some(x => x.id === next.id)) await autopilotProject(next.id).catch(error => send({ kind: 'auto', id: next.id, state: 'error', message: 'Piloto automático: ' + error.message }));
+      }
+      pilot.current = null;
+      pilot.running = false;
+    })();
+  }
+
+  async function autopilotSection(id, sectionId) {
+    const notes = [];
+    const step = (message, percent) => send({ kind: 'auto', id, sectionId, state: 'working', percent, message });
+    const mark = (state) => { const p = directStore.read(root, id); const s = p.sections.find(x => x.id === sectionId); if (s) { s.auto = { state, at: new Date().toISOString(), notes }; directStore.write(root, p); } return p; };
+    let project = directStore.read(root, id);
+    let section = project.sections.find(s => s.id === sectionId);
+    if (!section?.take) return;
+    const settings = project.settings.autopilot;
+    mark('trabajando');
+    step('Preparando la toma de «' + section.title + '»', 5);
+    await directStore.prepareMaster(root, { id, sectionId }, new AbortController().signal, media);
+    if (intel.whisperConfig(root).ready) {
+      step('Transcribiendo «' + section.title + '» en tu PC', 20);
+      await transcribeSection(id, sectionId);
+    } else notes.push('Instala Whisper en Configuración para transcribir, cortar errores y subtitular automáticamente.');
+    project = directStore.read(root, id);
+    section = project.sections.find(s => s.id === sectionId);
+    if (settings.cuts && section.transcript?.takeId === section.take.id) {
+      step('Quitando silencios y frases repetidas', 45);
+      const manual = (section.cuts || []).filter(c => !c.auto);
+      const cuts = [...manual, ...auto.autocut(section)];
+      project = directStore.updateSection(root, { id, sectionId, patch: { cuts } });
+      section = project.sections.find(s => s.id === sectionId);
+      const removed = Layout.keptDuration([], section.take.duration) - Layout.keptDuration(section.cuts, section.take.duration);
+      if (removed > 0.2) notes.push('Recortados ' + removed.toFixed(1).replace('.', ',') + ' s de silencios y repeticiones');
+    }
+    if (settings.images) {
+      step('Buscando imágenes de lo que mencionas', 60);
+      const marks = Layout.marks(section.text).marks;
+      const queries = [...marks.filter(m => m.type === 'imagen').map(m => m.value)];
+      const spoken = section.transcript?.takeId === section.take.id ? section.transcript.words.map(w => w.text).join(' ') : '';
+      const names = intel.entities(Layout.stripMarks(section.text) + ' ' + spoken).filter(e => e.known && e.type !== 'competicion');
+      for (const e of names) if (!queries.some(q => Layout.normalize(q).includes(Layout.normalize(e.name)))) queries.push(e.name);
+      const ids = [];
+      for (const query of queries.slice(0, 6)) {
+        const image = await imageFor(id, query, notes);
+        if (image) ids.push(image.id);
+      }
+      for (const m of marks.filter(x => x.type === 'dato')) {
+        const stat = auto.markStat(m.value);
+        project = directStore.read(root, id);
+        if (!project.images.some(i => i.source?.stat === auto.statKey(stat))) {
+          const file = await graphics.statCard(root, stat);
+          const saved = await directStore.saveImage(root, id, file, { name: 'Gráfico · ' + m.value, source: { provider: 'Once Records', license: 'Gráfico original generado por la aplicación', attribution: '', stat: auto.statKey(stat) } });
+          ids.push(saved.image.id);
+        }
+      }
+      project = directStore.read(root, id);
+      section = project.sections.find(s => s.id === sectionId);
+      if (ids.length) project = directStore.updateSection(root, { id, sectionId, patch: { imageIds: [...new Set([...section.imageIds, ...ids])] } });
+    }
+    step('Componiendo la sección', 80);
+    project = directStore.read(root, id);
+    section = project.sections.find(s => s.id === sectionId);
+    if (!section.layouts.length || section.layouts.every(l => l.source === 'auto')) {
+      const stats = await statImages(project, section);
+      project = stats.project;
+      section = project.sections.find(s => s.id === sectionId);
+      const proposal = intel.propose(project, section, { statImages: stats.map });
+      directStore.updateSection(root, { id, sectionId, patch: { layouts: auto.applyMarks(project, section, proposal.layouts) } });
+    } else notes.push('Se respetó tu composición manual');
+    const directives = auto.sectionDirectives(section);
+    const patch = {};
+    if (directives.mood && section.audio.mood === 'auto' && !section.audio.musicId) patch.audio = { mood: directives.mood };
+    if (directives.transition && section.transition.style === 'auto') patch.transition = { style: directives.transition };
+    if (Object.keys(patch).length) directStore.updateSection(root, { id, sectionId, patch });
+    project = mark('listo');
+    send({ kind: 'auto', id, sectionId, state: 'listo', percent: 100, message: '«' + section.title + '» lista', project });
+  }
+
+  /** Cuando todo está grabado y procesado: exporta, prepara YouTube y, si se pidió, publica. */
+  async function autopilotProject(id) {
+    let project = directStore.read(root, id);
+    const settings = project.settings.autopilot;
+    if (!settings.enabled || !settings.export || !project.sections.length) return;
+    if (!project.sections.every(s => s.take && s.auto?.state === 'listo')) return;
+    const signature = project.sections.map(s => s.take.id + ':' + s.auto.at).join('|');
+    if (project.autopilot?.exported === signature) return;
+    if (exportJob) return;
+    const meta = auto.suggestMetadata(project);
+    directStore.saveSettings(root, { id, youtube: { title: project.youtube.title || meta.title, description: project.youtube.description || meta.description,
+      tags: project.youtube.tags?.length ? project.youtube.tags : meta.tags, comment: project.youtube.comment || meta.comment, privacy: project.youtube.privacy } });
+    send({ kind: 'auto', id, state: 'working', percent: 0, message: 'Piloto automático: exportando el video final' });
+    const entry = await handlers['export.start']({ id, quality: 'final' });
+    project = directStore.read(root, id);
+    project.autopilot = { exported: signature, at: new Date().toISOString(), file: entry.file };
+    directStore.write(root, project);
+    let published = null;
+    if (settings.publish && youtube.status().connected && entry.review?.ok !== false) {
+      published = await youtube.upload({ id, file: entry.file }, detail => send({ kind: 'youtube', id, ...detail })).catch(error => { send({ kind: 'auto', id, state: 'error', message: 'YouTube: ' + error.message }); return null; });
+    }
+    send({ kind: 'auto', id, state: 'terminado', percent: 100, message: published ? 'Video publicado en YouTube' : 'Video listo para revisar y publicar', entry, project: directStore.read(root, id) });
+  }
+
   const handlers = {
     'list': () => ({ projects: directStore.listProjects(root), storage: directStore.storageInfo(root) }),
     'create': data => directStore.createProject(root, data),
@@ -125,7 +305,8 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
     'take.pending': ({ id }) => directStore.pendingTakes(root, id),
     'take.commit': async data => {
       const result = await directStore.commitTake(root, data, media);
-      queueMaster(data.id, result.sectionId);
+      if (result.project.settings.autopilot.enabled) queuePilot(data.id, result.sectionId);
+      else queueMaster(data.id, result.sectionId);
       return result;
     },
     'master.prepare': ({ id, sectionId }) => { queueMaster(id, sectionId); return true; },
@@ -157,7 +338,16 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       const image = project.images.find(i => i.id === imageId);
       if (!image) throw Error('Imagen no encontrada');
       image.tags = (Array.isArray(tags) ? tags : []).map(t => String(t).trim().slice(0, 80)).filter(Boolean).slice(0, 12);
-      return directStore.write(root, project);
+      if (image.libraryId) { try { library.retag(root, { id: image.libraryId, tags: image.tags }); } catch { image.libraryId = null; } }
+      directStore.write(root, project);
+      // Una foto propia etiquetada se guarda en la biblioteca para los próximos videos.
+      return (async () => {
+        if (!image.libraryId && image.tags.length && !image.source?.stat) {
+          const entry = await library.add(root, directStore.resolveFile(root, id, image.file), { name: image.name, tags: image.tags, source: image.source }).catch(() => null);
+          if (entry) { const latest = directStore.read(root, id); const img = latest.images.find(i => i.id === imageId); if (img) { img.libraryId = entry.id; directStore.write(root, latest); } }
+        }
+        return directStore.read(root, id);
+      })();
     },
     'image.search': async ({ query }) => {
       const result = await intel.searchImages(query);
@@ -187,6 +377,8 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       const project = saved.project;
       const image = project.images.find(i => i.id === saved.image.id);
       image.tags = [entity, query].filter(Boolean);
+      const entry = await library.add(root, buffer, { name: item.title, tags: image.tags, source: image.source }).catch(() => null);
+      if (entry) image.libraryId = entry.id;
       if (sectionId) { const s = project.sections.find(x => x.id === sectionId); if (s && !s.imageIds.includes(image.id)) s.imageIds.push(image.id); }
       directStore.write(root, project);
       return { image, project: directStore.read(root, id) };
@@ -207,7 +399,9 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       if (!section) throw Error('Sección no encontrada');
       const stats = await statImages(project, section);
       project = stats.project;
-      return { ...intel.propose(project, project.sections.find(s => s.id === sectionId), { statImages: stats.map }), project };
+      const current = project.sections.find(s => s.id === sectionId);
+      const result = intel.propose(project, current, { statImages: stats.map });
+      return { ...result, layouts: auto.applyMarks(project, current, result.layouts), project };
     },
     'intel.transcribe': async ({ id, sectionIds }) => {
       if (transcribeJob) throw Error('Ya hay una transcripción en curso');
@@ -302,6 +496,57 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       return file ? directStore.importBackup(root, { file }) : null;
     },
 
+    // Piloto automático, cortes y llamados a la acción
+    'auto.run': ({ id, sectionId }) => {
+      const project = directStore.read(root, id);
+      const targets = project.sections.filter(s => s.take && (!sectionId || s.id === sectionId));
+      if (!targets.length) throw Error('Graba al menos una sección');
+      if (!sectionId) { project.autopilot = null; directStore.write(root, project); }
+      for (const s of targets) queuePilot(id, s.id);
+      return { queued: targets.length };
+    },
+    'auto.status': () => ({ running: pilot.running, current: pilot.current, queued: pilot.queue.length }),
+    'cuts.auto': ({ id, sectionId }) => {
+      const project = directStore.read(root, id);
+      const section = project.sections.find(s => s.id === sectionId);
+      if (!section?.transcript || section.transcript.takeId !== section.take?.id) throw Error('Transcribe la sección para detectar silencios y repeticiones');
+      return directStore.updateSection(root, { id, sectionId, patch: { cuts: [...section.cuts.filter(c => !c.auto), ...auto.autocut(section)] } });
+    },
+    'cta.plan': ({ id }) => {
+      const project = directStore.read(root, id);
+      const starts = {};
+      let at = 0;
+      for (const piece of render.plan(project).pieces) { if (piece.kind === 'section') starts[piece.section.id] = at; at += piece.duration; }
+      return auto.plannedCtas(project, starts);
+    },
+    'cta.layer': async ({ type, text }) => {
+      const normal = await graphics.ctaCard(root, { type, text: text || '' });
+      const pressed = type === 'comentar' ? null : await graphics.ctaCard(root, { type, pressed: true });
+      return { normal: 'records://direct/graphic/' + path.basename(normal), pressed: pressed ? 'records://direct/graphic/' + path.basename(pressed) : null };
+    },
+    'youtube.suggest': ({ id }) => auto.suggestMetadata(directStore.read(root, id)),
+
+    // Biblioteca de fotos
+    'library.list': () => library.list(root),
+    'library.add': async ({ tags }) => {
+      const files = await pick({ title: 'Añadir fotos a tu biblioteca', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Imágenes', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif', 'tif', 'tiff', 'bmp'] }] });
+      const added = [], errors = [];
+      for (const file of files) {
+        try { added.push(await library.add(root, file, { name: path.basename(file), tags })); }
+        catch (error) { errors.push(path.basename(file) + ': ' + error.message); }
+      }
+      return { added, errors, items: library.list(root) };
+    },
+    'library.retag': data => library.retag(root, data),
+    'library.remove': data => library.remove(root, data),
+    'library.toProject': async ({ id, libraryId, sectionId }) => {
+      const item = library.list(root).find(x => x.id === libraryId);
+      if (!item) throw Error('Foto no encontrada');
+      const image = await fromLibrary(id, item, []);
+      if (sectionId) { const p = directStore.read(root, id); const s = p.sections.find(x => x.id === sectionId); if (s && !s.imageIds.includes(image.id)) directStore.updateSection(root, { id, sectionId, patch: { imageIds: [...s.imageIds, image.id] } }); }
+      return directStore.read(root, id);
+    },
+
     // YouTube
     'youtube.status': () => youtube.status(),
     'youtube.connect': data => youtube.connect(data),
@@ -348,6 +593,7 @@ function serve(root, request, url) {
   if (kind === 'take' && pieces.length === 2) file = directStore.takeFile(root, pieces[0], pieces[1]);
   else if (kind === 'file' && pieces.length >= 3) file = directStore.resolveFile(root, pieces[0], pieces.slice(1).join('/'));
   else if (kind === 'graphic' && pieces.length === 1 && /^[a-f0-9]{20}\.png$/.test(pieces[0])) file = path.join(graphics.cacheDir(root), pieces[0]);
+  else if (kind === 'photo' && pieces.length === 1 && /^[a-f0-9-]{36}\.jpg$/.test(pieces[0])) file = path.join(library.dir(root), pieces[0]);
   else if (kind === 'thumb' && pieces.length === 1 && /^[a-f0-9]{24}\.jpg$/.test(pieces[0])) file = path.join(root, 'Recursos', 'Directos', 'Miniaturas', pieces[0]);
   else if (kind === 'library' && pieces.length === 2 && ['music', 'sfx'].includes(pieces[0])) {
     try { file = audio.fileFor(root, pieces[0], pieces[1]); } catch { file = null; }

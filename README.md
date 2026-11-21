@@ -77,6 +77,19 @@ Este apartado sirve para documentales, historias y análisis de varios minutos g
 5. En **Música y efectos**, elige la música de cada sección. Studio crea la música y los efectos en tu equipo y añade ducking automático. En **Subtítulos**, transcribe con Whisper, corrige el texto y elige si quieres el .srt o los subtítulos integrados.
 6. En **Exportar y publicar**, genera una vista previa rápida o el MP4 final de 1920 × 1080 con los capítulos calculados. Después puedes publicarlo en YouTube con la autorización oficial de Google.
 
+Con el **piloto automático** solo tienes que pasar el guion y grabar:
+
+- **Grabación seguida**: al detener, la toma se guarda y la siguiente sección empieza tras 3 segundos.
+- **Al guardar cada toma**, Studio:
+  - transcribe la voz y corta silencios, muletillas y frases repetidas (se conserva el último intento);
+  - limpia la voz;
+  - busca fotos, primero en tu **biblioteca de fotos** y después en internet;
+  - crea los gráficos de las cifras y compone la sección;
+  - añade los llamados a la acción.
+- **Con todo grabado**, exporta el MP4 final con pantalla final, título, descripción, etiquetas y revisión final, y puede publicarlo en YouTube o programarlo.
+
+Pide el guion a Claude con el botón **Copiar instrucciones** para incluir marcas como `[IMAGEN: Harry Kane Bayern]`, `[DATO: 44 goles]` o `[PREGUNTA: ¿Kane ganará la Champions?]`.
+
 Detalles técnicos, funciones locales o con internet y pruebas: [Requisitos de Videos largos directos](REQUISITOS_VIDEOS_LARGOS_DIRECTOS.md).
 
 ## Estadísticas

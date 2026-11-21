@@ -1,5 +1,6 @@
 'use strict';
 /** Pruebas del apartado «Videos largos directos» (backend y lógica compartida). */
+process.env.RECORDS_DEEPFILTER = ''; // sin descargas: limpieza de voz con filtros clásicos
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -327,7 +328,10 @@ test('exporta un MP4 1920×1080 con transiciones, composiciones, imágenes, mús
     const words = 'Durante años Harry Kane fue el goleador del Tottenham.'.split(' ').map((text, i) => ({ text, start: i * 0.5, end: i * 0.5 + 0.4 }));
     directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transcript: { takeId: project.sections[1].take.id, words } } });
     directStore.updateSection(root, { id: p.id, sectionId: project.sections[2].id, patch: { transition: { duration: 3, sound: 'whoosh', style: 'tunel' }, audio: { mood: 'tension' } } });
-    directStore.saveSettings(root, { id: p.id, settings: { subtitles: { burn: true, style: 'impacto' }, transitions: { duration: 3 } } });
+    directStore.saveSettings(root, { id: p.id, settings: { subtitles: { burn: true, style: 'impacto' }, transitions: { duration: 3 }, cta: { endscreenDuration: 5 } } });
+    // Corte no destructivo de medio segundo y un llamado a la acción manual.
+    directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { cuts: [{ start: 3.6, end: 4.1, reason: 'Silencio' }] } });
+    directStore.updateSection(root, { id: p.id, sectionId: project.sections[2].id, patch: { ctas: [{ type: 'suscribir', start: 0.4 }] } });
     const events = [];
     const entry = await render.exportProject(root, p.id, { quality: 'final', send: e => events.push(e) });
     const output = directStore.resolveFile(root, p.id, entry.file);
@@ -335,10 +339,13 @@ test('exporta un MP4 1920×1080 con transiciones, composiciones, imágenes, mús
     assert.equal(info.width, 1920);
     assert.equal(info.height, 1080);
     assert.ok(info.hasAudio);
-    // 3 transiciones de 4/3 s + 3 tomas de 5 s.
-    const expected = 4 + 5 + 4 + 5 + 3 + 5;
+    // 3 transiciones (4, 4 y 3 s) + 3 tomas de 5 s (una con 0,5 s cortado) + pantalla final de 5 s.
+    const expected = 4 + 5 + 4 + 4.5 + 3 + 5 + 5;
     assert.ok(Math.abs(info.duration - expected) < 0.3, 'Duración ' + info.duration);
-    assert.deepEqual(entry.chapters.map(c => [Math.round(c.start), c.title]), [[0, 'Introducción'], [9, 'El comienzo'], [18, 'El ascenso']]);
+    assert.deepEqual(entry.chapters.map(c => [c.start, c.title]), [[0, 'Introducción'], [9, 'El comienzo'], [17.5, 'El ascenso']]);
+    assert.ok(entry.ctas >= 1, 'Llamado a la acción en pantalla');
+    assert.equal(entry.pieces.at(-1).kind, 'endscreen');
+    assert.ok(entry.review.items.length > 3, 'Revisión final');
     assert.equal(entry.chaptersText.split('\n')[0], '00:00 Introducción');
     assert.deepEqual(entry.missing, ['El punto de inflexión']);
     const srt = fs.readFileSync(directStore.resolveFile(root, p.id, entry.srt), 'utf8').replace(/^\ufeff/, '');
