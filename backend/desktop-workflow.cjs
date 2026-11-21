@@ -39,6 +39,7 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
   let browserSession = null;
   let backupTask = null;
   let oauthTask = null;
+  let facebookPending = null;
   const update = { status: 'disponible en una instalación publicada', message: '', installed: app.getVersion(), available: '' };
   let updater;
 
@@ -200,6 +201,24 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
       oauthTask = clients.googleOAuth(data, destination => shell.openExternal(destination))
         .then(secrets => publishing.connect('youtube', secrets)).finally(() => { oauthTask = null; });
       return oauthTask;
+    },
+    'accounts.tiktokAuth': data => {
+      if (oauthTask) throw Error('Ya hay una autorización en curso');
+      oauthTask = clients.tiktokOAuth(data, destination => shell.openExternal(destination))
+        .then(secrets => publishing.connect('tiktok', secrets)).finally(() => { oauthTask = null; });
+      return oauthTask;
+    },
+    // Facebook: Studio amplía el token y lista las páginas; los tokens de página no salen del proceso principal.
+    'accounts.facebookPages': async data => {
+      facebookPending = await clients.facebookPages(data);
+      return facebookPending.map(page => ({ id: page.id, name: page.name, insights: page.tasks.includes('ANALYZE') || !page.tasks.length }));
+    },
+    'accounts.facebookPage': async ({ pageId }) => {
+      const page = (facebookPending || []).find(item => item.id === String(pageId));
+      if (!page) throw Error('Vuelve a buscar tus páginas');
+      const identity = await publishing.connect('facebook', { provider: 'direct', profileId: page.id, accessToken: page.accessToken });
+      facebookPending = null;
+      return identity;
     },
     'accounts.disconnect': ({ network }) => publishing.disconnect(network),
     'accounts.tiktok': async () => clients.tiktokCreator(await publishing.accountFor('tiktok')),

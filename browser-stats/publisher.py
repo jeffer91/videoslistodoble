@@ -20,7 +20,7 @@ import time
 from playwright.sync_api import sync_playwright, Error as BrowserError
 
 import reader
-from reader import emit, open_browser, logged_in, allowed
+from reader import emit, open_browser, logged_in, allowed, close_browser
 
 UPLOAD_MINUTES = 30
 PAGE_POST_MINUTES = 15  # lo que tarda Facebook en mostrar el video nuevo en la página
@@ -449,10 +449,7 @@ def main():
             emit(error=str(error).splitlines()[0][:350], screenshot=shot)
             sys.exit(1)
         finally:
-            try:
-                browser.close()
-            finally:
-                process.terminate()
+            close_browser(browser, process)
 
 
 if __name__ == "__main__":

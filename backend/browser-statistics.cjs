@@ -53,6 +53,18 @@ async function preparePython(app, {onStatus = () => {}, signal} = {}) {
   return {base, cache, python, packages};
 }
 
+/** Pide al navegador que se cierre (como al pulsar la X) y lo fuerza solo si no responde. */
+function closeGracefully(pid, wait = 10000) {
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  if (!alive()) return;
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/PID', String(pid), '/T'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+    else process.kill(pid, 'SIGTERM');
+  } catch { /* ya cerrado */ }
+  const timer = setTimeout(() => { if (alive()) { try { process.kill(pid); } catch { /* cerrado */ } } }, wait);
+  timer.unref?.();
+}
+
 async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, onGroup = () => {}, groupUrl = '', signal} = {}) {
   if (!NETWORKS.includes(network)) throw Error('Red desconocida');
   if (!acquireBrowser('lector')) throw Error('El navegador está publicando un video. Inténtalo en unos minutos.');
@@ -69,8 +81,9 @@ async function runReader(app, network, save, {onStatus, onAccount, onGroup = () 
   let browserPid = null;
   const stop = () => {
     child.kill();
-    // El navegador se abre como proceso normal: se cierra también al cancelar.
-    if (browserPid) { try { process.kill(browserPid); } catch { /* Ya estaba cerrado. */ } browserPid = null; }
+    // El navegador se abre como proceso normal: se cierra también al cancelar, de forma ordenada
+    // para que guarde la sesión y no vuelva a pedir contraseña y código.
+    if (browserPid) { closeGracefully(browserPid); browserPid = null; }
   };
   app.once('before-quit',stop);
   signal?.addEventListener('abort',stop,{once:true});
@@ -105,4 +118,4 @@ async function runReader(app, network, save, {onStatus, onAccount, onGroup = () 
     signal?.removeEventListener('abort',stop);
   }
 }
-module.exports={readBrowser, preparePython, acquireBrowser, releaseBrowser, browserBusy, NETWORKS};
+module.exports={readBrowser, closeGracefully, preparePython, acquireBrowser, releaseBrowser, browserBusy, NETWORKS};

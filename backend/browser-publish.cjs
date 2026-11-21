@@ -9,7 +9,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { randomUUID } = require('node:crypto');
-const { preparePython, acquireBrowser, releaseBrowser, NETWORKS } = require('./browser-statistics.cjs');
+const { preparePython, acquireBrowser, releaseBrowser, closeGracefully, NETWORKS } = require('./browser-statistics.cjs');
 
 const REEL_LIMIT = 90;
 
@@ -56,7 +56,7 @@ async function publishWithBrowser(app, network, { file, metadata, quality, dryRu
     let browserPid = null, submitted = false, result = null, failure = null, shot = null, diagnostics = '';
     const stop = () => {
       child.kill();
-      if (browserPid) { try { process.kill(browserPid); } catch { /* ya cerrado */ } }
+      if (browserPid) closeGracefully(browserPid);
     };
     app.once('before-quit', stop);
     child.stderr.on('data', chunk => { diagnostics = (diagnostics + chunk).slice(-800); });

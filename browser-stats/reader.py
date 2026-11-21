@@ -394,6 +394,22 @@ def open_browser(pw, network, profile):
     return process, browser
 
 
+def close_browser(browser, process, seconds=15):
+    """Cierra el navegador como lo haría el usuario para que guarde la sesión (cookies) en el perfil.
+
+    Matar el proceso de golpe puede perder la sesión recién iniciada y obliga a volver a
+    escribir la contraseña y el código de verificación en Instagram, Facebook y TikTok.
+    """
+    try:
+        browser.new_browser_cdp_session().send("Browser.close")
+    except Exception:  # noqa: BLE001 - si ya estaba cerrado no hay nada que hacer
+        pass
+    try:
+        process.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+
+
 GROUP_METRICS = {
     "newMembers": r"(?:miembros nuevos|nuevos miembros|new members)",
     "activeMembers": r"(?:miembros activos|active members)",
@@ -485,10 +501,7 @@ def main():
                     emit(stage="navigate", message="No se pudo leer el grupo: " + str(error).splitlines()[0][:160])
             scan(target, network)
         finally:
-            try:
-                browser.close()
-            finally:
-                process.terminate()
+            close_browser(browser, process)
 
 
 if __name__ == "__main__":

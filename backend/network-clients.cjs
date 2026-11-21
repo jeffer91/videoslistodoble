@@ -14,7 +14,9 @@ const REQUEST_TIMEOUT = 25 * 1000;
 const UPLOAD_TIMEOUT = 25 * 60 * 1000;
 const SCOPES = [
   'https://www.googleapis.com/auth/youtube',
-  'https://www.googleapis.com/auth/yt-analytics.readonly'
+  'https://www.googleapis.com/auth/yt-analytics.readonly',
+  // Permite publicar el primer comentario desde «Videos largos directos».
+  'https://www.googleapis.com/auth/youtube.force-ssl'
 ];
 
 class NetworkError extends Error {
@@ -158,6 +160,87 @@ async function googleOAuth({ clientId, clientSecret, scopes }, open) {
     server.close();
     server.closeAllConnections();
   }
+}
+
+/** Servidor local de un solo uso que recibe la redirección del inicio de sesión (127.0.0.1, puerto aleatorio). */
+async function loopback(pathname, state, open, buildLink) {
+  let settle;
+  const completed = new Promise(resolve => { settle = resolve; });
+  const server = http.createServer((req, res) => {
+    const target = new URL(req.url, 'http://127.0.0.1');
+    if (req.method !== 'GET' || target.pathname !== pathname || target.searchParams.get('state') !== state) {
+      res.writeHead(404).end();
+      return;
+    }
+    const code = target.searchParams.get('code');
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      .end(code ? 'Vuelve a 11 Récords Studio para terminar la conexión.' : 'Se canceló la autorización.');
+    settle({ code, error: target.searchParams.get('error_description') || target.searchParams.get('error') || '' });
+  });
+  let timer;
+  try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+    const redirect = 'http://127.0.0.1:' + server.address().port + pathname;
+    await open(buildLink(redirect).href);
+    timer = setTimeout(() => settle({ code: null, error: 'tiempo de espera agotado' }), AUTH_TIMEOUT);
+    return { ...(await completed), redirect };
+  } finally {
+    clearTimeout(timer);
+    server.close();
+    server.closeAllConnections();
+  }
+}
+
+const TIKTOK_SCOPES = ['user.info.basic', 'video.list'];
+/**
+ * Autorización oficial de TikTok para apps de escritorio (Login Kit + PKCE).
+ * En la app de TikTok for Developers se registra la dirección http://127.0.0.1:*\/callback/.
+ */
+async function tiktokOAuth({ clientKey, clientSecret, stats = true, upload = false }, open) {
+  clientKey = String(clientKey || '').trim();
+  clientSecret = String(clientSecret || '').trim();
+  if (!/^[\w-]{8,64}$/.test(clientKey)) throw Error('Pega el Client key de tu app de TikTok');
+  if (!clientSecret) throw Error('Pega el Client secret de tu app de TikTok');
+  const state = randomBytes(24).toString('hex');
+  // TikTok pide el desafío PKCE en hexadecimal (no base64url) para apps de escritorio.
+  const verifier = randomBytes(48).toString('hex').slice(0, 64);
+  const challenge = createHash('sha256').update(verifier).digest('hex');
+  const scope = [...TIKTOK_SCOPES, ...(stats ? ['user.info.stats'] : []), ...(upload ? ['video.upload'] : [])].join(',');
+  const { code, error, redirect } = await loopback('/callback/', state, open, uri => urlFor('https://www.tiktok.com/v2/auth/authorize/', {
+    client_key: clientKey, scope, response_type: 'code', redirect_uri: uri, state, code_challenge: challenge, code_challenge_method: 'S256'
+  }));
+  if (!code) throw Error('TikTok no devolvió la autorización' + (error ? ': ' + error : '') + '. Revisa que la dirección http://127.0.0.1:*/callback/ esté registrada en Login Kit y que tu cuenta sea usuario de prueba del Sandbox.');
+  const result = await request(TIKTOK + '/v2/oauth/token/', { method: 'POST', form: {
+    client_key: clientKey, client_secret: clientSecret, code, grant_type: 'authorization_code', redirect_uri: redirect, code_verifier: verifier
+  } });
+  if (!result.access_token || !result.refresh_token) throw Error('TikTok no entregó los accesos' + (result.error_description ? ': ' + result.error_description : ''));
+  return { provider: 'direct', accessToken: result.access_token, refreshToken: result.refresh_token, expiresAt: tokenExpiration(result.expires_in),
+    clientId: clientKey, clientSecret, scope: result.scope || scope };
+}
+
+/**
+ * Páginas de Facebook con acceso que no caduca: amplía el token de usuario (60 días)
+ * y pide las páginas con él; los tokens de página obtenidos así no vencen.
+ */
+async function facebookPages({ appId, appSecret, userToken }) {
+  appId = String(appId || '').trim();
+  appSecret = String(appSecret || '').trim();
+  userToken = String(userToken || '').trim();
+  if (!/^\d{5,30}$/.test(appId)) throw Error('Pega el identificador de la app (App ID, solo números)');
+  if (!appSecret) throw Error('Pega la clave secreta de la app (App Secret)');
+  if (!userToken) throw Error('Pega el token de usuario del Explorador de la API Graph');
+  const extended = await request(META + '/oauth/access_token', { query: { grant_type: 'fb_exchange_token', client_id: appId, client_secret: appSecret, fb_exchange_token: userToken } });
+  if (!extended.access_token) throw Error('Meta no amplió el token. Revisa el App ID y el App Secret.');
+  const pages = [];
+  let after;
+  for (let n = 0; n < 10; n++) {
+    const result = await request(META + '/me/accounts', { token: extended.access_token, query: { fields: 'id,name,access_token,tasks', limit: 50, after } });
+    for (const page of result.data || []) if (page.id && page.access_token) pages.push({ id: String(page.id), name: page.name, accessToken: page.access_token, tasks: page.tasks || [] });
+    after = result.paging?.next ? result.paging?.cursors?.after : null;
+    if (!after) break;
+  }
+  if (!pages.length) throw Error('Ese token no administra ninguna página. Concede pages_show_list al generar el token y elige tu página.');
+  return pages;
 }
 
 async function refresh(name, account) {
@@ -564,4 +647,4 @@ async function metrics(name, account, job, quality) {
 const publish = { youtube: uploadYouTube, tiktok: uploadTikTok, instagram: uploadInstagram, facebook: uploadFacebook };
 
 const catalogPages = (network,account) => require('./video-statistics.cjs').catalog(request,network === 'instagram' ? metaBase(account) : META,network,account);
-module.exports = { catalogPages, NetworkError, request, googleOAuth, refresh, verifyAccount, tiktokCreator, publish, metrics };
+module.exports = { catalogPages, NetworkError, request, googleOAuth, tiktokOAuth, facebookPages, refresh, verifyAccount, tiktokCreator, publish, metrics };

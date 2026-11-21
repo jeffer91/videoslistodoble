@@ -606,21 +606,21 @@
       ]
     },
     facebook: {
-      gives: 'Vistas, reacciones, comentarios, compartidos y tiempo medio visto de los videos y Reels de tu página.',
+      gives: 'Vistas, reacciones, comentarios, compartidos y tiempo medio visto de los videos y Reels de tu página. Los grupos no tienen API: léelos con el lector de navegador.',
       steps: [
         ['Ten a mano tu página de Facebook', 'Las estadísticas se leen de la página donde publicas los videos y Reels. Debes ser administrador.'],
-        ['Usa una app de Meta', 'Puedes reutilizar la app creada para Instagram o crear otra con el caso de uso «Administrar todo lo de tu página».', 'meta-apps'],
-        ['Obtén el token de la página', 'En el Explorador de la API Graph elige tu app, añade pages_show_list, pages_read_engagement, read_insights y, para publicar, pages_manage_posts. Pulsa Generate Access Token y después elige tu página en «Token de página». Copia el token y el ID de la página.', 'meta-explorer'],
-        ['Haz que no caduque', 'Pega el token en el Depurador de tokens y pulsa Ampliar token de acceso. El token de página obtenido desde un token ampliado no vence.', 'meta-debugger']
+        ['Usa una app de Meta', 'Reutiliza la app creada para Instagram o crea otra con el caso de uso «Administrar todo lo de tu página». En Configuración de la app → Básica copia el identificador de la app (App ID) y la clave secreta (App Secret).', 'meta-apps'],
+        ['Genera un token de usuario', 'En el Explorador de la API Graph elige tu app, deja «Token de usuario» y añade los permisos pages_show_list, pages_read_engagement y read_insights (y pages_manage_posts si publicarás desde Studio). Pulsa Generate Access Token, acepta y marca tu página. Copia el token.', 'meta-explorer'],
+        ['Studio hace el resto', 'Pega abajo el App ID, el App Secret y el token. Studio amplía el token, te muestra tus páginas y guarda un acceso de página que no caduca.']
       ]
     },
     tiktok: {
-      gives: 'Vistas, me gusta, comentarios y compartidos. TikTok no entrega el tiempo visto por API: compleméntalo con el lector de navegador.',
+      gives: 'Vistas, me gusta, comentarios, compartidos y seguidores. TikTok no entrega el tiempo visto por API: compleméntalo con el lector de navegador.',
       steps: [
-        ['Crea una app en TikTok for Developers', 'Entra con tu cuenta de TikTok y crea una app de uso personal.', 'tiktok-apps'],
-        ['Añade Login Kit, Display API y Content Posting API', 'Activa user.info.basic y video.list para estadísticas, y video.upload para enviar videos a tus borradores (video.publish solo sirve tras la auditoría). user.info.stats es opcional para los seguidores.', 'tiktok-display'],
-        ['Trabaja en modo Sandbox', 'Agrega tu propia cuenta de TikTok como usuario de prueba. Así no necesitas la auditoría pública para leer tus videos.'],
-        ['Obtén los tokens', 'Autoriza tu cuenta en la app y copia el token de acceso y el token de renovación junto con el Client key y el Client secret.']
+        ['Crea una app en TikTok for Developers', 'Entra con tu cuenta de TikTok, pulsa Manage apps → Connect an app y elige uso personal. Después pulsa el interruptor Sandbox para trabajar en modo de prueba: así no necesitas la auditoría de TikTok.', 'tiktok-apps'],
+        ['Añade Login Kit y Display API', 'En Products añade Login Kit y Display API. Activa los permisos user.info.basic, user.info.stats y video.list (y video.upload solo si publicarás desde Studio, con Content Posting API).', 'tiktok-display'],
+        ['Registra la dirección de retorno', 'En Login Kit elige la plataforma Desktop y registra exactamente: http://127.0.0.1:*/callback/'],
+        ['Agrega tu cuenta como usuario de prueba', 'En Sandbox → Target users añade tu cuenta de TikTok (la de 10 000 seguidores). Copia el Client key y el Client secret de la app.'],
       ]
     }
   };
@@ -688,12 +688,21 @@
         action('st-connect', 'Conectar con Facebook Login', 'instagram-facebook') + '</details>';
     }
     if (network === 'facebook') {
-      return '<div class="st-form-grid">' + text('st-c-profile', 'ID de la página', '1000…', 'inputmode="numeric"') + secret('st-c-token', 'Token de la página') + '</div>' +
-        action('st-connect', 'Verificar y conectar', 'facebook', '');
+      return '<div class="st-form-grid">' + text('st-c-app', 'App ID', '1234…', 'inputmode="numeric"') + secret('st-c-app-secret', 'App Secret') + '</div>' +
+        secret('st-c-user-token', 'Token de usuario del Explorador', 'EAA…') +
+        action('st-fb-pages', 'Buscar mis páginas', 'facebook', '') + '<div id="st-fb-pages"></div>' +
+        '<details class="st-details"><summary>Ya tengo un token de página que no caduca</summary>' +
+        '<div class="st-form-grid">' + text('st-c-profile', 'ID de la página', '1000…', 'inputmode="numeric"') + secret('st-c-token', 'Token de la página') + '</div>' +
+        action('st-connect', 'Verificar y conectar', 'facebook') + '</details>';
     }
-    return '<div class="st-form-grid">' + text('st-c-client', 'Client key') + secret('st-c-secret', 'Client secret') +
-      secret('st-c-token', 'Token de acceso') + secret('st-c-refresh', 'Token de renovación') + '</div>' +
-      action('st-connect', 'Verificar y conectar', 'tiktok', '') +
+    return '<div class="st-form-grid">' + text('st-c-client', 'Client key') + secret('st-c-secret', 'Client secret') + '</div>' +
+      '<label class="st-check"><input type="checkbox" id="st-c-stats" checked> Seguidores (user.info.stats)</label>' +
+      '<label class="st-check"><input type="checkbox" id="st-c-upload"> Publicar desde Studio (video.upload)</label>' +
+      '<p class="st-note">Se abrirá tu navegador para autorizar tu cuenta de TikTok. Studio recibe la autorización en este equipo y renueva el acceso solo.</p>' +
+      action('st-tiktok', 'Autorizar TikTok', 'tiktok', '') +
+      '<details class="st-details"><summary>Ya tengo los tokens de acceso y renovación</summary>' +
+      '<div class="st-form-grid">' + secret('st-c-token', 'Token de acceso') + secret('st-c-refresh', 'Token de renovación') + '</div>' +
+      action('st-connect', 'Verificar y conectar', 'tiktok') + '</details>' +
       '<details class="st-details"><summary>Uso Ayrshare para TikTok</summary>' +
       '<div class="st-form-grid">' + secret('st-c-ayr', 'Clave de API de Ayrshare') + secret('st-c-ayr-profile', 'Profile-Key (opcional)') + '</div>' +
       action('st-connect', 'Conectar con Ayrshare', 'tiktok-ayrshare') + '</details>';
@@ -848,6 +857,33 @@
         await flow('accounts.google', { clientId: value('st-c-client'), clientSecret: value('st-c-secret') });
         return await afterConnect('youtube');
       } finally { element.disabled = false; element.textContent = 'Autorizar canal de YouTube'; }
+    }
+    if (name === 'st-tiktok') {
+      element.disabled = true;
+      element.textContent = 'Esperando la autorización en el navegador…';
+      try {
+        await flow('accounts.tiktokAuth', { clientKey: value('st-c-client'), clientSecret: value('st-c-secret'),
+          stats: document.getElementById('st-c-stats')?.checked !== false, upload: document.getElementById('st-c-upload')?.checked === true });
+        return await afterConnect('tiktok');
+      } finally { element.disabled = false; element.textContent = 'Autorizar TikTok'; }
+    }
+    if (name === 'st-fb-pages') {
+      element.disabled = true;
+      element.textContent = 'Buscando páginas…';
+      try {
+        const pages = await flow('accounts.facebookPages', { appId: value('st-c-app'), appSecret: value('st-c-app-secret'), userToken: value('st-c-user-token') });
+        const box = document.getElementById('st-fb-pages');
+        if (box) box.innerHTML = '<p class="st-note">Elige la página donde publicas:</p>' + pages.map(page => '<div class="row wrap">' +
+          action('st-fb-page', 'Conectar «' + esc(page.name) + '»', page.id, '') + (page.insights ? '' : '<small class="st-note">Sin permiso de estadísticas en esta página</small>') + '</div>').join('');
+      } finally { element.disabled = false; element.textContent = 'Buscar mis páginas'; }
+      return;
+    }
+    if (name === 'st-fb-page') {
+      element.disabled = true;
+      try {
+        await flow('accounts.facebookPage', { pageId: id });
+        return await afterConnect('facebook');
+      } finally { element.disabled = false; }
     }
     if (name === 'st-connect') {
       const [network, data] = connectionData(id);

@@ -228,3 +228,4 @@
 .ap .st-table td small{display:block;font-size:10px;max-width:150px;white-space:normal;color:var(--muted);margin-top:3px}
 .st-group-bars{display:flex;align-items:flex-end;gap:3px;height:70px;margin-top:14px;padding:6px;border:1px solid var(--line);border-radius:10px;background:#0c1510}
 .st-group-bars span{flex:1;min-width:4px;background:#4d8df5;border-radius:3px 3px 0 0;opacity:.85}
+.st-check{display:flex;gap:8px;align-items:center;margin:8px 0;font-size:13px}
