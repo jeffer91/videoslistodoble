@@ -120,6 +120,7 @@ async function* meta(request,base,network,account) {
   const instagram=network==='instagram',seen=new Set();
   let insightsPermissionDenied=false;
   const permissionError=error=>/HTTP (400|403) · 10\b/.test(String(error?.message||''));
+  const historicalMediaError=error=>/subcódigo 2108006\b/.test(String(error?.message||''));
   const missingInsights='Instagram Insights: Meta rechazó el permiso de estadísticas (código 10). Comprueba instagram_manage_insights en la configuración unificada y vuelve a autorizar Instagram para generar un token nuevo.';
   const edges=instagram?['media']:['videos','video_reels'];
   const fields=instagram?'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count':'id,title,description,created_time,permalink_url,length';
@@ -152,6 +153,10 @@ async function* meta(request,base,network,account) {
                 if(permissionError(error)){
                   insightsPermissionDenied=true;
                   warnings.add(missingInsights);
+                }else if(historicalMediaError(error)){
+                  // Meta no recupera Insights de contenido anterior a la última conversión
+                  // a cuenta profesional. No es un fallo de permisos ni del token.
+                  warnings.add('Reel '+v.id+': sin estadísticas históricas por API: se publicó antes de la conversión a cuenta profesional (Meta 2108006).');
                 }else{
                   const failures=[];
                   for(const k of names){
@@ -160,6 +165,10 @@ async function* meta(request,base,network,account) {
                       if(permissionError(metricError)){
                         insightsPermissionDenied=true;
                         warnings.add(missingInsights);
+                        break;
+                      }
+                      if(historicalMediaError(metricError)){
+                        warnings.add('Reel '+v.id+': sin estadísticas históricas por API: se publicó antes de la conversión a cuenta profesional (Meta 2108006).');
                         break;
                       }
                       failures.push({metric:k,message:metricError.message});
