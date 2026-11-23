@@ -25,6 +25,53 @@ test('Meta omite fotos en Instagram y elimina duplicados entre videos y Reels de
  assert.deepEqual((await collect('instagram',get)).flatMap(p=>p.videos.map(v=>v.externalId)),['2']);
  const rows=(await collect('facebook',get)).flatMap(p=>p.videos);assert.equal(rows.length,1);assert.equal(rows[0].metrics.views,5);
 });
+test('Facebook: Reel con Insights calcula vistas y tiempo visto, sin convertir ausencias en cero',async()=>{
+ const request=async(url)=>{
+   if(url.endsWith('/videos'))return {data:[]};
+   if(url.endsWith('/video_reels'))return {data:[{id:'201',created_time:'2026-11-23',title:'Reel nuevo',length:30}]};
+   if(url.endsWith('/video_insights'))return {data:[
+     {name:'fb_reels_total_plays',values:[{value:42}]},
+     {name:'post_video_avg_time_watched',values:[{value:15000}]},
+     {name:'post_video_view_time',values:[{value:900000}]},
+     {name:'post_video_social_actions',values:[{value:{shares:3}}]}
+   ]};
+   if(url.endsWith('/201'))return {likes:{summary:{total_count:4}},comments:{summary:{total_count:0}}};
+   throw Error('Ruta desconocida '+url);
+ };
+ const rows=(await collect('facebook',request)).flatMap(p=>p.videos);
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].metrics.views,42);
+ assert.equal(rows[0].metrics.retention,50);
+ assert.equal(rows[0].metrics.estimatedMinutesWatched,15);
+ assert.equal(rows[0].metrics.shares,3);
+ assert.equal(rows[0].metrics.comments,0);
+ assert.equal(rows[0].metrics.reach,null);
+});
+
+test('Facebook: permiso de Video Insights denegado no repite por Reel ni inventa vistas',async()=>{
+ let failures=0;
+ const request=async(url)=>{
+   if(url.endsWith('/videos'))return {data:[
+     {id:'201',title:'A',created_time:'2026-11-20'},
+     {id:'202',title:'B',created_time:'2026-11-21'}
+   ]};
+   if(url.endsWith('/video_reels'))return {data:[]};
+   if(url.endsWith('/video_insights')){
+     failures++;
+     throw Error('La plataforma respondió HTTP 403 · 200');
+   }
+   if(url.endsWith('/201')||url.endsWith('/202'))return {likes:{summary:{total_count:0}},comments:{summary:{total_count:2}}};
+   throw Error('Ruta desconocida '+url);
+ };
+ const pages=await collect('facebook',request),rows=pages.flatMap(p=>p.videos);
+ assert.equal(rows.length,2);
+ assert.equal(failures,1,'No repite la consulta sin permiso');
+ assert.equal(rows[0].metrics.views,null);
+ assert.equal(rows[1].metrics.views,null);
+ assert.equal(rows[0].metrics.likes,0);
+ assert.match(pages[0].warning,/pages_manage_engagement/);
+});
+
 test('Instagram evita consultas repetidas cuando Meta deniega Insights con código 10',async()=>{
  let insightCalls=0;
  const request=async(url)=>{
@@ -118,6 +165,24 @@ test('dos sincronizaciones conservan un solo video con dos mediciones y exportac
  assert.equal(data.videos[0].history.length,2);assert.ok(data.videos[0].history[0].at);assert.equal(data.videos[0].publishedAt,'2020-01-01');
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+test('Grupo de Facebook: guarda historia propia sin mezclarla con estadísticas de página',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'facebook-group-'));
+ try{
+   store.ensureRoot(root);
+   const p=createPublishing(root,{isEncryptionAvailable:()=>true,encryptString:v=>Buffer.from(v),decryptString:v=>v.toString()},
+     {verifyAccount:async()=>({id:'123',label:'Página'})});
+   p.groupReading({members:100,name:'Grupo 11 Records',url:'https://www.facebook.com/groups/11records',comments:0},new Date('2026-11-20T12:00:00Z'));
+   p.groupReading({members:105,name:'Grupo 11 Records',url:'https://www.facebook.com/groups/11records',posts:4},new Date('2026-11-23T12:00:00Z'));
+   const group=p.groupStats();
+   assert.equal(group.latest.members,105);
+   assert.equal(group.change,5);
+   assert.equal(group.week,5);
+   assert.equal(group.history.length,2);
+   assert.equal(group.latest.posts,4);
+   assert.equal(p.stats().length,0,'Las cifras del grupo no se convierten en publicaciones de la página');
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('API y navegador comparten el Reel, conservan fecha, ceros e historial por origen',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'browser-stats-'));
  try {

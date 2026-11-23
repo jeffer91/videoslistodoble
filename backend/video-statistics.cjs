@@ -119,6 +119,8 @@ async function* graphPages(request, endpoint, account, fields) {
 async function* meta(request,base,network,account) {
   const instagram=network==='instagram',seen=new Set();
   let insightsPermissionDenied=false;
+  let facebookInsightsDenied=false;
+  let facebookEngagementDenied=false;
   const permissionError=error=>/HTTP (400|403) · 10\b/.test(String(error?.message||''));
   const historicalMediaError=error=>/subcódigo 2108006\b/.test(String(error?.message||''));
   const missingInsights='Instagram Insights: Meta rechazó el permiso de estadísticas (código 10). Comprueba instagram_manage_insights en la configuración unificada y vuelve a autorizar Instagram para generar un token nuevo.';
@@ -183,15 +185,39 @@ async function* meta(request,base,network,account) {
               }
             }
           } else {
-            try {await read()} catch(error){warnings.add('Video Insights · '+error.message)}
+            const denied=error=>/HTTP (?:400|403) · (?:10|200|283)\b/.test(String(error?.message||''));
+            if(!facebookInsightsDenied){
+              try { await read(); }
+              catch(error){
+                if(denied(error)){
+                  facebookInsightsDenied=true;
+                  warnings.add('Facebook Insights: Meta rechazó las estadísticas de videos. Verifica read_insights, pages_manage_engagement y la tarea ANALYZE.');
+                } else warnings.add('Video Insights · '+error.message);
+              }
+            }else{
+              warnings.add('Facebook Insights: Meta rechazó las estadísticas de videos. Verifica read_insights, pages_manage_engagement y la tarea ANALYZE.');
+            }
+            // Una métrica ausente no representa cero vistas; las dos categorías de
+            // reproducciones de Meta (Reel y video de >= 3 s) tampoco son equivalentes.
             metrics.views=number(metrics.fb_reels_total_plays??metrics.total_video_views??metrics.post_video_views);
+            metrics.reach=number(metrics.post_impressions_unique);
             metrics.shares=number(metrics.post_video_social_actions?.share??metrics.post_video_social_actions?.shares);
-            if(v.length && metrics.post_video_avg_time_watched!=null)metrics.retention=metrics.post_video_avg_time_watched/(10*v.length);
-            try {
-              const reactions=await request(base+'/'+v.id,{token:account.accessToken,query:{fields:'likes.limit(0).summary(true),comments.limit(0).summary(true)'}});
-              metrics.likes=number(reactions.likes?.summary?.total_count);
-              metrics.comments=number(reactions.comments?.summary?.total_count);
-            } catch(error){warnings.add('Interacciones · '+error.message)}
+            const watched=number(metrics.post_video_avg_time_watched??metrics.total_video_avg_time_watched);
+            const totalMs=number(metrics.post_video_view_time??metrics.total_video_view_total_time);
+            if(totalMs!=null) metrics.estimatedMinutesWatched=Math.round(totalMs/600)/100;
+            if(v.length && watched!=null)metrics.retention=watched/(10*v.length);
+            if(!facebookEngagementDenied){
+              try {
+                const reactions=await request(base+'/'+v.id,{token:account.accessToken,query:{fields:'likes.limit(0).summary(true),comments.limit(0).summary(true)'}});
+                metrics.likes=number(reactions.likes?.summary?.total_count);
+                metrics.comments=number(reactions.comments?.summary?.total_count);
+              } catch(error){
+                if(denied(error)){
+                  facebookEngagementDenied=true;
+                  warnings.add('Facebook: faltan permisos para leer las interacciones de videos.');
+                }else warnings.add('Interacciones · '+error.message);
+              }
+            }
           }
           videos.push({externalId:String(v.id),title:v.title||v.caption||v.description||String(v.id),description:v.caption||v.description,
             publishedAt:iso(v.timestamp||v.created_time),url:v.permalink||(v.permalink_url?new URL(v.permalink_url,'https://www.facebook.com').href:null),

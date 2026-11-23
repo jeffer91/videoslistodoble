@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, Error as BrowserError
+from group_parser import parse_count, group_numbers
 
 START = {
     "youtube": "https://studio.youtube.com/",
@@ -63,24 +64,6 @@ FOLLOWERS = r"""() => {
   for (const pattern of patterns) { const match = text.match(pattern); if (match) return match[1].trim(); }
   return null;
 }"""
-
-
-def parse_count(raw):
-    match = re.fullmatch(r"(\d[\d.,\s]*?)\s*(mil|mill\.?|k|m)?", (raw or "").strip().lower())
-    if not match:
-        return None
-    value, unit = match.group(1).replace(" ", ""), match.group(2)
-    if unit:
-        value = value.replace(",", ".")
-    elif re.fullmatch(r"\d{1,3}([.,]\d{3})+", value):
-        value = re.sub(r"[.,]", "", value)
-    elif re.search(r"[.,]", value):
-        return None
-    try:
-        number = float(value) * {"k": 1e3, "mil": 1e3, "m": 1e6, "mill": 1e6, "mill.": 1e6}.get(unit, 1)
-    except ValueError:
-        return None
-    return round(number)
 
 
 def read_followers(page, reported, seconds=15):
@@ -408,29 +391,6 @@ def close_browser(browser, process, seconds=15):
         process.wait(timeout=seconds)
     except subprocess.TimeoutExpired:
         process.terminate()
-
-
-GROUP_METRICS = {
-    "newMembers": r"(?:miembros nuevos|nuevos miembros|new members)",
-    "activeMembers": r"(?:miembros activos|active members)",
-    "posts": r"(?:publicaciones|posts)",
-    "comments": r"(?:comentarios|comments)",
-    "reactions": r"(?:reacciones|reactions)",
-}
-NUMBER = r"(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)"
-
-
-def group_numbers(text):
-    """Cifras del panel de estadísticas del grupo (la etiqueta va antes o después del número)."""
-    found = {}
-    for key, label in GROUP_METRICS.items():
-        for pattern in [label + r"\s*\n\s*" + NUMBER, NUMBER + r"\s*\n?\s*" + label]:
-            match = re.search(pattern, text, re.I)
-            value = parse_count(match.group(1)) if match else None
-            if value is not None:
-                found[key] = value
-                break
-    return found
 
 
 def read_group(page, url):

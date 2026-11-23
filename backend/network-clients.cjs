@@ -260,6 +260,29 @@ async function facebookPages({ appId, appSecret, userToken }) {
   return pages;
 }
 
+/** Comprueba una métrica vigente de la página antes de guardar el acceso.
+ * Meta puede devolver una lista vacía si no existen lecturas; eso NO significa
+ * que el permiso esté denegado. El error HTTP sí determina la autorización.
+ */
+async function verifyFacebookInsights(pageId, token) {
+  let lastError;
+  for (const metric of ['page_media_view','page_follows']) {
+    try {
+      const result = await request(META_UNIFIED + '/' + numericId(pageId) + '/insights', {
+        token, query: { metric, period: 'day', limit: 1 }
+      });
+      if (!Array.isArray(result.data)) throw new NetworkError('Meta no devolvió la estructura de estadísticas de la página.');
+      return metric;
+    } catch (error) {
+      lastError = error;
+      // Si Meta retiró un indicador, probar otro. Un problema de permisos no
+      // desaparece al cambiar de métrica y no debemos ocultarlo.
+      if (!/HTTP 400 · 100\b/.test(String(error.message))) break;
+    }
+  }
+  throw new NetworkError('El token identifica la página, pero no puede leer sus estadísticas. Comprueba read_insights, pages_read_engagement, la tarea ANALYZE y el acceso de la app a esta página en Meta. Detalle: ' + (lastError?.message || 'consulta rechazada'));
+}
+
 async function refresh(name, account) {
   if (name === 'instagram' && instagramLogin(account)) {
     // Los tokens de larga duración de Instagram duran 60 días y se renuevan con el propio token.
@@ -311,7 +334,10 @@ async function verifyAccount(name, account) {
   if (name === 'facebook') {
     const page = await request(META + '/me', {token,query:{fields:'id,name'}});
     if (String(page.id)!==numericId(account.profileId)) throw Error('El token debe pertenecer a la página indicada');
-    return {id:String(page.id),label:page.name};
+    const checkedMetric = await verifyFacebookInsights(page.id, token);
+    // Los seguidores son opcionales: no bloquean una conexión con Insights válido.
+    const info = await request(META + '/' + numericId(page.id), {token,query:{fields:'followers_count'}}).catch(()=>({}));
+    return {id:String(page.id),label:page.name,followers:valueNumber(info.followers_count),insightsMetric:checkedMetric};
   }
   if (name === 'instagram' && instagramLogin(account)) {
     if (/^EAA/.test(String(token))) {

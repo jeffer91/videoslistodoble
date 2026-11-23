@@ -20,3 +20,23 @@ for(const [network,href,id] of [
     assert.equal(result[0].metrics.likes,undefined);
   });
 }
+
+const {normalizeFacebookGroupUrl}=require('../backend/browser-statistics.cjs');
+
+test('Facebook: el grupo acepta barra final, dominio móvil y parámetros normales',()=>{
+  assert.equal(normalizeFacebookGroupUrl('https://www.facebook.com/groups/11contra11/'),
+    'https://www.facebook.com/groups/11contra11');
+  assert.equal(normalizeFacebookGroupUrl('https://m.facebook.com/groups/123456789/?ref=share#top'),
+    'https://www.facebook.com/groups/123456789');
+  assert.equal(normalizeFacebookGroupUrl(''), '');
+});
+
+test('Facebook: el lector rechaza URL ajena o ruta de publicación, no las ignora',()=>{
+  for(const url of [
+    'https://facebook.com.ejemplo.com/groups/123',
+    'https://www.facebook.com/groups/123/posts/456',
+    'http://www.facebook.com/groups/123',
+    'https://www.facebook.com/pages/123'
+  ])assert.throws(()=>normalizeFacebookGroupUrl(url),/enlace HTTPS directo/);
+  assert.throws(()=>normalizeFacebookGroupUrl('esto no es una URL'),/no es una URL válida/);
+});

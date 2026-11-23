@@ -211,11 +211,15 @@ function installWorkflow({ app, shell, dialog, safeStorage, root, window, regist
     // Facebook: Studio amplía el token y lista las páginas; los tokens de página no salen del proceso principal.
     'accounts.facebookPages': async data => {
       facebookPending = await clients.facebookPages(data);
-      return facebookPending.map(page => ({ id: page.id, name: page.name, insights: page.tasks.includes('ANALYZE') || !page.tasks.length }));
+      return facebookPending.map(page => ({ id: page.id, name: page.name,
+        canAnalyze: page.tasks.includes('ANALYZE'), tasksKnown: page.tasks.length > 0 }));
     },
     'accounts.facebookPage': async ({ pageId }) => {
       const page = (facebookPending || []).find(item => item.id === String(pageId));
       if (!page) throw Error('Vuelve a buscar tus páginas');
+      if (page.tasks.length && !page.tasks.includes('ANALYZE')) {
+        throw Error('Meta no te ha asignado la tarea ANALYZE en esta página. Solicita acceso a estadísticas de la página antes de conectarla.');
+      }
       const identity = await publishing.connect('facebook', { provider: 'direct', profileId: page.id, accessToken: page.accessToken });
       facebookPending = null;
       return identity;
