@@ -601,7 +601,7 @@
       steps: [
         ['Usa una cuenta profesional', 'En Instagram abre Configuración → Tipo de cuenta y herramientas → Cambiar a cuenta profesional (Creador o Empresa). No necesitas una página de Facebook.'],
         ['Crea una app en Meta for Developers', 'Pulsa Crear app, elige el caso de uso «Administrar mensajes y contenido en Instagram» y termina el asistente.', 'meta-apps'],
-        ['Configura el inicio de sesión unificado', 'En API setup with Unified login crea una configuración. En Permisos y funciones activa instagram_manage_insights y agrégalo también a los permisos de esa configuración; instagram_basic es obligatorio.'],
+        ['Configura el inicio de sesión unificado', 'En API setup with Unified login usa una configuración con instagram_basic e instagram_manage_insights. Si Meta devuelve 400 · 100, edita esa misma configuración en Facebook Login for Business → Configuraciones y agrega business_management; vuelve a autorizar Instagram y genera un token nuevo.'],
         ['Añade tu cuenta como evaluadora', 'En Generar tokens de acceso → Agregar cuenta añade tu Instagram. Acepta la invitación en Configuración → Permisos de aplicaciones y sitios web → Invitaciones para evaluadores.'],
         ['Genera el token', 'Genera el token para tu cuenta y copia también su ID numérico (1784…). Los tokens unificados de Meta suelen comenzar con EAA; si la configuración dice que no caducan, Studio no intentará renovarlos como tokens IGAA.']
       ]
@@ -686,7 +686,7 @@
       return '<div class="st-form-grid">' + text('st-c-unified-profile', 'ID de Instagram (numérico)', '1784…', 'inputmode="numeric"') +
         secret('st-c-unified-token', 'Token unificado de Meta', 'EAA…') + '</div>' +
         action('st-connect', 'Verificar y conectar', 'instagram-unified', '') +
-        '<p class="st-note">Usa el token generado en API setup with Unified login. Para ver estadísticas, la configuración de Meta también debe tener instagram_manage_insights.</p>' +
+        '<p class="st-note">Usa el token de API setup with Unified login. Necesitas instagram_basic e instagram_manage_insights; ante 400 · 100 comprueba la asignación del activo y business_management en Facebook Login for Business.</p>' +
         '<details class="st-details"><summary>Tengo un token IGAA del inicio de sesión anterior</summary>' +
         secret('st-c-token', 'Token de acceso de Instagram', 'IGAA…') +
         action('st-connect', 'Verificar con Instagram Login', 'instagram') + '</details>' +
