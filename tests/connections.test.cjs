@@ -15,6 +15,29 @@ function withFetch(handler, run) {
 }
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
+test('Instagram: muestra detalle seguro de Graph API 100, sin mostrar tokens', async () => {
+  const token = 'EAAEjemploSecreto1234567890';
+  await withFetch(async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer ' + token);
+    return json({
+      error: {
+        code: 100, error_subcode: 33,
+        message: 'Unsupported metric for this media type; access_token=' + token
+      }
+    }, 400);
+  }, async () => {
+    await assert.rejects(clients.request('https://graph.facebook.com/v27.0/123/insights', {
+      token, query: {metric:'views'}
+    }), error => {
+      assert.match(error.message,/HTTP 400 · 100/);
+      assert.match(error.message,/subcódigo 33/);
+      assert.match(error.message,/Unsupported metric for this media type/);
+      assert.doesNotMatch(error.message,/EAAEjemploSecreto/);
+      return true;
+    });
+  });
+});
+
 test('TikTok: autoriza en el navegador con PKCE y devuelve accesos renovables', async () => {
   let link, tokenBody;
   await withFetch(async (url, options) => {
