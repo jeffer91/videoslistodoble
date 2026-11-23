@@ -69,7 +69,22 @@ async function request(base, { query, method, token, json, form, headers, upload
   const apiError = typeof data?.error === 'string' ? data.error : data?.error?.code;
   if (!response.ok || apiError && apiError !== 'ok') {
     const code = /^[a-zA-Z0-9_.-]{1,100}$/.test(String(apiError ?? '')) ? ' · ' + apiError : '';
-    throw new NetworkError('La plataforma respondió HTTP ' + response.status + code,
+    // Para (#100) de Instagram, el mensaje de Meta distingue métricas incompatibles
+    // de objetos inaccesibles. Mostrarlo sin revelar el token evita más cambios a ciegas.
+    const isMeta = /^https:\/\/graph\.(?:facebook|instagram)\.com\//.test(base);
+    const metaDetail = isMeta && String(apiError) === '100' && typeof data?.error?.message === 'string'
+      ? data.error.message : '';
+    const sanitized = metaDetail
+      .replaceAll(String(token || ''), token ? '[token oculto]' : '')
+      .replace(/https?:\/\/[^\s"'<>]+/gi, '[enlace oculto]')
+      .replace(/\b(?:EAA|IGAA|IGQV)[A-Za-z0-9_-]{6,}\b/g, '[token oculto]')
+      .replace(/(?:access_token|client_secret|app_secret)\s*[:=]\s*[^\s,;]+/gi, '[credencial oculta]')
+      .replace(/[\r\n\t]+/g, ' ')
+      .trim().slice(0, 250);
+    const subcode = /^\d{1,10}$/.test(String(data?.error?.error_subcode ?? ''))
+      ? ' (subcódigo ' + data.error.error_subcode + ')' : '';
+    const detail = sanitized ? ' · ' + sanitized : '';
+    throw new NetworkError('La plataforma respondió HTTP ' + response.status + code + subcode + detail,
       response.status < 500 && ![408, 429].includes(response.status));
   }
   if (data === null) throw new NetworkError('Respuesta inválida de la plataforma', false);
