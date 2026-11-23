@@ -16,6 +16,22 @@ const {command} = require('./media.cjs');
 const STAGES = new Set(['login', 'navigate', 'listing', 'details']);
 const NETWORKS = ['youtube','tiktok','instagram','facebook'];
 
+/** Acepta las URLs habituales del grupo, sin parámetros ni rutas adicionales.
+ * Rechazar en lugar de omitir silenciosamente impide que se simule una lectura exitosa.
+ */
+function normalizeFacebookGroupUrl(raw) {
+  if (!String(raw || '').trim()) return '';
+  let url;
+  try { url = new URL(String(raw).trim()); } catch { throw Error('La dirección del grupo de Facebook no es una URL válida'); }
+  const allowed = new Set(['facebook.com','www.facebook.com','web.facebook.com','m.facebook.com']);
+  const match = /^\/groups\/([a-zA-Z0-9_.-]+)\/?$/.exec(url.pathname);
+  if (url.protocol !== 'https:' || !allowed.has(url.hostname.toLowerCase()) ||
+      url.username || url.password || url.port || !match) {
+    throw Error('Usa el enlace HTTPS directo del grupo: https://www.facebook.com/groups/identificador');
+  }
+  return 'https://www.facebook.com/groups/' + match[1];
+}
+
 // Un solo navegador a la vez: el lector y el publicador comparten el perfil de cada red.
 let busy = null;
 function acquireBrowser(owner) {
@@ -67,6 +83,7 @@ function closeGracefully(pid, wait = 10000) {
 
 async function readBrowser(app, network, save, {onStatus = () => {}, onAccount = () => {}, onGroup = () => {}, groupUrl = '', signal} = {}) {
   if (!NETWORKS.includes(network)) throw Error('Red desconocida');
+  if (network === 'facebook') groupUrl = normalizeFacebookGroupUrl(groupUrl);
   if (!acquireBrowser('lector')) throw Error('El navegador está publicando un video. Inténtalo en unos minutos.');
   try { return await runReader(app, network, save, {onStatus, onAccount, onGroup, groupUrl, signal}); }
   finally { releaseBrowser('lector'); }
@@ -75,7 +92,7 @@ async function readBrowser(app, network, save, {onStatus = () => {}, onAccount =
 async function runReader(app, network, save, {onStatus, onAccount, onGroup = () => {}, groupUrl = '', signal}) {
   const {base, cache, python, packages} = await preparePython(app, {onStatus, signal});
   onStatus('opening', {message:'Abriendo el navegador…'});
-  const group = network === 'facebook' && /^https:\/\/(www|web|m)\.facebook\.com\/groups\/[\w.-]+$/.test(groupUrl) ? [groupUrl] : [];
+  const group = network === 'facebook' && groupUrl ? [groupUrl] : [];
   const child = spawn(python,['-u',path.join(base,'browser-stats','reader.py'),network,path.join(cache,'perfil-'+network),...group],
     {windowsHide:true,env:{...process.env,PYTHONPATH:packages,PYTHONIOENCODING:'utf-8'}});
   let browserPid = null;
@@ -118,4 +135,4 @@ async function runReader(app, network, save, {onStatus, onAccount, onGroup = () 
     signal?.removeEventListener('abort',stop);
   }
 }
-module.exports={readBrowser, closeGracefully, preparePython, acquireBrowser, releaseBrowser, browserBusy, NETWORKS};
+module.exports={readBrowser, closeGracefully, preparePython, acquireBrowser, releaseBrowser, browserBusy, NETWORKS, normalizeFacebookGroupUrl};
