@@ -609,10 +609,10 @@
     facebook: {
       gives: 'Vistas, reacciones, comentarios, compartidos y tiempo medio visto de los videos y Reels de tu página. Los grupos no tienen API: léelos con el lector de navegador.',
       steps: [
-        ['Ten a mano tu página de Facebook', 'Las estadísticas se leen de la página donde publicas los videos y Reels. Debes ser administrador.'],
+        ['Ten a mano tu página de Facebook', 'Las estadísticas se leen de la página que administras. Debes tener acceso a su tarea ANALYZE para consultar Insights.'],
         ['Usa una app de Meta', 'Reutiliza la app creada para Instagram o crea otra con el caso de uso «Administrar todo lo de tu página». En Configuración de la app → Básica copia el identificador de la app (App ID) y la clave secreta (App Secret).', 'meta-apps'],
-        ['Genera un token de usuario', 'En el Explorador de la API Graph elige tu app, deja «Token de usuario» y añade los permisos pages_show_list, pages_read_engagement y read_insights (y pages_manage_posts si publicarás desde Studio). Pulsa Generate Access Token, acepta y marca tu página. Copia el token.', 'meta-explorer'],
-        ['Studio hace el resto', 'Pega abajo el App ID, el App Secret y el token. Studio amplía el token, te muestra tus páginas y guarda un acceso de página que no caduca.']
+        ['Genera un token de usuario', 'En el Explorador de la API Graph selecciona tu app y Token de usuario. Solicita pages_show_list, pages_read_engagement, read_insights y pages_manage_engagement para el análisis de videos; agrega pages_manage_posts si también publicarás. Autoriza el acceso a la página. Nunca compartas el token ni App Secret por chat.', 'meta-explorer'],
+        ['Studio verifica antes de conectar', 'Introduce App ID, App Secret y token de usuario únicamente en Studio. Elige la página; Studio comprueba una métrica de Page Insights y solo guarda su token si Meta concede acceso. Las estadísticas de videos y Reels dependen además de sus permisos y disponibilidad.']
       ]
     },
     tiktok: {
@@ -632,7 +632,20 @@
     const expires = account.expiresAt ? Date.parse(account.expiresAt) : null;
     if (expires && expires < Date.now() && account.provider !== 'instagram-login') return { cls: 'warn', text: 'Acceso vencido' };
     if (expires && expires < Date.now()) return { cls: 'warn', text: 'Token vencido: genera uno nuevo' };
+    if (network === 'facebook' && !account.insightsMetric) return { cls: 'warn', text: 'Conectado · revisar Insights' };
     return { cls: 'on', text: 'Conectado' };
+  }
+
+  function facebookGroupConnection() {
+    const group = central?.group;
+    const last = group?.latest;
+    return '<section class="panel st-panel"><div class="row between wrap"><h2>Grupo de Facebook · lectura independiente</h2><span class="st-status ' +
+      (last ? 'on' : 'off') + '">' + (last ? 'Lectura registrada' : 'Sin lectura') + '</span></div>' +
+      '<p>Meta retiró la API pública de grupos. Studio lee las cifras visibles de tu propio grupo con el navegador, sin mezclar miembros del grupo con seguidores de la página.</p>' +
+      (last ? '<p class="st-note">Última lectura: ' + esc(day(last.at)) + ' · Miembros: ' +
+        (last.members == null ? 'sin dato' : number(last.members)) + '</p>' :
+        '<p class="st-note">Para leer el grupo, registra su URL en Publicación automática → Facebook. No necesitas activar la publicación en el grupo.</p>') +
+      '<div class="row wrap">' + action('st-tab', 'Ir al lector de Facebook', 'browser', '') + '</div></section>';
   }
 
   function connectionsTab() {
@@ -651,7 +664,7 @@
           (id === 'tiktok' && !account ? '<p class="st-note">¿Prefieres no crear una app? Usa el <button class="st-link" data-action="st-tab" data-id="browser">lector de navegador</button>.</p>' : '') +
           '</article>';
       }).join('') + '</div>' +
-      cloudPanel() +
+      facebookGroupConnection() + cloudPanel() +
       '<section class="panel st-panel st-why"><h2>¿Por qué la conexión oficial?</h2><ul>' +
       '<li><strong>Cifras exactas</strong>: 1.234 vistas, no «1,2 K».</li>' +
       '<li><strong>Todo el catálogo</strong>: incluye los videos publicados fuera de Studio.</li>' +
@@ -882,7 +895,9 @@
         const pages = await flow('accounts.facebookPages', { appId: value('st-c-app'), appSecret: value('st-c-app-secret'), userToken: value('st-c-user-token') });
         const box = document.getElementById('st-fb-pages');
         if (box) box.innerHTML = '<p class="st-note">Elige la página donde publicas:</p>' + pages.map(page => '<div class="row wrap">' +
-          action('st-fb-page', 'Conectar «' + esc(page.name) + '»', page.id, '') + (page.insights ? '' : '<small class="st-note">Sin permiso de estadísticas en esta página</small>') + '</div>').join('');
+          action('st-fb-page', 'Conectar «' + esc(page.name) + '»', page.id, '') + (page.tasksKnown ? (page.canAnalyze ? '<small class="st-note">Tarea ANALYZE disponible; Studio comprobará Insights al conectar</small>' :
+            '<small class="st-note">Sin tarea ANALYZE: solicita acceso a estadísticas</small>') :
+            '<small class="st-note">Meta no informó tareas: Studio comprobará Insights al conectar</small>') + '</div>').join('');
       } finally { element.disabled = false; element.textContent = 'Buscar mis páginas'; }
       return;
     }
