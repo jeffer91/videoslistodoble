@@ -118,6 +118,9 @@ async function* graphPages(request, endpoint, account, fields) {
 }
 async function* meta(request,base,network,account) {
   const instagram=network==='instagram',seen=new Set();
+  let insightsPermissionDenied=false;
+  const permissionError=error=>/HTTP (400|403) · 10\b/.test(String(error?.message||''));
+  const missingInsights='Instagram Insights: Meta rechazó el permiso de estadísticas (código 10). Comprueba instagram_manage_insights en la configuración unificada y vuelve a autorizar Instagram para generar un token nuevo.';
   const edges=instagram?['media']:['videos','video_reels'];
   const fields=instagram?'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count':'id,title,description,created_time,permalink_url,length';
   for(const edge of edges){
@@ -138,9 +141,32 @@ async function* meta(request,base,network,account) {
             }
           };
           if(instagram){
-            const names=IG_METRICS.filter(k=>!k.startsWith('ig_reels')||v.media_product_type==='REELS');
-            try { await read(names.join(',')); }
-            catch { for(const k of names) {try{await read(k)}catch(error){warnings.add(k+' · '+error.message)}} }
+            // Si Meta deniega Insights (código 10), repetir la misma petición por cada métrica
+            // y por cada Reel solo ralentiza la sincronización y no resuelve el permiso.
+            if(insightsPermissionDenied){
+              warnings.add(missingInsights);
+            }else{
+              const names=IG_METRICS.filter(k=>!k.startsWith('ig_reels')||v.media_product_type==='REELS');
+              try { await read(names.join(',')); }
+              catch(error){
+                if(permissionError(error)){
+                  insightsPermissionDenied=true;
+                  warnings.add(missingInsights);
+                }else{
+                  for(const k of names){
+                    try { await read(k); }
+                    catch(metricError){
+                      if(permissionError(metricError)){
+                        insightsPermissionDenied=true;
+                        warnings.add(missingInsights);
+                        break;
+                      }
+                      warnings.add(k+' · '+metricError.message);
+                    }
+                  }
+                }
+              }
+            }
           } else {
             try {await read()} catch(error){warnings.add('Video Insights · '+error.message)}
             metrics.views=number(metrics.fb_reels_total_plays??metrics.total_video_views??metrics.post_video_views);
