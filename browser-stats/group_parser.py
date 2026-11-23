@@ -8,7 +8,7 @@ GROUP_METRICS = {
     "comments": r"(?:comentarios|comments)",
     "reactions": r"(?:reacciones|reactions)",
 }
-NUMBER = r"(\d[\d.,]*(?:\s*(?:mil|mill\.?|k|m)\b)?)"
+NUMBER = r"(\d[\d.,]*(?:[ \t]*(?:mil|mill\.?|k|m)\b)?)"
 
 
 def parse_count(raw):
@@ -37,12 +37,15 @@ def group_numbers(text):
     """
     found = {}
     for key, label in GROUP_METRICS.items():
+        # Cada captura debe pertenecer a la misma línea de la etiqueta o a
+        # la línea inmediatamente siguiente. \s* libre saltaba a la cifra
+        # de la siguiente estadística, intercambiando sus valores.
         patterns = [
-            label + r"\s*[:\-]?\s*" + NUMBER,
-            NUMBER + r"\s*[:\-]?\s*" + label,
+            r"^[ \t]*" + label + r"[ \t]*[:\-]?[ \t]*(?:\r?\n[ \t]*)?" + NUMBER + r"[ \t]*$",
+            r"^[ \t]*" + NUMBER + r"[ \t]*[:\-]?[ \t]*" + label + r"[ \t]*$",
         ]
         for pattern in patterns:
-            match = re.search(pattern, text, re.I)
+            match = re.search(pattern, text, re.I | re.M)
             value = parse_count(match.group(1)) if match else None
             if value is not None:
                 found[key] = value
