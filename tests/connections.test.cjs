@@ -84,10 +84,14 @@ test('Facebook: amplía el token de usuario y lista las páginas con su acceso p
 test('Instagram Unified Login: valida el token EAA mediante Graph de Meta', async () => {
   await withFetch(async (url, options) => {
     assert.equal(url.origin, 'https://graph.facebook.com');
-    assert.equal(url.pathname, '/v24.0/17841400000000000');
-    assert.equal(url.searchParams.get('fields'), 'id,username,followers_count,account_type');
     assert.equal(options.headers.Authorization, 'Bearer EAA-prueba');
-    return json({ id: '17841400000000000', username: '11records11', followers_count: 100, account_type: 'CREATOR' });
+    if (url.pathname === '/v27.0/me/assigned_instagram_accounts') {
+      assert.equal(url.searchParams.get('fields'), 'id,username');
+      return json({ data: [{ id: '17841400000000000', username: '11records11' }] });
+    }
+    assert.equal(url.pathname, '/v27.0/17841400000000000');
+    assert.equal(url.searchParams.get('fields'), 'id,username,followers_count');
+    return json({ id: '17841400000000000', username: '11records11', followers_count: 100 });
   }, async () => {
     const identity = await clients.verifyAccount('instagram', {
       provider: 'instagram-unified', profileId: '17841400000000000', accessToken: 'EAA-prueba'
@@ -95,6 +99,29 @@ test('Instagram Unified Login: valida el token EAA mediante Graph de Meta', asyn
     assert.equal(identity.id, '17841400000000000');
     assert.equal(identity.label, '@11records11');
     assert.equal(identity.followers, 100);
+  });
+});
+
+test('Instagram Unified Login: explica cuando el activo no fue asignado', async () => {
+  await withFetch(async (url, options) => {
+    assert.equal(url.pathname, '/v27.0/me/assigned_instagram_accounts');
+    assert.equal(options.headers.Authorization, 'Bearer EAA-prueba');
+    return json({ data: [] });
+  }, async () => {
+    await assert.rejects(clients.verifyAccount('instagram', {
+      provider: 'instagram-unified', profileId: '17841400000000000', accessToken: 'EAA-prueba'
+    }), /no tiene asignado el Instagram/);
+  });
+});
+
+test('Instagram Unified Login: ofrece diagnóstico cuando Meta devuelve 400/100', async () => {
+  await withFetch(async url => {
+    assert.equal(url.pathname, '/v27.0/me/assigned_instagram_accounts');
+    return json({ error: { code: 100, error_subcode: 33 } }, 400);
+  }, async () => {
+    await assert.rejects(clients.verifyAccount('instagram', {
+      provider: 'instagram-unified', profileId: '17841400000000000', accessToken: 'EAA-prueba'
+    }), /business_management/);
   });
 });
 
