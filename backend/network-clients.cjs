@@ -6,6 +6,8 @@ const http = require('node:http');
 const GOOGLE = 'https://www.googleapis.com';
 const TIKTOK = 'https://open.tiktokapis.com';
 const META = 'https://graph.facebook.com/v24.0';
+// La API con inicio de sesión unificado de Meta (token SUAT) usa su propio contexto Graph.
+const META_UNIFIED = 'https://graph.facebook.com/v27.0';
 // Instagram API con inicio de sesión de Instagram: no necesita una página de Facebook.
 const IG_LOGIN = 'https://graph.instagram.com/v24.0';
 const AYR = 'https://api.ayrshare.com/api';
@@ -84,7 +86,7 @@ function instagramLogin(account) {
 }
 
 function metaBase(account) {
-  return instagramLogin(account) ? IG_LOGIN : META;
+  return instagramLogin(account) ? IG_LOGIN : (account?.provider === 'instagram-unified' ? META_UNIFIED : META);
 }
 
 function instagramOwner(account) {
@@ -309,8 +311,29 @@ async function verifyAccount(name, account) {
     return { id, label: '@' + result.username, followers: valueNumber(result.followers_count), provider: 'instagram-login' };
   }
   if (name === 'instagram') {
-    const result = await request(META + '/' + numericId(account.profileId), { token, query: { fields: 'id,username,followers_count,account_type' } });
-    if (!result.username) throw Error('No se encontró el perfil profesional de Instagram indicado');
+    const id = numericId(account.profileId);
+    if (account.provider === 'instagram-unified') {
+      // Con un token SUAT, Meta solo permite consultar las cuentas efectivamente compartidas.
+      // El ID visible en "Generar token" no demuestra que se haya asignado el activo.
+      let result;
+      try {
+        result = await request(META_UNIFIED + '/me/assigned_instagram_accounts', {
+          token, query: { fields: 'id,username', limit: 100 }
+        });
+      } catch (error) {
+        if (/HTTP 400 · 100/.test(error.message)) {
+          throw new NetworkError('Meta no devuelve las cuentas de Instagram asignadas al token. En Facebook Login for Business → Configuraciones → Editar, agrega business_management a la misma configuración y vuelve a autorizar Instagram para generar un token nuevo.');
+        }
+        throw error;
+      }
+      if (!Array.isArray(result.data) || !result.data.some(item => String(item.id) === id)) {
+        throw new NetworkError('Este token de Meta no tiene asignado el Instagram indicado. Revisa los activos compartidos de tu portafolio y, si sigue vacío, agrega business_management a la configuración en Facebook Login for Business y vuelve a autorizar la cuenta.');
+      }
+    }
+    // account_type no es un campo admitido aquí en la API Unified/Facebook Login.
+    const base = metaBase(account);
+    const result = await request(base + '/' + id, { token, query: { fields: 'id,username,followers_count' } });
+    if (!result.username || String(result.id) !== id) throw Error('El token no devolvió el perfil profesional de Instagram indicado');
     return { id: String(result.id), label: '@' + result.username, followers: valueNumber(result.followers_count) };
   }
   throw Error('Red desconocida');
