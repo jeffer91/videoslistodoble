@@ -28,6 +28,12 @@ class GroupParserTests(unittest.TestCase):
     def test_lectura_parcial_y_cero_real(self):
         self.assertEqual(group_numbers("Comentarios: 0\nTexto sin número"), {"comments": 0})
 
+    def test_no_toma_valores_de_otra_fila(self):
+        self.assertEqual(
+            group_numbers("Comentarios\\nSin datos\\nReacciones\\n7"),
+            {"reactions": 7},
+        )
+
     def test_no_inventa_datos(self):
         self.assertEqual(group_numbers("Publicaciones\nNo disponibles"), {})
 
