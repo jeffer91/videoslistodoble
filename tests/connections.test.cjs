@@ -104,6 +104,59 @@ test('Facebook: amplía el token de usuario y lista las páginas con su acceso p
   await assert.rejects(clients.facebookPages({ appId: 'abc', appSecret: 's', userToken: 't' }), /App ID/);
 });
 
+test('Facebook: verifica Page Insights con una métrica vigente antes de conectar', async () => {
+  const seen=[];
+  await withFetch(async (url, options) => {
+    seen.push(url.pathname);
+    assert.equal(options.headers.Authorization,'Bearer token-de-pagina');
+    if (url.pathname === '/v24.0/me')return json({id:'123',name:'11 Records'});
+    if (url.pathname === '/v27.0/123/insights'){
+      assert.equal(url.searchParams.get('metric'),'page_media_view');
+      assert.equal(url.searchParams.get('period'),'day');
+      return json({data:[]}); // La página nueva puede no tener datos todavía.
+    }
+    if (url.pathname === '/v24.0/123')return json({followers_count:42});
+    throw Error('Ruta inesperada '+url.pathname);
+  },async()=>{
+    const id=await clients.verifyAccount('facebook',{profileId:'123',accessToken:'token-de-pagina'});
+    assert.equal(id.label,'11 Records');
+    assert.equal(id.followers,42);
+    assert.equal(id.insightsMetric,'page_media_view');
+  });
+  assert.deepEqual(seen,['/v24.0/me','/v27.0/123/insights','/v24.0/123']);
+});
+
+test('Facebook: una métrica retirada permite probar otra antes de declarar denegación', async () => {
+  let tries=0;
+  await withFetch(async url => {
+    if(url.pathname === '/v24.0/me')return json({id:'123',name:'11 Records'});
+    if(url.pathname.endsWith('/insights')){
+      tries++;
+      if(url.searchParams.get('metric')==='page_media_view')return json({error:{code:100,message:'Metric unsupported'}},400);
+      assert.equal(url.searchParams.get('metric'),'page_follows');
+      return json({data:[{name:'page_follows',values:[]}]});
+    }
+    return json({});
+  },async()=>{
+    const result=await clients.verifyAccount('facebook',{profileId:'123',accessToken:'token'});
+    assert.equal(result.insightsMetric,'page_follows');
+    assert.equal(tries,2);
+  });
+});
+
+test('Facebook: rechaza la conexión cuando el token de página no tiene Insights', async () => {
+  let requests=0;
+  await withFetch(async url => {
+    requests++;
+    if(url.pathname === '/v24.0/me')return json({id:'123',name:'11 Records'});
+    if(url.pathname.endsWith('/insights'))return json({error:{code:200,message:'Missing permissions'}},403);
+    throw Error('No debería intentar otras solicitudes después de permisos denegados');
+  },async()=>{
+    await assert.rejects(clients.verifyAccount('facebook',{profileId:'123',accessToken:'token'}),/read_insights.*pages_read_engagement.*ANALYZE/);
+  });
+  assert.equal(requests,2);
+});
+
 test('Instagram Unified Login: valida el token EAA mediante Graph de Meta', async () => {
   await withFetch(async (url, options) => {
     assert.equal(url.origin, 'https://graph.facebook.com');
