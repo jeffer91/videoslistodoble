@@ -25,6 +25,53 @@ test('Meta omite fotos en Instagram y elimina duplicados entre videos y Reels de
  assert.deepEqual((await collect('instagram',get)).flatMap(p=>p.videos.map(v=>v.externalId)),['2']);
  const rows=(await collect('facebook',get)).flatMap(p=>p.videos);assert.equal(rows.length,1);assert.equal(rows[0].metrics.views,5);
 });
+test('Facebook: Reel con Insights calcula vistas y tiempo visto, sin convertir ausencias en cero',async()=>{
+ const request=async(url)=>{
+   if(url.endsWith('/videos'))return {data:[]};
+   if(url.endsWith('/video_reels'))return {data:[{id:'201',created_time:'2026-11-23',title:'Reel nuevo',length:30}]};
+   if(url.endsWith('/video_insights'))return {data:[
+     {name:'fb_reels_total_plays',values:[{value:42}]},
+     {name:'post_video_avg_time_watched',values:[{value:15000}]},
+     {name:'post_video_view_time',values:[{value:900000}]},
+     {name:'post_video_social_actions',values:[{value:{shares:3}}]}
+   ]};
+   if(url.endsWith('/201'))return {likes:{summary:{total_count:4}},comments:{summary:{total_count:0}}};
+   throw Error('Ruta desconocida '+url);
+ };
+ const rows=(await collect('facebook',request)).flatMap(p=>p.videos);
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].metrics.views,42);
+ assert.equal(rows[0].metrics.retention,50);
+ assert.equal(rows[0].metrics.estimatedMinutesWatched,15);
+ assert.equal(rows[0].metrics.shares,3);
+ assert.equal(rows[0].metrics.comments,0);
+ assert.equal(rows[0].metrics.reach,null);
+});
+
+test('Facebook: permiso de Video Insights denegado no repite por Reel ni inventa vistas',async()=>{
+ let failures=0;
+ const request=async(url)=>{
+   if(url.endsWith('/videos'))return {data:[
+     {id:'201',title:'A',created_time:'2026-11-20'},
+     {id:'202',title:'B',created_time:'2026-11-21'}
+   ]};
+   if(url.endsWith('/video_reels'))return {data:[]};
+   if(url.endsWith('/video_insights')){
+     failures++;
+     throw Error('La plataforma respondió HTTP 403 · 200');
+   }
+   if(url.endsWith('/201')||url.endsWith('/202'))return {likes:{summary:{total_count:0}},comments:{summary:{total_count:2}}};
+   throw Error('Ruta desconocida '+url);
+ };
+ const pages=await collect('facebook',request),rows=pages.flatMap(p=>p.videos);
+ assert.equal(rows.length,2);
+ assert.equal(failures,1,'No repite la consulta sin permiso');
+ assert.equal(rows[0].metrics.views,null);
+ assert.equal(rows[1].metrics.views,null);
+ assert.equal(rows[0].metrics.likes,0);
+ assert.match(pages[0].warning,/pages_manage_engagement/);
+});
+
 test('Instagram evita consultas repetidas cuando Meta deniega Insights con código 10',async()=>{
  let insightCalls=0;
  const request=async(url)=>{
