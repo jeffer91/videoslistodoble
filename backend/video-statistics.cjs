@@ -153,6 +153,7 @@ async function* meta(request,base,network,account) {
                   insightsPermissionDenied=true;
                   warnings.add(missingInsights);
                 }else{
+                  const failures=[];
                   for(const k of names){
                     try { await read(k); }
                     catch(metricError){
@@ -161,8 +162,13 @@ async function* meta(request,base,network,account) {
                         warnings.add(missingInsights);
                         break;
                       }
-                      warnings.add(k+' · '+metricError.message);
+                      failures.push({metric:k,message:metricError.message});
                     }
+                  }
+                  if(failures.length===names.length && failures.every(item=>/HTTP 400 · 100\b/.test(item.message))){
+                    warnings.add('Instagram Insights: todas las métricas rechazadas (código 100). Primera respuesta: ' + failures[0].message);
+                  }else{
+                    for(const item of failures)warnings.add(item.metric+' · '+item.message);
                   }
                 }
               }
