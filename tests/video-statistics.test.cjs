@@ -62,6 +62,19 @@ test('Instagram conserva la consulta por métrica ante errores diferentes a perm
  assert.equal(pages[0].videos[0].metrics.views,10);
 });
 
+test('Instagram resume rechazos de todas las métricas cuando Meta devuelve 100',async()=>{
+ const request=async(url,opts)=>{
+   if(url.endsWith('/media'))return {data:[{id:'111',media_type:'VIDEO',media_product_type:'REELS'}]};
+   if(url.endsWith('/insights'))throw Error('La plataforma respondió HTTP 400 · 100 · Incompatible metric');
+   throw Error('Ruta inesperada');
+ };
+ const pages=await collect('instagram',request);
+ assert.equal(pages[0].videos.length,1);
+ assert.match(pages[0].warning,/todas las métricas rechazadas/);
+ assert.match(pages[0].warning,/Incompatible metric/);
+ assert.equal(pages[0].warning.split('HTTP 400').length,2,'Un único detalle de diagnóstico');
+});
+
 test('Ayrshare conserva estadísticas de videos publicados fuera de Studio',async()=>{
  const pages=await collect('tiktok',async()=>({posts:[{id:'123',created:'2025-01-01',videoViews:42,reach:32}],meta:{pagination:{hasMore:false}}}),'ayrshare');
  assert.equal(pages[0].videos[0].metrics.reach,32);
