@@ -601,8 +601,9 @@
       steps: [
         ['Usa una cuenta profesional', 'En Instagram abre Configuración → Tipo de cuenta y herramientas → Cambiar a cuenta profesional (Creador o Empresa). No necesitas una página de Facebook.'],
         ['Crea una app en Meta for Developers', 'Pulsa Crear app, elige el caso de uso «Administrar mensajes y contenido en Instagram» y termina el asistente.', 'meta-apps'],
-        ['Añade tu cuenta como evaluadora', 'En la app abre Instagram → Configuración de la API con inicio de sesión de Instagram → Generar tokens de acceso → Añadir cuenta. Acepta la invitación en Instagram (Configuración → Apps y sitios web → Invitaciones de evaluador).'],
-        ['Genera el token', 'Pulsa Generar token junto a tu cuenta y concede instagram_business_basic e instagram_business_manage_insights (y instagram_business_content_publish si publicarás desde Studio). Copia el token: dura 60 días y Studio lo renueva solo.']
+        ['Configura el inicio de sesión unificado', 'En API setup with Unified login crea una configuración. En Permisos y funciones activa instagram_manage_insights y agrégalo también a los permisos de esa configuración; instagram_basic es obligatorio.'],
+        ['Añade tu cuenta como evaluadora', 'En Generar tokens de acceso → Agregar cuenta añade tu Instagram. Acepta la invitación en Configuración → Permisos de aplicaciones y sitios web → Invitaciones para evaluadores.'],
+        ['Genera el token', 'Genera el token para tu cuenta y copia también su ID numérico (1784…). Los tokens unificados de Meta suelen comenzar con EAA; si la configuración dice que no caducan, Studio no intentará renovarlos como tokens IGAA.']
       ]
     },
     facebook: {
@@ -640,7 +641,8 @@
         const account = accounts[id], state = connectionState(id);
         return '<article class="st-connection st-' + id + '"><header>' + badge(id) + '<span class="st-status ' + state.cls + '">' + esc(state.text) + '</span></header>' +
           (account ? '<p class="st-account">' + esc(account.label) + (account.followers != null ? ' <small>· ' + compact(account.followers) + ' seguidores</small>' : '') + '</p>' +
-            (account.provider === 'instagram-login' ? '<p class="st-note">Token renovado automáticamente' + (account.expiresAt ? ' · vence ' + esc(day(account.expiresAt)) : '') + '</p>' : '')
+            (account.provider === 'instagram-login' ? '<p class="st-note">Token renovado automáticamente' + (account.expiresAt ? ' · vence ' + esc(day(account.expiresAt)) : '') + '</p>' : '') +
+            (account.provider === 'instagram-unified' ? '<p class="st-note">Token unificado de Meta: sin renovación automática. Se puede revocar en Meta.</p>' : '')
             : '<p class="st-note">Configuración única de unos ' + n.minutes + ' minutos.</p>') +
           '<p>' + esc(GUIDES[id].gives) + '</p>' +
           '<div class="row wrap">' + (account
@@ -681,8 +683,13 @@
         action('st-google', 'Autorizar canal de YouTube', network, '');
     }
     if (network === 'instagram') {
-      return secret('st-c-token', 'Token de acceso de Instagram', 'IGAA…') +
-        action('st-connect', 'Verificar y conectar', 'instagram', '') +
+      return '<div class="st-form-grid">' + text('st-c-unified-profile', 'ID de Instagram (numérico)', '1784…', 'inputmode="numeric"') +
+        secret('st-c-unified-token', 'Token unificado de Meta', 'EAA…') + '</div>' +
+        action('st-connect', 'Verificar y conectar', 'instagram-unified', '') +
+        '<p class="st-note">Usa el token generado en API setup with Unified login. Para ver estadísticas, la configuración de Meta también debe tener instagram_manage_insights.</p>' +
+        '<details class="st-details"><summary>Tengo un token IGAA del inicio de sesión anterior</summary>' +
+        secret('st-c-token', 'Token de acceso de Instagram', 'IGAA…') +
+        action('st-connect', 'Verificar con Instagram Login', 'instagram') + '</details>' +
         '<details class="st-details"><summary>Mi Instagram está enlazado a una página de Facebook (método anterior)</summary>' +
         '<div class="st-form-grid">' + text('st-c-profile', 'ID del perfil profesional', '1784…', 'inputmode="numeric"') + secret('st-c-meta-token', 'Token de Meta') + '</div>' +
         action('st-connect', 'Conectar con Facebook Login', 'instagram-facebook') + '</details>';
@@ -709,6 +716,7 @@
   }
 
   function connectionData(kind) {
+    if (kind === 'instagram-unified') return ['instagram', { provider: 'instagram-unified', profileId: value('st-c-unified-profile'), accessToken: value('st-c-unified-token') }];
     if (kind === 'instagram') return ['instagram', { provider: 'instagram-login', accessToken: value('st-c-token') }];
     if (kind === 'instagram-facebook') return ['instagram', { provider: 'direct', profileId: value('st-c-profile'), accessToken: value('st-c-meta-token') }];
     if (kind === 'facebook') return ['facebook', { provider: 'direct', profileId: value('st-c-profile'), accessToken: value('st-c-token') }];
@@ -889,6 +897,7 @@
       const [network, data] = connectionData(id);
       if (!data.accessToken) return notice('Pega el token de acceso', true);
       if (network === 'facebook' && !data.profileId) return notice('Escribe el ID de la página', true);
+      if (id === 'instagram-unified' && !/^\d{1,40}$/.test(data.profileId)) return notice('Escribe el ID numérico de Instagram que muestra Meta', true);
       element.disabled = true;
       const label = element.textContent;
       element.textContent = 'Verificando…';

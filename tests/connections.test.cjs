@@ -81,6 +81,30 @@ test('Facebook: amplía el token de usuario y lista las páginas con su acceso p
   await assert.rejects(clients.facebookPages({ appId: 'abc', appSecret: 's', userToken: 't' }), /App ID/);
 });
 
+test('Instagram Unified Login: valida el token EAA mediante Graph de Meta', async () => {
+  await withFetch(async (url, options) => {
+    assert.equal(url.origin, 'https://graph.facebook.com');
+    assert.equal(url.pathname, '/v24.0/17841400000000000');
+    assert.equal(url.searchParams.get('fields'), 'id,username,followers_count,account_type');
+    assert.equal(options.headers.Authorization, 'Bearer EAA-prueba');
+    return json({ id: '17841400000000000', username: '11records11', followers_count: 100, account_type: 'CREATOR' });
+  }, async () => {
+    const identity = await clients.verifyAccount('instagram', {
+      provider: 'instagram-unified', profileId: '17841400000000000', accessToken: 'EAA-prueba'
+    });
+    assert.equal(identity.id, '17841400000000000');
+    assert.equal(identity.label, '@11records11');
+    assert.equal(identity.followers, 100);
+  });
+});
+
+test('Instagram: no confunde un token EAA con Instagram Login IGAA', async () => {
+  await assert.rejects(
+    clients.verifyAccount('instagram', { provider: 'instagram-login', accessToken: 'EAA-prueba' }),
+    /Unified Login/
+  );
+});
+
 test('el navegador del lector se cierra de forma ordenada', async () => {
   const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM",()=>{require("fs").writeFileSync(process.argv[1],"ok");process.exit(0)});setInterval(()=>{},1000)', require('node:path').join(require('node:os').tmpdir(), 'cierre-' + process.pid)]);
   await new Promise(r => setTimeout(r, 300));

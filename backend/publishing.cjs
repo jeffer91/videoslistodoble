@@ -19,7 +19,7 @@ const BROWSER_ACCOUNTS = 'cuentas-navegador';
 const GROUP = 'grupo-facebook';
 const GROUP_FIELDS = ['members', 'newMembers', 'activeMembers', 'posts', 'comments', 'reactions'];
 const WAIT = 45000;
-const PROVIDERS = new Set(['direct', 'ayrshare', 'instagram-login']);
+const PROVIDERS = new Set(['direct', 'ayrshare', 'instagram-login', 'instagram-unified']);
 // Instagram no permite renovar un token ya vencido: se renueva con una semana de margen.
 const INSTAGRAM_MARGIN = 7 * 86400000;
 const INSTAGRAM_LIFETIME = 55 * 86400000;
@@ -115,9 +115,12 @@ function createPublishing(root, vault, platform = clients) {
     accountName(network);
     const account = normalizeSecrets(data);
     if (network !== 'tiktok' && account.provider === 'ayrshare') throw Error('Ayrshare está disponible para TikTok');
-    if (network !== 'instagram' && account.provider === 'instagram-login') throw Error('El inicio de sesión de Instagram solo sirve para Instagram');
+    if (network !== 'instagram' && ['instagram-login', 'instagram-unified'].includes(account.provider)) throw Error('El inicio de sesión de Instagram solo sirve para Instagram');
     if (account.provider === 'instagram-login' && !account.expiresAt) {
       account.expiresAt = new Date(Date.now() + INSTAGRAM_LIFETIME).toISOString();
+    }
+    if (network === 'instagram' && account.provider === 'instagram-unified' && !account.profileId) {
+      throw Error('Escribe el ID numérico de la cuenta profesional de Instagram');
     }
     account.identity = await platform.verifyAccount(network, account);
     return saveSecret(network, account);
