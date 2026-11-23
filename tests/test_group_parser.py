@@ -30,7 +30,7 @@ class GroupParserTests(unittest.TestCase):
 
     def test_no_toma_valores_de_otra_fila(self):
         self.assertEqual(
-            group_numbers("Comentarios\\nSin datos\\nReacciones\\n7"),
+            group_numbers("Comentarios\nSin datos\nReacciones\n7"),
             {"reactions": 7},
         )
 
