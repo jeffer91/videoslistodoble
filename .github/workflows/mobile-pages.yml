@@ -1,9 +1,13 @@
-name: Grabadora móvil - GitHub Pages
+name: Grabadora móvil y Shorts - GitHub Pages
 on:
   push:
     branches: [main]
     paths:
       - 'grabador/**'
+      - 'shorts/**'
+      - 'assets/**'
+      - 'scripts/build-pages.cjs'
+      - '.github/mobile-pages-index.html'
       - '.github/workflows/mobile-pages.yml'
   workflow_dispatch:
 permissions:
@@ -21,12 +25,14 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/configure-pages@v5
+      - name: Probar la lógica de Shorts
+        run: node --test tests/shorts-core.test.cjs
       - name: Preparar la página
-        run: |
-          mkdir -p site/grabador
-          cp grabador/* site/grabador/
-          cp .github/mobile-pages-index.html site/index.html
+        run: node scripts/build-pages.cjs site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

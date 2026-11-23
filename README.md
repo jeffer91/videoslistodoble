@@ -41,6 +41,22 @@ El instalador se genera sin firma de editor comercial. Configuración muestra la
 6. Aprueba las escenas, revisa el montaje y exporta. Puedes **Renderizar vista previa** para ver el montaje de FFmpeg con efectos y audio antes de exportar. La exportación verifica duración, resolución, audio, márgenes de los rótulos generados y reproducción.
 7. Abre el MP4 exportado. Genera tres miniaturas y guarda título, descripción y etiquetas por red. Tras la revisión del MP4 puedes aprobar ese archivo y autorizar el envío a cada cuenta.
 
+## Shorts desde el celular (página web)
+
+Abre **[jeffer91.github.io/videoslistodoble/shorts](https://jeffer91.github.io/videoslistodoble/shorts/)** en Chrome (Android) o Safari (iPhone). Puedes añadirla a la pantalla de inicio para usarla como una app.
+
+1. Escribe el título y pega el guion. **Repartir en escenas** reconoce `GANCHO:`, `DESARROLLO:` y `CIERRE:`.
+2. Graba el gancho, el desarrollo y el cierre con el teleprompter. Cada escena tiene cuenta atrás, revisión y **Repetir** o **Usar toma**. En ⚙ eliges el micrófono (por ejemplo, el lavalier), la velocidad y el tamaño del texto.
+3. Al guardar la tercera toma, el Short se procesa solo:
+   - detecta la voz y corta los silencios del inicio, del final y las pausas largas;
+   - limpia la voz y la deja en −14 LUFS con picos por debajo de −1 dBFS;
+   - monta el video vertical 1080 × 1920 con fondo desenfocado, marco dorado, título, logo, acercamientos en cada corte y el sello «Récord confirmado» al final.
+4. **Compartir** envía el MP4 directamente a TikTok, Instagram o YouTube; también puedes **Descargar** el video.
+
+Todo ocurre en el navegador: los videos se guardan en el propio celular y no se suben a ningún servidor. En navegadores con WebCodecs (Chrome, Edge, Safari 26 o posterior) la exportación es más rápida que el tiempo real y genera MP4 H.264/AAC. En los demás se graba el montaje en tiempo real. Las animaciones de fotos, Whisper y la publicación automática siguen en Studio para Windows.
+
+Para probarla en el equipo: `npm run pages` arma el sitio en `site/` y `npm run test:shorts` ejecuta la prueba completa en Chrome con cámara y micrófono simulados.
+
 ## Grabar con el celular
 
 1. En Windows, abre el récord y elige **Gancho**, **Desarrollo** o **Cierre**. Dentro de **Grabación y composición**, pulsa **Grabar con celular** y **Copiar enlace**.
