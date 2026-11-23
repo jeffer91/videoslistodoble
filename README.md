@@ -50,12 +50,24 @@ Abre **[jeffer91.github.io/videoslistodoble/shorts](https://jeffer91.github.io/v
 3. Al guardar la tercera toma, el Short se procesa solo:
    - detecta la voz y corta los silencios del inicio, del final y las pausas largas;
    - limpia la voz y la deja en −14 LUFS con picos por debajo de −1 dBFS;
-   - monta el video vertical 1080 × 1920 con fondo desenfocado, marco dorado, título, logo, acercamientos en cada corte y el sello «Récord confirmado» al final.
+   - escribe los **subtítulos** con Whisper dentro del navegador, palabra por palabra, y corrige la ortografía con tu guion (nombres como «Lewandowski» salen tal como los escribiste);
+   - monta el video vertical 1080 × 1920 con fondo desenfocado, marco dorado, título, subtítulos con la palabra activa en dorado, logo, acercamientos en cada corte y el sello «Récord confirmado» al final.
 4. **Compartir** envía el MP4 directamente a TikTok, Instagram o YouTube; también puedes **Descargar** el video.
+5. **Corregir subtítulos** permite cambiar cualquier frase y volver a exportar sin repetir la transcripción.
 
-Todo ocurre en el navegador: los videos se guardan en el propio celular y no se suben a ningún servidor. En navegadores con WebCodecs (Chrome, Edge, Safari 26 o posterior) la exportación es más rápida que el tiempo real y genera MP4 H.264/AAC. En los demás se graba el montaje en tiempo real. Las animaciones de fotos, Whisper y la publicación automática siguen en Studio para Windows.
+La primera vez que se usan los subtítulos, el navegador descarga el modelo de Whisper desde Hugging Face (calidad *Normal*: `whisper-base`, o *Ligera*: `whisper-tiny`) y lo guarda para las siguientes veces. Con WebGPU se usa la tarjeta gráfica; si no, el procesador. Si la descarga o el modelo fallan, el Short se exporta igual, sin subtítulos.
 
-Para probarla en el equipo: `npm run pages` arma el sitio en `site/` y `npm run test:shorts` ejecuta la prueba completa en Chrome con cámara y micrófono simulados.
+Todo ocurre en el navegador: los videos se guardan en el propio celular y no se suben a ningún servidor. En navegadores con WebCodecs (Chrome, Edge, Safari 26 o posterior) la exportación es más rápida que el tiempo real y genera MP4 H.264/AAC. En los demás se graba el montaje en tiempo real. Las animaciones de fotos y la publicación automática siguen en Studio para Windows.
+
+Para probarla en el equipo:
+
+~~~bash
+npm ci --prefix web-vendor --ignore-scripts   # Transformers.js para los subtítulos
+npm run pages                                 # arma el sitio en site/
+npm run test:shorts                           # prueba completa en Chrome con cámara y micrófono simulados
+~~~
+
+`npm run test:shorts` desactiva los subtítulos salvo que indiques un modelo local con `SHORTS_WHISPER_MODEL_DIR` (carpeta con `Xenova/whisper-tiny/…`); `SHORTS_VOICE_WAV` permite usar una grabación de voz y `SHORTS_TAKE_MS` la duración de cada toma.
 
 ## Grabar con el celular
 

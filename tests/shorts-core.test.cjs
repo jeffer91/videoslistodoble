@@ -121,3 +121,56 @@ test('shorts: composición, logo y textos', () => {
   assert.equal(core.stampDrop(0), -1);
   assert.ok(Math.abs(core.stampDrop(2)) < 0.001);
 });
+
+const W = (text, start, end) => ({ text, start, end });
+
+test('shorts: el guion corrige la ortografía de Whisper sin tocar los tiempos', () => {
+  const words = [W(' Y', 0, 0.2), W(' rompió', 0.2, 0.6), W(' el', 0.6, 0.7), W(' récord', 0.7, 1.1), W(' de', 1.1, 1.2), W(' Lewan', 1.2, 1.5), W('dowski.', 1.5, 2.0)];
+  const { words: out, corrected } = core.alignToScript(words, 'Y rompió el récord de Lewandowski.');
+  assert.deepEqual(out.map(w => w.text), ['Y', 'rompió', 'el', 'récord', 'de', 'Lewandowski.']);
+  assert.deepEqual([out[5].start, out[5].end], [1.2, 2.0]);
+  assert.ok(corrected >= 1);
+  const typo = core.alignToScript([W('Harri', 0, .3), W('Cane', .3, .6), W('marcó', .6, 1)], 'Harry Kane marcó');
+  assert.deepEqual(typo.words.map(w => w.text), ['Harry', 'Kane', 'marcó']);
+});
+
+test('shorts: lo improvisado fuera del guion se conserva y lo no dicho se omite', () => {
+  const words = [W('Hola', 0, .3), W('amigos', .3, .7), W('Kane', 1, 1.3), W('marcó', 1.3, 1.7), W('goles', 1.7, 2)];
+  const { words: out } = core.alignToScript(words, 'Kane marcó cuarenta y cuatro goles');
+  assert.deepEqual(out.map(w => w.text), ['Hola', 'amigos', 'Kane', 'marcó', 'goles']);
+  // Si el guion no tiene nada que ver, se deja la transcripción tal cual.
+  const unrelated = core.alignToScript([W('uno', 0, 1), W('dos', 1, 2)], 'tres cuatro cinco');
+  assert.deepEqual(unrelated.words.map(w => w.text), ['uno', 'dos']);
+});
+
+test('shorts: tramos sin tiempos por palabra y frases inventadas por Whisper', () => {
+  const words = core.wordsFromChunks([{ text: ' Gol de Kane.', timestamp: [1, 2.2] }]);
+  assert.deepEqual(words.map(w => w.text), ['Gol', 'de', 'Kane.']);
+  assert.equal(words[0].start, 1);
+  assert.ok(Math.abs(words[2].end - 2.2) < 1e-9);
+  const cleaned = core.dropHallucinations([W('Gol.', 0, 1), W('Subtítulos', 1, 2), W('realizados', 2, 3), W('por', 3, 4), W('Amara.org', 4, 5)]);
+  assert.deepEqual(cleaned.map(w => w.text), ['Gol.']);
+});
+
+test('shorts: los subtítulos se agrupan en páginas cortas con la palabra activa', () => {
+  const words = [W('¿Sabías', 0, .4), W('que', .4, .5), W('Kane', .5, .9), W('marcó', .9, 1.2), W('44', 1.2, 1.5), W('goles?', 1.5, 2),
+    W('Increíble.', 3, 3.6)];
+  const pages = core.captionPages(words);
+  assert.deepEqual(pages.map(p => p.words.map(w => w.text).join(' ')), ['¿Sabías que Kane marcó', '44 goles?', 'Increíble.']);
+  assert.equal(pages[1].end, 2.5, 'se mantiene medio segundo tras la última palabra');
+  const at = core.captionAt(pages, 0.95);
+  assert.equal(at.page, pages[0]); assert.equal(at.active, 3);
+  assert.equal(core.captionAt(pages, 2.7), null);
+  assert.deepEqual(core.retimePage(pages[1], '44 GOLES').map(w => w.text), ['44', 'GOLES']);
+  const longer = core.retimePage(pages[1], 'cuarenta y cuatro goles');
+  assert.equal(longer.length, 4); assert.equal(longer[0].start, 1.2); assert.ok(Math.abs(longer[3].end - 2) < 1e-9);
+});
+
+test('shorts: el audio largo se parte en el punto más silencioso para Whisper', () => {
+  const samples = concat(tone(16), noise(0.6), tone(14));
+  const parts = core.splitForTranscription(samples, SR, 25, 12);
+  assert.equal(parts.length, 2);
+  assert.ok(parts[0].end > 16 && parts[0].end < 16.6, String(parts[0].end));
+  assert.equal(parts[1].end, samples.length / SR);
+  assert.deepEqual(core.splitForTranscription(tone(5), SR), [{ start: 0, end: 5 }]);
+});

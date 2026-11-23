@@ -48,6 +48,7 @@
     if (screen === 'record') return renderRecord();
     if (screen === 'process') return renderProcess();
     if (screen === 'done') return renderDone();
+    if (screen === 'captions') return renderCaptions();
   }
 
   /* ---------- Inicio ---------- */
@@ -97,6 +98,10 @@
       C.SCENES.map(key => '<label>' + C.SCENE_LABELS[key] + ' <small>(teleprompter)</small><textarea name="' + key + '" rows="' + (key === 'body' ? 6 : 3) + '">' + esc(p.script[key]) + '</textarea></label>').join('') +
       '<fieldset><legend>Al procesar</legend>' +
       check('cutSilences', 'Cortar silencios y pausas largas', p.options.cutSilences) +
+      check('captions', 'Subtítulos automáticos (Whisper)', p.options.captions) +
+      '<label class="inline">Calidad de subtítulos<select name="captionQuality">' +
+      Object.entries(ShortsWhisper.MODELS).map(([key, m]) => '<option value="' + key + '"' + ((p.options.captionQuality || 'base') === key ? ' selected' : '') + '>' + m.label + ' · descarga ' + m.size + ' la primera vez</option>').join('') +
+      '</select></label>' +
       check('stamp', 'Sello «Récord confirmado» al final', p.options.stamp) +
       check('logo', 'Logo de 11 Récords', p.options.logo) + '</fieldset>' +
       '<button class="primary big" type="submit">Grabar →</button></form></main>';
@@ -111,7 +116,8 @@
       e.preventDefault();
       p.title = form.title.value.trim();
       for (const key of C.SCENES) p.script[key] = form[key].value.trim();
-      for (const key of ['cutSilences', 'stamp', 'logo']) p.options[key] = form[key].checked;
+      for (const key of ['cutSilences', 'captions', 'stamp', 'logo']) p.options[key] = form[key].checked;
+      p.options.captionQuality = form.captionQuality.value;
       await S.save(p);
       S.persist();
       state.scene = C.SCENES.find(key => !p.takes[key]?.blob) || 'hook';
@@ -360,7 +366,8 @@
 
   /* ---------- Procesamiento ---------- */
 
-  const STEPS = [['analyze', 'Detectar voz y silencios'], ['audio', 'Limpiar la voz y ajustar el volumen'], ['video', 'Montar y exportar el video']];
+  const STEPS = [['analyze', 'Detectar voz y silencios'], ['audio', 'Limpiar la voz y ajustar el volumen'],
+    ['captions', 'Escribir los subtítulos'], ['video', 'Montar y exportar el video']];
   let controller = null;
 
   async function renderProcess() {
@@ -399,12 +406,14 @@
           status.textContent = message;
         }
       });
+      if (result.captions) p.captions = result.captions;
       const key = p.id + ':output:' + Date.now();
       await S.putBlob(key, result.blob);
       if (p.output?.blob) S.deleteBlob(p.output.blob).catch(() => {});
       p.output = {
         blob: key, type: result.mimeType, extension: result.extension, method: result.method, size: result.blob.size,
-        duration: result.stats.finalSeconds, removed: result.stats.removedSeconds, lufs: result.stats.lufs, at: new Date().toISOString()
+        duration: result.stats.finalSeconds, removed: result.stats.removedSeconds, lufs: result.stats.lufs,
+        captions: result.captions?.words?.length || 0, at: new Date().toISOString()
       };
       await S.save(p);
       keepAwake(false);
@@ -437,10 +446,12 @@
       '<dl class="facts"><div><dt>Duración</dt><dd>' + C.formatTime(p.output.duration) + '</dd></div>' +
       '<div><dt>Silencios quitados</dt><dd>' + (p.output.removed || 0).toFixed(1) + ' s</dd></div>' +
       '<div><dt>Volumen</dt><dd>' + (Number.isFinite(p.output.lufs) ? p.output.lufs.toFixed(1) + ' LUFS' : '—') + '</dd></div>' +
+      '<div><dt>Subtítulos</dt><dd>' + (p.output.captions ? p.output.captions + ' palabras' : 'No') + '</dd></div>' +
       '<div><dt>Archivo</dt><dd>' + esc((p.output.extension || 'mp4').toUpperCase()) + ' · ' + (p.output.size / 1048576).toFixed(1) + ' MB</dd></div></dl>' +
       (p.output.extension !== 'mp4' ? '<p class="note warn">Este navegador solo pudo crear un WebM. YouTube lo acepta; para TikTok o Instagram usa Chrome o Safari actualizados.</p>' : '') +
       '<div class="stack">' + (canShare ? '<button class="primary big" data-share>Compartir en TikTok, Instagram o YouTube</button>' : '') +
       '<a class="button ' + (canShare ? 'secondary' : 'primary big') + '" download="' + esc(name) + '" href="' + url + '">Descargar video</a>' +
+      (p.captions?.words?.length ? '<button class="secondary" data-captions>Corregir subtítulos</button>' : '') +
       '<button class="secondary" data-redo>Volver a grabar una escena</button>' +
       '<button class="secondary" data-reprocess>Procesar de nuevo</button>' +
       '<button class="secondary" data-new>＋ Nuevo Short</button></div></main>';
@@ -451,8 +462,31 @@
       catch (e) { if (e.name !== 'AbortError') toast('No se pudo compartir: ' + e.message, true); }
     };
     root.querySelector('[data-redo]').onclick = () => go('record');
+    const fix = root.querySelector('[data-captions]');
+    if (fix) fix.onclick = () => go('captions');
     root.querySelector('[data-reprocess]').onclick = () => go('process');
     root.querySelector('[data-new]').onclick = () => go('script', S.create());
+  }
+
+  /* ---------- Corregir subtítulos ---------- */
+
+  function renderCaptions() {
+    const p = state.project;
+    const pages = C.captionPages(p.captions?.words || []);
+    root.innerHTML = '<main class="page">' + header(true) + '<h1>Corregir subtítulos</h1>' +
+      '<p class="lead">Cambia el texto de cada frase. Los tiempos se conservan; deja una frase vacía para quitarla.</p>' +
+      '<form id="captions" class="stack">' + pages.map((page, i) =>
+        '<label class="caption-row"><small>' + C.formatTime(page.start) + '</small><input name="c' + i + '" autocomplete="off" value="' + esc(page.words.map(w => w.text).join(' ')) + '"></label>').join('') +
+      '<button class="primary big" type="submit">Guardar y volver a exportar</button></form></main>';
+    bindBack(() => go('done'));
+    root.querySelector('#captions').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const words = pages.flatMap((page, i) => C.retimePage(page, form['c' + i].value));
+      p.captions = { ...p.captions, words, edited: true, at: new Date().toISOString() };
+      await S.save(p);
+      go('process', p);
+    };
   }
 
   /* ---------- Arranque ---------- */

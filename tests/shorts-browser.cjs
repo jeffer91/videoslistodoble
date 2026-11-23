@@ -29,19 +29,27 @@ function makeMedia() {
   const video = path.join(work, 'camara.y4m');
   run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=720x1280:rate=30', '-t', '6', '-pix_fmt', 'yuv420p', video]);
   // Voz simulada: tonos (frases) separados por silencios largos y cortos.
+  if (process.env.SHORTS_VOICE_WAV) return { video, audio: path.resolve(process.env.SHORTS_VOICE_WAV) };
   const audio = path.join(work, 'voz.wav');
   const expr = "if(between(t,0.9,2.4)+between(t,3.6,4.6)+between(t,4.8,5.6),0.25*sin(2*PI*220*t)*(1+0.3*sin(2*PI*3*t)),0.0008*(random(0)-0.5))";
   run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc=exprs='" + expr + "':s=48000:d=7", '-ac', '1', audio]);
   return { video, audio };
 }
 
+// Modelo Whisper local opcional (carpeta con <organización>/<modelo>/...), servido en /models/.
+const modelDir = process.env.SHORTS_WHISPER_MODEL_DIR ? path.resolve(process.env.SHORTS_WHISPER_MODEL_DIR) : null;
+const modelId = process.env.SHORTS_WHISPER_MODEL || 'Xenova/whisper-tiny';
+const takeMs = Number(process.env.SHORTS_TAKE_MS || 6500);
+
 function serve(dir) {
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png',
-    '.wav': 'audio/wav', '.webmanifest': 'application/manifest+json' };
+    '.wav': 'audio/wav', '.webmanifest': 'application/manifest+json', '.json': 'application/json', '.wasm': 'application/wasm' };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    let file = path.join(dir, decodeURIComponent(url.pathname));
-    if (!file.startsWith(dir)) { res.writeHead(403); return res.end(); }
+    const fromModels = modelDir && url.pathname.startsWith('/models/');
+    const base = fromModels ? modelDir : dir;
+    let file = path.join(base, decodeURIComponent(fromModels ? url.pathname.slice('/models'.length) : url.pathname));
+    if (!file.startsWith(base)) { res.writeHead(403); return res.end(); }
     if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
     if (!fs.existsSync(file)) { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' });
@@ -83,13 +91,19 @@ async function savedOutput(page, which = 'output') {
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); if (m.type() === 'warning') console.log('[aviso]', m.text()); });
   try {
+    if (modelDir) {
+      await page.goto(origin + '/shorts/');
+      await page.evaluate(cfg => localStorage.setItem('shorts-11-whisper', JSON.stringify(cfg)),
+        { model: modelId, remoteHost: origin + '/models/', remotePathTemplate: '{model}/', device: 'wasm', wasmDtype: 'q8' });
+    }
     await page.goto(origin + '/');
     await page.getByRole('link', { name: /Crear un Short/ }).click();
     await page.getByRole('button', { name: /Nuevo Short/ }).click();
     await page.getByLabel('Título del récord').fill('Kane y sus 44 goles en una temporada');
-    await page.locator('textarea[name="paste"]').fill('GANCHO: ¿Sabías que Kane marcó 44 goles?\nDESARROLLO: Fue su primera temporada en el Bayern.\nY rompió el récord de Lewandowski.\nCIERRE: Síguenos para más récords.');
+    await page.locator('textarea[name="paste"]').fill('GANCHO: Harry Kane marcó cuarenta y cuatro goles en una sola temporada.\nDESARROLLO: Fue su primera temporada en el Bayern.\nY rompió el récord de Lewandowski.\nCIERRE: Síguenos para más récords.');
     await page.getByRole('button', { name: 'Repartir en escenas' }).click();
     assert.equal(await page.locator('textarea[name="closing"]').inputValue(), 'Síguenos para más récords.');
+    if (!modelDir) await page.getByLabel('Subtítulos automáticos (Whisper)').uncheck();
     await page.screenshot({ path: path.join(shots, '1-guion.png') });
     await page.getByRole('button', { name: /Grabar/ }).click();
 
@@ -97,7 +111,7 @@ async function savedOutput(page, which = 'output') {
     for (const scene of ['Gancho', 'Desarrollo', 'Cierre']) {
       await page.locator('[data-shutter]').click();
       await page.waitForSelector('.rec-badge:not([hidden])', { timeout: 6000 });
-      await page.waitForTimeout(6500);
+      await page.waitForTimeout(takeMs);
       if (scene === 'Gancho') await page.screenshot({ path: path.join(shots, '2-grabando.png') });
       await page.locator('[data-shutter]').click();
       await page.waitForSelector('.review:not([hidden])', { timeout: 8000 });
@@ -130,14 +144,41 @@ async function savedOutput(page, which = 'output') {
     // Cada toma dura ~6,5 s; con los silencios cortados cada escena queda en ~4,9 s.
     assert.ok(info.removed > 3, 'se quitaron silencios: ' + info.removed);
     assert.ok(Math.abs(info.lufs - (-14)) < 1.5, 'volumen ' + info.lufs);
+    const captions = await page.evaluate(() => window.ShortsApp.state.project.captions);
+    if (modelDir) {
+      console.log('Subtítulos (' + captions.mode + ', ' + captions.device + '):', captions.words.map(w => w.text).join(' '));
+      assert.ok(info.captions > 5, 'hay subtítulos: ' + info.captions);
+      assert.ok(captions.words.every((w, i, all) => w.start <= w.end && (i === 0 || all[i - 1].start <= w.start + 1e-6)), 'tiempos ordenados');
+      assert.ok(captions.words.every(w => w.end <= info.duration + 0.01), 'dentro del video');
+    } else {
+      assert.equal(info.captions, 0);
+    }
     const loud = spawnSync(ffmpeg, ['-hide_banner', '-nostats', '-i', file, '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8' }).stderr;
     const measured = Number((/I:\s+(-?[\d.]+) LUFS/.exec(loud.split('Summary:').pop()) || [])[1]);
     console.log('LUFS medido con ffmpeg:', measured);
     assert.ok(Math.abs(measured - (-14)) < 2, 'LUFS del archivo ' + measured);
-    for (const [name, at] of [['fotograma-gancho', 1], ['fotograma-cierre', info.duration - 2.2], ['fotograma-sello', info.duration - 0.3]]) {
+    const firstWord = captions?.words?.[2];
+    for (const [name, at] of [['fotograma-gancho', firstWord ? firstWord.start + 0.05 : 1], ['fotograma-cierre', info.duration - 2.2], ['fotograma-sello', info.duration - 0.3]]) {
       run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.max(0, at)), '-i', file, '-frames:v', '1', '-vf', 'scale=360:-1', path.join(shots, name + '.png')]);
     }
     fs.copyFileSync(file, path.join(shots, 'short-final.' + info.extension));
+
+    if (modelDir) {
+      await page.getByRole('button', { name: 'Corregir subtítulos' }).click();
+      const first = page.locator('#captions input').first();
+      await first.fill('¡GOLAZO DE KANE!');
+      await page.screenshot({ path: path.join(shots, '5-corregir.png') });
+      const started = Date.now();
+      await page.getByRole('button', { name: 'Guardar y volver a exportar' }).click();
+      await page.waitForSelector('text=¡Short listo!', { timeout: 240000 });
+      const edited = await page.evaluate(() => window.ShortsApp.state.project.captions);
+      assert.equal(edited.edited, true);
+      assert.deepEqual(edited.words.slice(0, 3).map(w => w.text), ['¡GOLAZO', 'DE', 'KANE!']);
+      console.log('Reexportado con subtítulos corregidos en ' + Math.round((Date.now() - started) / 1000) + ' s (sin volver a transcribir)');
+      const editedFile = path.join(work, 'corregido.mp4');
+      fs.writeFileSync(editedFile, await savedOutput(page));
+      run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(edited.words[1].start + 0.05), '-i', editedFile, '-frames:v', '1', '-vf', 'scale=360:-1', path.join(shots, 'fotograma-corregido.png')]);
+    }
 
     // Respaldo en tiempo real (navegadores sin WebCodecs).
     const realtime = await page.evaluate(async () => {
@@ -157,7 +198,7 @@ async function savedOutput(page, which = 'output') {
     assert.equal(realtime.method, 'realtime');
     assert.equal(rv.width, 1080); assert.equal(rv.height, 1920);
 
-    const relevant = errors.filter(e => !/favicon|serviceWorker/i.test(e));
+    const relevant = errors.filter(e => !/favicon|serviceWorker|onnxruntime|VerifyEachNodeIsAssignedToAnEp|session_state/i.test(e));
     assert.deepEqual(relevant, [], 'sin errores en la consola');
     console.log('Shorts web: prueba completa superada. Archivos en ' + shots);
   } catch (error) {

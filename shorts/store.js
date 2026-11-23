@@ -40,7 +40,7 @@ const ShortsStore = (() => {
     const now = new Date().toISOString();
     return {
       id: newId(), title: '', script: { hook: '', body: '', closing: '' }, takes: {},
-      options: { cutSilences: true, stamp: true, logo: true }, output: null,
+      options: { cutSilences: true, captions: true, captionQuality: 'base', stamp: true, logo: true }, output: null, captions: null,
       createdAt: now, updatedAt: now, ...fields
     };
   }

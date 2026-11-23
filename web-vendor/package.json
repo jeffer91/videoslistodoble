@@ -1,0 +1,8 @@
+{
+  "name": "11-records-web-vendor",
+  "private": true,
+  "description": "Librerías del navegador que se copian al sitio de GitHub Pages (subtítulos con Whisper en /shorts/). Se instalan con: npm ci --prefix web-vendor --ignore-scripts",
+  "dependencies": {
+    "@huggingface/transformers": "4.3.2"
+  }
+}

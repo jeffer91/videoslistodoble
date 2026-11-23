@@ -1,7 +1,7 @@
 'use strict';
 /* Permite abrir la app sin conexión. Red primero para recibir siempre la última versión. */
-const CACHE = 'shorts-11-v1';
-const SHELL = ['./', './index.html', './shorts.css', './core.js', './store.js', './audio.js', './compose.js', './export.js', './app.js',
+const CACHE = 'shorts-11-v2';
+const SHELL = ['./', './index.html', './shorts.css', './core.js', './store.js', './audio.js', './compose.js', './whisper.js', './whisper-worker.js', './export.js', './app.js',
   './manifest.webmanifest', './vendor/mediabunny.min.mjs', './media/logo-11-records.png', './media/sello-vertical.png', './media/sello.wav',
   './media/icon-192.png', './media/icon-512.png'];
 

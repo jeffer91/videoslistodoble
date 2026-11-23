@@ -14,3 +14,12 @@ npm pack mediabunny @mediabunny/aac-encoder
 # copia los dos archivos y repite el cambio de la importación
 sed -i 's#from"mediabunny"#from"./mediabunny.min.mjs"#g' shorts/vendor/mediabunny-aac-encoder.min.mjs
 ~~~
+
+## Whisper (subtítulos)
+
+Transformers.js y el motor ONNX **no** se guardan en el repositorio porque pesan unos 40 MB. Su versión está fijada en `web-vendor/package.json` y `web-vendor/package-lock.json`; el workflow de Pages los instala con `npm ci --prefix web-vendor --ignore-scripts` y `scripts/build-pages.cjs` copia a `site/shorts/vendor/transformers/`:
+
+- `transformers.min.js` (@huggingface/transformers 4.3.2, Apache-2.0)
+- `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` y `ort-wasm-simd-threaded.{mjs,wasm}` (onnxruntime-web, MIT). La segunda variante es para Safari anterior a 26 sin WebGPU.
+
+Los modelos (`onnx-community/whisper-base_timestamped` y `onnx-community/whisper-tiny_timestamped`) se descargan de Hugging Face la primera vez y quedan guardados en el navegador.

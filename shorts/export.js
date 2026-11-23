@@ -65,7 +65,10 @@ const ShortsExport = (() => {
     const sound = await ShortsAudio.soundtrack(parts, timeline, media.stamp);
     report('audio', 1, 'Voz a ' + (Number.isFinite(sound.lufs) ? sound.lufs.toFixed(1) : '—') + ' LUFS');
 
-    const composer = ShortsCompose.createComposer({ title: project.title, logo: media.logo, plate: media.plate, options });
+    const captions = options.captions === false ? null : await captionWords({ project, parts, timeline, options, report, signal });
+    const pages = captions?.words?.length ? C.captionPages(captions.words) : null;
+
+    const composer = ShortsCompose.createComposer({ title: project.title, logo: media.logo, plate: media.plate, options, captions: pages });
     const stats = { rawSeconds, finalSeconds: timeline.duration, removedSeconds: Math.max(0, rawSeconds - timeline.content), lufs: sound.lufs };
 
     let result = null;
@@ -80,7 +83,36 @@ const ShortsExport = (() => {
     }
     if (!result) result = await renderRealtime({ blobs, timeline, sound, composer, report, signal, preview });
     report('done', 1, 'Short listo');
-    return { ...result, stats, timeline };
+    return { ...result, stats, timeline, captions };
+  }
+
+  /** Identifica las tomas y el recorte usados, para reutilizar subtítulos ya hechos o corregidos. */
+  const captionSource = project => C.SCENES.map(k => project.takes?.[k]?.blob || '').join('|') + '|' + (project.options?.cutSilences !== false);
+
+  async function captionWords({ project, parts, timeline, options, report, signal }) {
+    const source = captionSource(project);
+    if (project.captions?.source === source && Array.isArray(project.captions.words)) {
+      report('captions', 1, project.captions.edited ? 'Usando tus subtítulos corregidos' : 'Usando los subtítulos ya escritos');
+      return project.captions;
+    }
+    try {
+      const scenes = parts.map(part => ({
+        key: part.key,
+        samples: C.joinRanges([part], SR),
+        offset: (timeline.segments.find(s => s.scene === part.key) || { outStart: 0 }).outStart,
+        script: project.script?.[part.key] || ''
+      }));
+      const result = await ShortsWhisper.transcribe(scenes, {
+        quality: options.captionQuality || 'base', signal,
+        onProgress: (progress, message) => report('captions', progress, message)
+      });
+      return { ...result, source, edited: false, at: new Date().toISOString() };
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      console.warn('Subtítulos no disponibles', error);
+      report('captions', 1, 'Sin subtítulos: ' + (error.message || error));
+      return null;
+    }
   }
 
   async function renderFast({ blobs, timeline, sound, composer, report, signal, preview }) {
@@ -257,5 +289,5 @@ const ShortsExport = (() => {
     return { blob: new Blob(chunks, { type }), mimeType: type, extension: type.includes('mp4') ? 'mp4' : 'webm', method: 'realtime' };
   }
 
-  return { render, fastPathAvailable, pickRecorderType };
+  return { render, fastPathAvailable, pickRecorderType, captionSource };
 })();

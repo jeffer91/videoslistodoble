@@ -7,6 +7,7 @@ on:
       - 'shorts/**'
       - 'assets/**'
       - 'scripts/build-pages.cjs'
+      - 'web-vendor/package*.json'
       - '.github/mobile-pages-index.html'
       - '.github/workflows/mobile-pages.yml'
   workflow_dispatch:
@@ -31,6 +32,8 @@ jobs:
       - uses: actions/configure-pages@v5
       - name: Probar la lógica de Shorts
         run: node --test tests/shorts-core.test.cjs
+      - name: Instalar las librerías del navegador (Whisper)
+        run: npm ci --prefix web-vendor --ignore-scripts --no-audit --no-fund
       - name: Preparar la página
         run: node scripts/build-pages.cjs site
       - uses: actions/upload-pages-artifact@v3

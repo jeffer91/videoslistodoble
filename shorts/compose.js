@@ -52,7 +52,57 @@ const ShortsCompose = (() => {
     return plate;
   }
 
-  function createComposer({ title, logo, plate, options = {} }) {
+  const CAPTION_FONT = size => '900 ' + size + 'px "Arial Black", "DM Sans", "Segoe UI", Roboto, Arial, sans-serif';
+  const CAPTION = { size: 70, lineHeight: 86, maxWidth: 920, centerY: 1500, active: '#ffd552', text: '#ffffff', stroke: '#000000' };
+
+  /** Subtítulo en mayúsculas con contorno; la palabra que se está diciendo va en dorado. */
+  function drawCaption(ctx, state) {
+    const { page, active, age } = state;
+    ctx.save();
+    ctx.font = CAPTION_FONT(CAPTION.size);
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    const words = page.words.map(w => w.text.toLocaleUpperCase('es'));
+    const space = ctx.measureText(' ').width;
+    const widths = words.map(w => ctx.measureText(w).width);
+    const lines = [];
+    let line = [], width = 0;
+    words.forEach((w, i) => {
+      const extra = line.length ? space + widths[i] : widths[i];
+      if (line.length && width + extra > CAPTION.maxWidth) { lines.push({ items: line, width }); line = []; width = 0; }
+      line.push(i); width += line.length > 1 ? space + widths[i] : widths[i];
+    });
+    if (line.length) lines.push({ items: line, width });
+    const pop = age < 0.12 ? 0.86 + 0.14 * (age / 0.12) : 1;
+    const top = CAPTION.centerY - (lines.length - 1) * CAPTION.lineHeight / 2;
+    ctx.translate(W / 2, CAPTION.centerY);
+    ctx.scale(pop, pop);
+    ctx.translate(-W / 2, -CAPTION.centerY);
+    lines.forEach((l, row) => {
+      const fit = Math.min(1, CAPTION.maxWidth / l.width);
+      let x = W / 2 - l.width * fit / 2;
+      const y = top + row * CAPTION.lineHeight;
+      for (const i of l.items) {
+        const isActive = i === active;
+        const scale = fit * (isActive ? 1.06 : 1);
+        const w = widths[i] * fit;
+        ctx.save();
+        ctx.translate(x + w / 2, y);
+        ctx.scale(scale, scale);
+        ctx.lineWidth = 12;
+        ctx.strokeStyle = CAPTION.stroke;
+        ctx.textAlign = 'center';
+        ctx.strokeText(words[i], 0, 4);
+        ctx.fillStyle = isActive ? CAPTION.active : CAPTION.text;
+        ctx.fillText(words[i], 0, 4);
+        ctx.restore();
+        x += w + space * fit;
+      }
+    });
+    ctx.restore();
+  }
+
+  function createComposer({ title, logo, plate, options = {}, captions = null }) {
     const titleImage = titlePlate(title);
     const small = canvas(54, 96);
     const smallCtx = small.getContext('2d');
@@ -116,6 +166,10 @@ const ShortsCompose = (() => {
         ctx.fillRect(0, 0, W, H);
       }
       if (titleImage) ctx.drawImage(titleImage, Math.round((W - titleImage.width) / 2), 160);
+      if (captions && info.stamp === null) {
+        const state = C.captionAt(captions, info.t);
+        if (state) drawCaption(ctx, state);
+      }
       ctx.fillStyle = STRIP;
       ctx.fillRect(0, H - 16, W, 16);
       if (logo && options.logo !== false) {
@@ -144,5 +198,5 @@ const ShortsCompose = (() => {
     });
   }
 
-  return { createComposer, loadImage, canvas, sizeOf };
+  return { createComposer, loadImage, canvas, sizeOf, drawCaption };
 })();

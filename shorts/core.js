@@ -407,6 +407,224 @@
     return lines;
   }
 
+  /* ---------- Subtítulos ---------- */
+
+  /** Forma comparable de una palabra: minúsculas, sin tildes ni signos. */
+  function normalizeWord(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ]/g, '');
+  }
+
+  function levenshtein(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const row = [i];
+      for (let j = 1; j <= b.length; j++) {
+        row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      prev = row;
+    }
+    return prev[b.length];
+  }
+
+  /** Parecido entre dos palabras normalizadas (0..1). */
+  function similarity(a, b) {
+    if (!a && !b) return 1;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+  }
+
+  /** Divide un texto en palabras (conservando la puntuación pegada a cada una). */
+  function scriptTokens(text) {
+    return String(text || '').replace(/[\r\n]+/g, ' ').split(/\s+/)
+      .map(t => t.replace(/^[*_#>"“”«»]+|[*_"“”«»]+$/g, '')).filter(t => normalizeWord(t));
+  }
+
+  /**
+   * Corrige la ortografía de la transcripción con el guion, conservando los tiempos de Whisper.
+   * Permite que Whisper parta una palabra en dos o junte dos en una, y deja intactas
+   * las frases improvisadas que no están en el guion.
+   */
+  function alignToScript(words, script) {
+    const tokens = scriptTokens(script);
+    const spoken = words.filter(w => normalizeWord(w.text));
+    if (!tokens.length || !spoken.length) return { words: spoken.map(w => ({ ...w })), corrected: 0, quality: 0 };
+    const a = spoken.map(w => normalizeWord(w.text));
+    const b = tokens.map(normalizeWord);
+    const n = a.length, m = b.length;
+    const INS = 1, DEL = 0.6;
+    const cost = Array.from({ length: n + 1 }, () => new Float64Array(m + 1).fill(Infinity));
+    const move = Array.from({ length: n + 1 }, () => new Uint8Array(m + 1));
+    cost[0][0] = 0;
+    const subCost = s => s >= 0.999 ? 0 : s >= 0.5 ? 1 - s : 1.6;
+    for (let i = 0; i <= n; i++) {
+      for (let j = 0; j <= m; j++) {
+        const base = cost[i][j];
+        if (base === Infinity) continue;
+        const relax = (ni, nj, value, kind) => {
+          if (ni <= n && nj <= m && base + value < cost[ni][nj]) { cost[ni][nj] = base + value; move[ni][nj] = kind; }
+        };
+        if (i < n && j < m) relax(i + 1, j + 1, subCost(similarity(a[i], b[j])), 1);
+        if (i < n) relax(i + 1, j, INS, 2);
+        if (j < m) relax(i, j + 1, DEL, 3);
+        if (i + 1 < n && j < m) relax(i + 2, j + 1, subCost(similarity(a[i] + a[i + 1], b[j])) + 0.1, 4);
+        if (i < n && j + 1 < m) relax(i + 1, j + 2, subCost(similarity(a[i], b[j] + b[j + 1])) + 0.1, 5);
+      }
+    }
+    const steps = [];
+    for (let i = n, j = m; i > 0 || j > 0;) {
+      const kind = move[i][j];
+      steps.push({ kind, i, j });
+      if (kind === 1) { i--; j--; } else if (kind === 2) i--; else if (kind === 3) j--; else if (kind === 4) { i -= 2; j--; } else { i--; j -= 2; }
+    }
+    steps.reverse();
+    const out = [];
+    let corrected = 0, strong = 0;
+    for (const { kind, i, j } of steps) {
+      if (kind === 1) {
+        const w = spoken[i - 1], s = similarity(a[i - 1], b[j - 1]);
+        if (s >= 0.8) strong++;
+        const useScript = s >= 0.5;
+        if (useScript && tokens[j - 1] !== w.text.trim()) corrected++;
+        out.push({ text: useScript ? tokens[j - 1] : w.text.trim(), start: w.start, end: w.end });
+      } else if (kind === 2) {
+        const w = spoken[i - 1];
+        out.push({ text: w.text.trim(), start: w.start, end: w.end });
+      } else if (kind === 4) {
+        const w1 = spoken[i - 2], w2 = spoken[i - 1];
+        const s = similarity(a[i - 2] + a[i - 1], b[j - 1]);
+        if (s >= 0.6) { strong += 2; corrected++; out.push({ text: tokens[j - 1], start: w1.start, end: w2.end }); }
+        else out.push({ text: w1.text.trim(), start: w1.start, end: w1.end }, { text: w2.text.trim(), start: w2.start, end: w2.end });
+      } else if (kind === 5) {
+        const w = spoken[i - 1];
+        const s = similarity(a[i - 1], b[j - 2] + b[j - 1]);
+        if (s >= 0.6) {
+          strong++; corrected++;
+          const l1 = b[j - 2].length, l2 = b[j - 1].length;
+          const mid = w.start + (w.end - w.start) * l1 / (l1 + l2);
+          out.push({ text: tokens[j - 2], start: w.start, end: mid }, { text: tokens[j - 1], start: mid, end: w.end });
+        } else out.push({ text: w.text.trim(), start: w.start, end: w.end });
+      }
+    }
+    const quality = strong / spoken.length;
+    if (quality < 0.35) return { words: spoken.map(w => ({ text: w.text.trim(), start: w.start, end: w.end })), corrected: 0, quality };
+    return { words: out, corrected, quality };
+  }
+
+  /** Convierte tramos con tiempo (sin tiempos por palabra) en palabras repartidas por longitud. */
+  function wordsFromChunks(chunks) {
+    const out = [];
+    for (const chunk of chunks || []) {
+      const [start, end] = chunk.timestamp || [];
+      const parts = String(chunk.text || '').trim().split(/\s+/).filter(Boolean);
+      if (!parts.length || !Number.isFinite(start)) continue;
+      const stop = Number.isFinite(end) && end > start ? end : start + parts.length * 0.35;
+      const total = parts.reduce((n, p) => n + p.length + 1, 0);
+      let cursor = start;
+      for (const part of parts) {
+        const span = (stop - start) * (part.length + 1) / total;
+        out.push({ text: part, start: cursor, end: cursor + span });
+        cursor += span;
+      }
+    }
+    return out;
+  }
+
+  const HALLUCINATIONS = [/amara\.org/i, /subt[ií]tulos (realizados|por la comunidad)/i, /gracias por ver(\s+el\s+video)?[.!]*$/i, /suscr[ií]bete al canal/i];
+  /** Quita frases que Whisper inventa a veces y que no están en el guion. */
+  function dropHallucinations(words, script = '') {
+    const text = words.map(w => w.text).join(' ');
+    const pattern = HALLUCINATIONS.find(p => p.test(text) && !p.test(script));
+    if (!pattern) return words;
+    const sentences = [];
+    let current = [];
+    for (const w of words) { current.push(w); if (/[.!?]$/.test(w.text)) { sentences.push(current); current = []; } }
+    if (current.length) sentences.push(current);
+    return sentences.filter(s => !HALLUCINATIONS.some(p => p.test(s.map(w => w.text).join(' ')) && !p.test(script))).flat();
+  }
+
+  /**
+   * Agrupa las palabras en «páginas» cortas de subtítulos.
+   * Corta tras signos de puntuación, en pausas y al llegar al máximo de palabras o letras.
+   */
+  function captionPages(words, options = {}) {
+    const maxWords = options.maxWords ?? 4;
+    const maxChars = options.maxChars ?? 22;
+    const gap = options.gap ?? 0.4;
+    const hold = options.hold ?? 0.5;
+    const pages = [];
+    let group = [];
+    const flush = () => { if (group.length) pages.push({ words: group }); group = []; };
+    for (const word of words) {
+      const text = String(word.text || '').trim();
+      if (!text) continue;
+      const last = group[group.length - 1];
+      const chars = group.reduce((n, w) => n + w.text.length + 1, text.length);
+      if (last && (group.length >= maxWords || chars > maxChars || word.start - last.end > gap || /[.!?;:,]$/.test(last.text))) flush();
+      group.push({ text, start: word.start, end: Math.max(word.end, word.start + 0.05) });
+    }
+    flush();
+    pages.forEach((page, i) => {
+      page.start = page.words[0].start;
+      const lastEnd = page.words[page.words.length - 1].end;
+      const next = pages[i + 1];
+      page.end = next ? Math.max(lastEnd, Math.min(next.words[0].start, lastEnd + hold)) : lastEnd + hold;
+    });
+    return pages;
+  }
+
+  /** Subtítulo visible en el instante t: página, palabra activa y tiempo desde que apareció. */
+  function captionAt(pages, t) {
+    if (!pages?.length) return null;
+    let lo = 0, hi = pages.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (pages[mid].start <= t) lo = mid; else hi = mid - 1; }
+    const page = pages[lo];
+    if (t < page.start || t >= page.end) return null;
+    let active = -1;
+    page.words.forEach((w, i) => { if (t >= w.start) active = i; });
+    return { page, active, age: t - page.start };
+  }
+
+  /** Cambia el texto de una página repartiendo su tiempo entre las palabras nuevas. */
+  function retimePage(page, text) {
+    const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return [];
+    const start = page.words[0].start;
+    const end = page.words[page.words.length - 1].end;
+    if (parts.length === page.words.length) return parts.map((p, i) => ({ ...page.words[i], text: p }));
+    const total = parts.reduce((n, p) => n + p.length + 1, 0);
+    let cursor = start;
+    return parts.map(p => {
+      const span = (end - start) * (p.length + 1) / total;
+      const word = { text: p, start: cursor, end: cursor + span };
+      cursor += span;
+      return word;
+    });
+  }
+
+  /**
+   * Trozos de como mucho maxSeconds para Whisper, cortando en el punto más silencioso
+   * a partir de minSeconds. Devuelve [{start,end}] en segundos.
+   */
+  function splitForTranscription(samples, sampleRate, maxSeconds = 25, minSeconds = 12) {
+    const duration = samples.length / sampleRate;
+    if (duration <= maxSeconds) return duration > 0 ? [{ start: 0, end: duration }] : [];
+    const { levels, window } = envelope(samples, sampleRate, 0.02);
+    const parts = [];
+    let start = 0;
+    while (duration - start > maxSeconds) {
+      const from = Math.ceil((start + minSeconds) / window), to = Math.floor((start + maxSeconds) / window);
+      let best = to, quietest = Infinity;
+      for (let i = from; i <= to && i < levels.length; i++) if (levels[i] < quietest) { quietest = levels[i]; best = i; }
+      const cut = best * window;
+      parts.push({ start, end: cut });
+      start = cut;
+    }
+    parts.push({ start, end: duration });
+    return parts;
+  }
+
   function formatTime(seconds) {
     const s = Math.max(0, Math.round(seconds));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -422,6 +640,7 @@
     SCENES, SCENE_LABELS, WIDTH, HEIGHT, FPS, SAMPLE_RATE, STAMP_SECONDS, TARGET_LUFS, PEAK_CEILING_DB,
     clamp, dbToGain, gainToDb, parseScript, mixToMono, envelope, detectSpeech, totalLength, joinRanges,
     kWeight, loudness, peak, limit, normalizeVoice, mixAt, buildTimeline, locate, coverCrop, presenterRect,
-    logoPosition, punchZoom, flash, stampDrop, wrapLines, formatTime, fileName
+    logoPosition, punchZoom, flash, stampDrop, wrapLines, formatTime, fileName,
+    normalizeWord, similarity, scriptTokens, alignToScript, wordsFromChunks, dropHallucinations, captionPages, captionAt, retimePage, splitForTranscription
   };
 });
