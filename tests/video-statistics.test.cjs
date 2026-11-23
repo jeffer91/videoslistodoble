@@ -75,6 +75,35 @@ test('Instagram resume rechazos de todas las métricas cuando Meta devuelve 100'
  assert.equal(pages[0].warning.split('HTTP 400').length,2,'Un único detalle de diagnóstico');
 });
 
+test('Instagram: Reel anterior a conversión profesional no reintenta Insights; Reel nuevo sí',async()=>{
+ const requests={old:0,new:0};
+ const request=async(url)=>{
+   if(url.endsWith('/media'))return {data:[
+     {id:'111',caption:'Reel anterior',media_type:'VIDEO',media_product_type:'REELS',like_count:5,comments_count:2},
+     {id:'222',caption:'Reel reciente',media_type:'VIDEO',media_product_type:'REELS',like_count:7,comments_count:1}
+   ]};
+   if(url.endsWith('/111/insights')){
+     requests.old++;
+     throw Error('La plataforma respondió HTTP 400 · 100 (subcódigo 2108006) · Invalid parameter');
+   }
+   if(url.endsWith('/222/insights')){
+     requests.new++;
+     return {data:[{name:'views',total_value:{value:35}}]};
+   }
+   throw Error('Ruta inesperada: '+url);
+ };
+ const pages=await collect('instagram',request);
+ assert.equal(requests.old,1,'No debe repetir Insights históricos del Reel anterior');
+ assert.equal(requests.new,1,'El Reel nuevo sí debe consultar Insights');
+ assert.equal(pages[0].videos.length,2,'Conserva ambos Reels en el catálogo');
+ assert.equal(pages[0].videos[0].metrics.likes,5);
+ assert.equal(pages[0].videos[0].metrics.comments,2);
+ assert.equal(pages[0].videos[0].metrics.views,undefined,'No inventar 0 vistas');
+ assert.equal(pages[0].videos[1].metrics.views,35);
+ assert.match(pages[0].warning,/antes de la conversión/);
+ assert.doesNotMatch(pages[0].warning,/instagram_manage_insights/);
+});
+
 test('Ayrshare conserva estadísticas de videos publicados fuera de Studio',async()=>{
  const pages=await collect('tiktok',async()=>({posts:[{id:'123',created:'2025-01-01',videoViews:42,reach:32}],meta:{pagination:{hasMore:false}}}),'ayrshare');
  assert.equal(pages[0].videos[0].metrics.reach,32);
