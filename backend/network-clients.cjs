@@ -297,6 +297,9 @@ async function verifyAccount(name, account) {
     return {id:String(page.id),label:page.name};
   }
   if (name === 'instagram' && instagramLogin(account)) {
+    if (/^EAA/.test(String(token))) {
+      throw Error('Este token es de Meta Unified Login. Usa la opción Token unificado de Meta en Estadísticas → Conexiones.');
+    }
     const result = await request(IG_LOGIN + '/me', { token, query: { fields: 'user_id,username,followers_count,account_type' } });
     const id = String(result.user_id || result.id || '');
     if (!result.username || !/^\d{1,40}$/.test(id)) throw Error('El token no corresponde a una cuenta profesional de Instagram');
@@ -306,7 +309,7 @@ async function verifyAccount(name, account) {
     return { id, label: '@' + result.username, followers: valueNumber(result.followers_count), provider: 'instagram-login' };
   }
   if (name === 'instagram') {
-    const result = await request(META + '/' + numericId(account.profileId), { token, query: { fields: 'id,username,followers_count' } });
+    const result = await request(META + '/' + numericId(account.profileId), { token, query: { fields: 'id,username,followers_count,account_type' } });
     if (!result.username) throw Error('No se encontró el perfil profesional de Instagram indicado');
     return { id: String(result.id), label: '@' + result.username, followers: valueNumber(result.followers_count) };
   }
