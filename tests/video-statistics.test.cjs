@@ -25,6 +25,43 @@ test('Meta omite fotos en Instagram y elimina duplicados entre videos y Reels de
  assert.deepEqual((await collect('instagram',get)).flatMap(p=>p.videos.map(v=>v.externalId)),['2']);
  const rows=(await collect('facebook',get)).flatMap(p=>p.videos);assert.equal(rows.length,1);assert.equal(rows[0].metrics.views,5);
 });
+test('Instagram evita consultas repetidas cuando Meta deniega Insights con código 10',async()=>{
+ let insightCalls=0;
+ const request=async(url)=>{
+   if(url.endsWith('/media'))return {data:[
+     {id:'111',media_type:'VIDEO',media_product_type:'REELS',like_count:2,comments_count:1},
+     {id:'222',media_type:'VIDEO',media_product_type:'REELS',like_count:3,comments_count:0}
+   ]};
+   if(url.endsWith('/insights')){
+     insightCalls++;
+     throw Error('La plataforma respondió HTTP 400 · 10');
+   }
+   throw Error('Solicitud inesperada '+url);
+ };
+ const pages=await collect('instagram',request);
+ assert.equal(insightCalls,1,'No debe solicitar otra vez las métricas bloqueadas');
+ assert.equal(pages[0].videos.length,2);
+ assert.equal(pages[0].videos[0].metrics.likes,2);
+ assert.equal(pages[0].videos[1].metrics.comments,0);
+ assert.match(pages[0].warning,/instagram_manage_insights/);
+});
+
+test('Instagram conserva la consulta por métrica ante errores diferentes a permisos',async()=>{
+ let insightCalls=0;
+ const request=async(url,options)=>{
+   if(url.endsWith('/media'))return {data:[{id:'111',media_type:'VIDEO',media_product_type:'REELS'}]};
+   if(url.endsWith('/insights')){
+     insightCalls++;
+     if(options.query.metric.includes(','))throw Error('Metric incompatibility HTTP 400 · 100');
+     return {data:[{name:options.query.metric,total_value:{value:10}}]};
+   }
+   throw Error('Solicitud inesperada '+url);
+ };
+ const pages=await collect('instagram',request);
+ assert.ok(insightCalls>1,'Con otros errores puede hacer consultas individuales');
+ assert.equal(pages[0].videos[0].metrics.views,10);
+});
+
 test('Ayrshare conserva estadísticas de videos publicados fuera de Studio',async()=>{
  const pages=await collect('tiktok',async()=>({posts:[{id:'123',created:'2025-01-01',videoViews:42,reach:32}],meta:{pagination:{hasMore:false}}}),'ayrshare');
  assert.equal(pages[0].videos[0].metrics.reach,32);
