@@ -160,7 +160,7 @@
       check('ps-images', st.autopilot.images, 'Buscar imágenes: primero en tu biblioteca, luego en Wikimedia Commons') +
       check('ps-export', st.autopilot.export, 'Exportar el MP4 final cuando todas las secciones estén listas') +
       check('ps-publish', st.autopilot.publish, 'Publicar en YouTube automáticamente tras la revisión final') +
-      '<h3>Grabación</h3>' + check('ps-continuous', st.recording.continuous, 'Grabación seguida: guarda la toma y pasa a la siguiente sección tras 3 s') +
+      '<h3>Grabación</h3>' + check('ps-continuous', st.recording.continuous, 'Grabación seguida: cuando la grabación se detiene sola, guarda la toma y pasa a la siguiente sección tras 3 s (con «Detener» siempre revisas)') +
       check('ps-autostop', st.recording.autoStop, 'Detener sola al terminar el texto y dejar de hablar') +
       '<h3>Llamados a la acción</h3>' + check('ps-cta', st.cta.enabled, 'Mostrar «Suscríbete», «Dale like» y la pregunta para comentar') +
       check('ps-reminders', st.cta.reminders, 'Recordatorios automáticos hacia el minuto 1:30 y al final') +
@@ -252,7 +252,7 @@
       '<div class="dl-stage-empty" id="dl-stage-empty"><p>La cámara se mostrará en formato cuadrado 1:1, centrada.</p>' + btn('camera-on', 'Activar cámara y micrófono') + '</div></div>' +
       '<div class="dl-controls"><div class="dl-row wrap" id="dl-live">' + btn('rec-start', '● Iniciar grabación', 'dl-rec', 'disabled') + btn('rec-stop', '■ Detener', 'danger', 'disabled') +
       '<span class="dl-mic"><meter id="dl-meter" min="0" max="60" low="25" high="55" optimum="45"></meter><small id="dl-meter-text">Micrófono</small></span><small id="dl-write"></small></div>' +
-      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-retry', 'Descartar y repetir', 'secondary') + '</div>' +
+      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-keep-next', 'Guardar y seguir', 'secondary', 'title="Guarda la toma y graba la siguiente sección tras 3 s"') + btn('rec-retry', 'Descartar y repetir', 'secondary') + '</div>' +
       (s.take ? '<p class="dl-note">Una sola toma por sección. Si grabas de nuevo, la toma actual se conserva hasta que la nueva quede verificada en el disco.</p>' : '') +
       '<div class="dl-two tight"><label class="dl-field">Cámara<select id="dl-cam"></select></label><label class="dl-field">Micrófono<select id="dl-mic"></select></label></div></div>' +
       (s.take ? '<details class="dl-panel"><summary>Ver la toma activa</summary><video controls preload="metadata" src="' + fileUrl(s.take.master || s.take.original) + '"></video></details>' : '') + '</section>' +
@@ -374,6 +374,7 @@
   const Recorder = (function () {
     let stream = null, recorder = null, draw = 0, meter = 0, audioCtx = null, take = null, writes = Promise.resolve(), sequence = 0, writeError = null, started = 0, inspecting = false;
     let lastVoice = 0, watcher = 0, countdown = 0, session = true;
+    const MIN_AUTO_SAVE = 3;
 
     function busy() { return Boolean(recorder); }
 
@@ -507,11 +508,13 @@
       clearInterval(watcher);
       watcher = setInterval(() => {
         if (!recorder || !S.project.settings.recording.autoStop) return;
-        if (Date.now() - started > 4000 && DirectPrompter.atEnd() && performance.now() - lastVoice > 2000) { clearInterval(watcher); stop().catch(e => toast(e.message, true)); }
+        if (Date.now() - started > 4000 && DirectPrompter.atEnd() && performance.now() - lastVoice > 2000) { clearInterval(watcher); stop(true).catch(e => toast(e.message, true)); }
       }, 250);
     }
 
-    async function stop() {
+    // auto = true solo cuando se detiene sola (texto terminado y silencio).
+    // «Detener» pulsado a mano siempre deja la toma en revisión.
+    async function stop(auto = false) {
       const active = recorder;
       if (!active) return;
       inspecting = true;
@@ -526,8 +529,9 @@
       DirectPrompter.stop();
       q('#dl-rec-badge').hidden = true;
       q('[data-dl="rec-stop"]').disabled = true;
+      let info = null;
       try {
-        const info = await call('take.inspect', { id: S.project.id, takeId: take.id });
+        info = await call('take.inspect', { id: S.project.id, takeId: take.id });
         if (!info.ok) throw Error('La toma no tiene suficiente imagen y sonido. Repite la grabación.');
         q('#dl-live').hidden = true;
         q('#dl-reviewbar').hidden = false;
@@ -537,8 +541,8 @@
         review.hidden = false;
         review.src = 'records://direct/take/' + encodeURIComponent(S.project.id) + '/' + encodeURIComponent(take.id);
       } finally { inspecting = false; }
-      // Grabación seguida: se guarda sola y continúa con la siguiente sección.
-      if (S.project.settings.recording.continuous && session && take) await keep(true);
+      // Grabación seguida: solo tras la parada automática y con una toma de al menos 3 s.
+      if (auto && S.project.settings.recording.continuous && session && take && info?.duration >= MIN_AUTO_SAVE) await keep(true);
     }
 
     function cancelSession() {
@@ -585,6 +589,8 @@
       if (chained && next) Recorder.next();
     }
 
+    function keepAndNext() { session = true; return keep(true); }
+
     async function retry() {
       if (take) await call('take.discard', { id: S.project.id, takeId: take.id }).catch(() => {});
       take = null;
@@ -609,7 +615,7 @@
       take = null;
     }
 
-    return { mountStage, open, start, stop, keep, retry, close, busy, next, cancelSession, stream: () => stream };
+    return { mountStage, open, start, stop, keep, keepAndNext, retry, close, busy, next, cancelSession, stream: () => stream };
   })();
 
   // ── Eventos ───────────────────────────────────────────────────────────────
@@ -684,6 +690,7 @@
     if (action === 'rec-start') return Recorder.start();
     if (action === 'rec-stop') return Recorder.stop();
     if (action === 'rec-keep') return Recorder.keep();
+    if (action === 'rec-keep-next') return Recorder.keepAndNext();
     if (action === 'rec-retry') return Recorder.retry();
     if (action === 'recover-use') { const r = await call('take.commit', { id: S.project.id, takeId: id }); setProject(r.project); S.pending = await call('take.pending', { id: S.project.id }); toast('Toma recuperada'); return render(); }
     if (action === 'recover-discard') { await call('take.discard', { id: S.project.id, takeId: id }); S.pending = await call('take.pending', { id: S.project.id }); return render(); }

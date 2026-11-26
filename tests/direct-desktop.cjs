@@ -59,7 +59,7 @@ async function run() {
     const texts = await page.locator('.dl-script-sec textarea').evaluateAll(list => list.map(i => i.value).join('\n'));
     assert.ok(!texts.includes('━') && !texts.includes('SECCIÓN 0'), 'Separadores y encabezados fuera del texto narrable');
 
-    // Grabación seguida: al detener, la toma se guarda y tras 3 s empieza la siguiente sección.
+    // «Detener» a mano siempre deja la toma en revisión; «Guardar y seguir» la guarda y tras 3 s graba la siguiente.
     // (El piloto automático se prueba en tests/direct-auto.test.cjs; aquí se desactiva para no exportar dos veces.)
     await page.evaluate(() => window.DirectLong.call('settings.save', { id: window.DirectLong.state.project.id,
       settings: { autopilot: { enabled: false }, recording: { continuous: true, autoStop: false } } }).then(p => { window.DirectLong.state.project = p; }));
@@ -75,6 +75,11 @@ async function run() {
       await page.getByText(/Guardando en disco/).waitFor({ timeout: 25000 });
       await page.waitForTimeout(2600);
       await page.getByRole('button', { name: '■ Detener' }).click();
+      await page.locator('#dl-reviewbar').waitFor({ state: 'visible', timeout: 30000 });
+      await page.waitForTimeout(3500);
+      assert.equal(await page.evaluate(() => window.DirectLong.state.project.sections.filter(s => s.take).length), index, 'Detener no guarda la toma por su cuenta');
+      assert.equal(await page.locator('#dl-countdown').count(), 0, 'Detener no arranca la siguiente sección');
+      await page.getByRole('button', { name: 'Guardar y seguir' }).click();
       await page.waitForFunction(n => window.DirectLong.state.project.sections.filter(s => s.take).length === n, index + 1, { timeout: 30000 });
       if (index < 2) await page.locator('#dl-countdown').waitFor();
     }
