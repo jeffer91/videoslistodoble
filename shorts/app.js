@@ -3,6 +3,7 @@
 (() => {
   const C = ShortsCore;
   const S = ShortsStore;
+  const FX = ShortsEffects;
   const root = document.getElementById('app');
   const BASE = new URL('./', location.href).href;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -104,6 +105,9 @@
       '</select></label>' +
       check('stamp', 'Sello «Récord confirmado» al final', p.options.stamp) +
       check('logo', 'Logo de 11 Récords', p.options.logo) + '</fieldset>' +
+      effectsFieldset(FX.settings(p.options)) + marksHelp() +
+      '<section class="photos"><h2>Fotos de las marcas</h2><p class="note">Para <code>[IMAGEN]</code>, <code>[JUGADOR]</code> y <code>[VS]</code>. Se buscan solas en Wikimedia Commons (licencias libres) al procesar; aquí puedes buscarlas antes o subir las tuyas.</p>' +
+      '<div data-photos></div><button type="button" class="secondary" data-photos-find>Buscar las fotos que faltan</button></section>' +
       '<button class="primary big" type="submit">Grabar →</button></form></main>';
     bindBack(() => go('home'));
     const form = root.querySelector('#script');
@@ -111,19 +115,144 @@
       const parsed = C.parseScript(form.paste.value);
       for (const key of C.SCENES) if (parsed[key]) form[key].value = parsed[key];
       toast('Guion repartido en gancho, desarrollo y cierre');
+      renderPhotos(form);
     };
+    root.querySelector('[data-copy-format]').onclick = () => copyFormat(form.title.value.trim());
+    for (const key of C.SCENES) form[key].addEventListener('change', () => renderPhotos(form));
+    root.querySelector('[data-photos-find]').onclick = async e => {
+      const button = e.currentTarget;
+      const queries = currentQueries(form).filter(q => { const x = ShortsImages.entry(p, q); return !x || x.source === 'ninguna'; });
+      if (!queries.length) return toast('No faltan fotos');
+      button.disabled = true;
+      let found = 0;
+      for (const q of queries) {
+        button.textContent = 'Buscando: ' + q + '…';
+        try { if (await ShortsImages.find(p, q)) found++; } catch (error) { toast('Sin conexión con Commons: ' + error.message, true); break; }
+      }
+      await S.save(p);
+      button.disabled = false; button.textContent = 'Buscar las fotos que faltan';
+      toast(found + ' de ' + queries.length + ' fotos encontradas');
+      renderPhotos(form);
+    };
+    renderPhotos(form);
     form.onsubmit = async e => {
       e.preventDefault();
       p.title = form.title.value.trim();
       for (const key of C.SCENES) p.script[key] = form[key].value.trim();
-      for (const key of ['cutSilences', 'captions', 'stamp', 'logo']) p.options[key] = form[key].checked;
+      for (const key of ['cutSilences', 'captions', 'stamp', 'logo', ...FX_CHECKS.map(c => c[0])]) p.options[key] = form[key].checked;
       p.options.captionQuality = form.captionQuality.value;
+      p.options.captionStyle = form.captionStyle.value;
+      p.options.titleStyle = form.titleStyle.value;
       await S.save(p);
       S.persist();
       state.scene = C.SCENES.find(key => !p.takes[key]?.blob) || 'hook';
       go('record', p);
     };
   }
+  const FX_CHECKS = [
+    ['effects', 'Efectos y marcas del guion (pantalla dividida, contador, ficha, VS, mapa…)'],
+    ['zoom', 'Zoom de énfasis automático'],
+    ['sfx', 'Sonidos sincronizados (pop, whoosh, golpe)'],
+    ['progress', 'Barra de progreso arriba'],
+    ['grade', 'Color uniforme (más contraste y saturación)'],
+    ['recHook', 'Visor «REC» durante el gancho'],
+    ['loop', 'Final en bucle (funde con el primer fotograma)']
+  ];
+
+  function effectsFieldset(o) {
+    const select = (name, label, options, value) => '<label class="inline">' + label + '<select name="' + name + '">' +
+      options.map(([k, v]) => '<option value="' + k + '"' + (value === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>';
+    return '<fieldset><legend>Efectos</legend>' + FX_CHECKS.map(([k, label]) => '<label class="check"><input type="checkbox" name="' + k + '"' + (o[k] ? ' checked' : '') + '> ' + label + '</label>').join('') +
+      select('captionStyle', 'Subtítulos', [['limpio', 'Limpios: 1-3 palabras en el centro'], ['impacto', 'Impacto: mayúsculas con contorno']], o.captionStyle) +
+      select('titleStyle', 'Titular', [['caja', 'Caja blanca'], ['oscuro', 'Oscuro en mayúsculas']], o.titleStyle) + '</fieldset>';
+  }
+
+  const MARKS = [
+    ['[IMAGEN: Estadio Azteca]', 'pantalla dividida con esa foto arriba'],
+    ['[TITULAR: Lo que nadie vio]', 'titular en caja blanca (en vez del título)'],
+    ['[DATO: 44 goles]', 'contador animado de la cifra'],
+    ['[JUGADOR: Kane | Bayern | Inglaterra | 32 años]', 'ficha de jugador con foto'],
+    ['[VS: Kane 44 goles | Haaland 38 goles]', 'comparación con dos fotos'],
+    ['[MARCADOR: México 2-1 Brasil | Final 2005]', 'marcador de partido'],
+    ['[MAPA: México]', 'mapa que se acerca al país'],
+    ['[PASO: Gancho visual]', 'insignia numerada ① ② ③'],
+    ['[TEXTO: ¿Viste este | movimiento de cámara?]', 'texto fino + grueso'],
+    ['[REC]', 'visor de cámara hasta el final de la escena'],
+    ['[ZOOM]', 'acercamiento fuerte'],
+    ['[FLECHA: este es él]', 'flecha y círculo señalando'],
+    ['[TEMBLOR]', 'sacudida de cámara']
+  ];
+
+  function marksHelp() {
+    return '<details class="marks"><summary>Marcas de efectos para el guion</summary><p class="note">Escríbelas dentro del texto, justo donde deben ocurrir. El teleprompter no las muestra.</p><ul>' +
+      MARKS.map(([code, text]) => '<li><code>' + esc(code) + '</code> ' + esc(text) + '</li>').join('') + '</ul>' +
+      '<button type="button" class="secondary" data-copy-format>📋 Copiar formato del guion para Claude</button></details>';
+  }
+
+  function formatTemplate(topic) {
+    return ['Escribe el guion de un Short vertical (30-50 segundos) para el canal de fútbol 11 Récords sobre: ' + (topic || '<TEMA>') + '.', '',
+      'FORMATO OBLIGATORIO (se importa solo):', 'GANCHO: 1-2 frases que atrapen en 3 segundos.', 'DESARROLLO: el récord con datos concretos, frases cortas.', 'CIERRE: una frase final y la invitación a seguir el canal.', '',
+      'Responde SOLO con el guion, sin markdown ni comentarios.', '',
+      'Añade estas MARCAS entre corchetes dentro del texto, justo donde deben ocurrir (no se leen en voz alta):',
+      ...MARKS.map(([code, text]) => code + ' → ' + text),
+      'Usa como máximo una marca de panel ([IMAGEN], [DATO], [JUGADOR], [VS], [MARCADOR], [MAPA]) cada 3-4 segundos y al menos un [DATO].', '',
+      'EJEMPLO:', 'GANCHO: [REC] ¿Sabías que [DATO: 44 goles] Harry Kane marcó cuarenta y cuatro goles en una temporada?',
+      'DESARROLLO: [PASO: El fichaje] [IMAGEN: Allianz Arena] Llegó al Bayern en 2023. [VS: Kane 44 goles | Lewandowski 41 goles] Y superó a Lewandowski.',
+      'CIERRE: [TEXTO: ¿Lo viste | venir?] Síguenos para más récords.'].join('\n');
+  }
+
+  async function copyFormat(topic) {
+    const text = formatTemplate(topic);
+    try { await navigator.clipboard.writeText(text); toast('Formato copiado. Pégalo en Claude.'); }
+    catch {
+      const box = document.createElement('textarea');
+      box.value = text; box.rows = 12; box.readOnly = true; box.className = 'copy-box';
+      root.querySelector('details.marks')?.append(box);
+      box.select();
+      toast('Selecciona el texto y cópialo', true);
+    }
+  }
+
+  function currentQueries(form) {
+    const script = {};
+    for (const key of C.SCENES) script[key] = form[key].value;
+    return FX.photoQueries(script);
+  }
+
+  async function renderPhotos(form) {
+    const p = state.project;
+    const box = root.querySelector('[data-photos]');
+    if (!box) return;
+    const queries = currentQueries(form);
+    root.querySelector('[data-photos-find]').hidden = !queries.length;
+    if (!queries.length) { box.innerHTML = '<p class="note">Aún no hay marcas que necesiten foto.</p>'; return; }
+    const label = e => !e ? 'Se buscará al procesar' : e.source === 'commons' ? 'Wikimedia Commons' : e.source === 'propia' ? 'Foto propia' : e.source === 'ninguna' ? 'No encontrada: sube una' : 'Sin foto (se muestra el texto)';
+    const rows = await Promise.all(queries.map(async q => {
+      const e = ShortsImages.entry(p, q);
+      const blob = e?.blob ? await S.getBlob(e.blob).catch(() => null) : null;
+      const thumb = blob ? '<img alt="" src="' + objectUrl(blob) + '">' : '<span class="thumb-empty">?</span>';
+      return '<li class="photo-row">' + thumb + '<div><strong>' + esc(q) + '</strong><small>' + esc(label(e)) + '</small>' + (e?.credit ? '<small class="credit">' + esc(e.credit) + '</small>' : '') + '</div>' +
+        '<div class="photo-actions"><button type="button" class="secondary" data-photo-find="' + esc(q) + '">Buscar</button>' +
+        '<label class="button secondary">Subir<input type="file" accept="image/*" hidden data-photo-upload="' + esc(q) + '"></label>' +
+        (e?.blob ? '<button type="button" class="secondary" data-photo-remove="' + esc(q) + '">Quitar</button>' : '') + '</div></li>';
+    }));
+    box.innerHTML = '<ul class="photo-list">' + rows.join('') + '</ul>';
+    box.querySelectorAll('[data-photo-find]').forEach(b => b.onclick = async () => {
+      b.disabled = true; b.textContent = '…';
+      try { const ok = await ShortsImages.find(p, b.dataset.photoFind); toast(ok ? 'Foto encontrada' : 'No hay foto libre para «' + b.dataset.photoFind + '». Sube una.', !ok); }
+      catch (error) { toast('Sin conexión con Commons: ' + error.message, true); }
+      await S.save(p); renderPhotos(form);
+    });
+    box.querySelectorAll('[data-photo-upload]').forEach(input => input.onchange = async () => {
+      try { await ShortsImages.upload(p, input.dataset.photoUpload, input.files[0]); await S.save(p); toast('Foto guardada'); }
+      catch (error) { toast(error.message, true); }
+      renderPhotos(form);
+    });
+    box.querySelectorAll('[data-photo-remove]').forEach(b => b.onclick = async () => {
+      ShortsImages.remove(p, b.dataset.photoRemove); await S.save(p); renderPhotos(form);
+    });
+  }
+
   const check = (name, label, on) => '<label class="check"><input type="checkbox" name="' + name + '"' + (on !== false ? ' checked' : '') + '> ' + label + '</label>';
 
   /* ---------- Grabación ---------- */
@@ -194,7 +323,7 @@
       b.textContent = C.SCENE_LABELS[b.dataset.scene] + (p.takes[b.dataset.scene]?.blob ? ' ✓' : '');
     });
     const text = root.querySelector('.prompter-text');
-    text.textContent = p.script[key] || 'Sin texto para ' + C.SCENE_LABELS[key].toLowerCase() + '. Puedes grabar igualmente.';
+    text.textContent = FX.stripMarks(p.script[key]) || 'Sin texto para ' + C.SCENE_LABELS[key].toLowerCase() + '. Puedes grabar igualmente.';
     applyPrompterSize();
     resetPrompter();
     root.querySelector('[data-process]').hidden = !complete(p);
@@ -413,7 +542,7 @@
       p.output = {
         blob: key, type: result.mimeType, extension: result.extension, method: result.method, size: result.blob.size,
         duration: result.stats.finalSeconds, removed: result.stats.removedSeconds, lufs: result.stats.lufs,
-        captions: result.captions?.words?.length || 0, at: new Date().toISOString()
+        captions: result.captions?.words?.length || 0, effects: result.effects, at: new Date().toISOString()
       };
       await S.save(p);
       keepAwake(false);
@@ -447,7 +576,9 @@
       '<div><dt>Silencios quitados</dt><dd>' + (p.output.removed || 0).toFixed(1) + ' s</dd></div>' +
       '<div><dt>Volumen</dt><dd>' + (Number.isFinite(p.output.lufs) ? p.output.lufs.toFixed(1) + ' LUFS' : '—') + '</dd></div>' +
       '<div><dt>Subtítulos</dt><dd>' + (p.output.captions ? p.output.captions + ' palabras' : 'No') + '</dd></div>' +
-      '<div><dt>Archivo</dt><dd>' + esc((p.output.extension || 'mp4').toUpperCase()) + ' · ' + (p.output.size / 1048576).toFixed(1) + ' MB</dd></div></dl>' +
+      '<div><dt>Archivo</dt><dd>' + esc((p.output.extension || 'mp4').toUpperCase()) + ' · ' + (p.output.size / 1048576).toFixed(1) + ' MB</dd></div>' +
+      (p.output.effects ? '<div><dt>Efectos</dt><dd>' + p.output.effects.events + ' marcas · ' + p.output.effects.zooms + ' zooms · ' + p.output.effects.sounds + ' sonidos</dd></div>' : '') + '</dl>' +
+      (ShortsImages.credits(p).length ? '<details class="credits" open><summary>Créditos de las fotos (pégalos en la descripción)</summary><textarea rows="3" readonly>' + esc(ShortsImages.credits(p).join('\n')) + '</textarea></details>' : '') +
       (p.output.extension !== 'mp4' ? '<p class="note warn">Este navegador solo pudo crear un WebM. YouTube lo acepta; para TikTok o Instagram usa Chrome o Safari actualizados.</p>' : '') +
       '<div class="stack">' + (canShare ? '<button class="primary big" data-share>Compartir en TikTok, Instagram o YouTube</button>' : '') +
       '<a class="button ' + (canShare ? 'secondary' : 'primary big') + '" download="' + esc(name) + '" href="' + url + '">Descargar video</a>' +

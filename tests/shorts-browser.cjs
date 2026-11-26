@@ -100,9 +100,32 @@ async function savedOutput(page, which = 'output') {
     await page.getByRole('link', { name: /Crear un Short/ }).click();
     await page.getByRole('button', { name: /Nuevo Short/ }).click();
     await page.getByLabel('Título del récord').fill('Kane y sus 44 goles en una temporada');
-    await page.locator('textarea[name="paste"]').fill('GANCHO: Harry Kane marcó cuarenta y cuatro goles en una sola temporada.\nDESARROLLO: Fue su primera temporada en el Bayern.\nY rompió el récord de Lewandowski.\nCIERRE: Síguenos para más récords.');
+    await page.locator('textarea[name="paste"]').fill('GANCHO: [REC] [TITULAR: El récord de Kane] Harry Kane marcó [DATO: 44 goles] cuarenta y cuatro goles en una sola temporada.\n' +
+      'DESARROLLO: [PASO: El fichaje] [IMAGEN: Allianz Arena] Fue su primera temporada en el Bayern. [JUGADOR: Harry Kane | Bayern | Inglaterra | 32 años]\n' +
+      'Y [VS: Kane 44 goles | Lewandowski 41 goles] rompió el récord de [FLECHA: él] Lewandowski. [ZOOM]\n' +
+      'CIERRE: [TEXTO: ¿Lo viste | venir?] [MAPA: Alemania] Síguenos [MARCADOR: Bayern 8-0 Schalke | Bundesliga 2023] para más [TEMBLOR] récords.');
     await page.getByRole('button', { name: 'Repartir en escenas' }).click();
-    assert.equal(await page.locator('textarea[name="closing"]').inputValue(), 'Síguenos para más récords.');
+    assert.match(await page.locator('textarea[name="closing"]').inputValue(), /^\[TEXTO/);
+    // Fotos de prueba (sin red): una imagen de color por cada marca que la necesita.
+    await page.waitForSelector('.photo-row');
+    assert.equal(await page.locator('.photo-row').count(), 4, 'Allianz Arena, Harry Kane, Kane y Lewandowski');
+    await page.evaluate(async () => {
+      const p = window.ShortsApp.state.project;
+      const colors = ['#1e6fbf', '#c0392b', '#8e44ad', '#16a085'];
+      const queries = [...document.querySelectorAll('.photo-row strong')].map(n => n.textContent);
+      for (const [i, q] of queries.entries()) {
+        const c = document.createElement('canvas'); c.width = 1200; c.height = 900;
+        const x = c.getContext('2d');
+        x.fillStyle = colors[i % colors.length]; x.fillRect(0, 0, 1200, 900);
+        x.fillStyle = '#fff'; x.font = '900 110px sans-serif'; x.textAlign = 'center'; x.fillText(q, 600, 480);
+        const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+        await ShortsImages.upload(p, q, new File([blob], q + '.jpg', { type: 'image/jpeg' }));
+      }
+      await ShortsStore.save(p);
+    });
+    await page.getByRole('button', { name: 'Buscar las fotos que faltan' }).isVisible();
+    await page.locator('details.marks summary').click();
+    await page.screenshot({ path: path.join(shots, '1b-marcas.png'), fullPage: true });
     if (!modelDir) await page.getByLabel('Subtítulos automáticos (Whisper)').uncheck();
     await page.screenshot({ path: path.join(shots, '1-guion.png') });
     await page.getByRole('button', { name: /Grabar/ }).click();
@@ -111,6 +134,7 @@ async function savedOutput(page, which = 'output') {
     for (const scene of ['Gancho', 'Desarrollo', 'Cierre']) {
       await page.locator('[data-shutter]').click();
       await page.waitForSelector('.rec-badge:not([hidden])', { timeout: 6000 });
+      if (scene === 'Gancho') assert.ok(!(await page.locator('.prompter-text').innerText()).includes('['), 'el teleprompter no muestra las marcas');
       await page.waitForTimeout(takeMs);
       if (scene === 'Gancho') await page.screenshot({ path: path.join(shots, '2-grabando.png') });
       await page.locator('[data-shutter]').click();
@@ -144,6 +168,10 @@ async function savedOutput(page, which = 'output') {
     // Cada toma dura ~6,5 s; con los silencios cortados cada escena queda en ~4,9 s.
     assert.ok(info.removed > 3, 'se quitaron silencios: ' + info.removed);
     assert.ok(Math.abs(info.lufs - (-14)) < 1.5, 'volumen ' + info.lufs);
+    console.log('Efectos:', JSON.stringify(info.effects));
+    assert.ok(info.effects && info.effects.events >= 12, 'se programaron las marcas');
+    assert.ok(info.effects.photos === 4 && info.effects.sounds > 5, 'fotos y sonidos');
+    run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-vf', 'fps=2,scale=270:-1,tile=8x4', '-frames:v', '1', path.join(shots, 'efectos-hoja.png')]);
     const captions = await page.evaluate(() => window.ShortsApp.state.project.captions);
     if (modelDir) {
       console.log('Subtítulos (' + captions.mode + ', ' + captions.device + '):', captions.words.map(w => w.text).join(' '));
@@ -179,6 +207,25 @@ async function savedOutput(page, which = 'output') {
       fs.writeFileSync(editedFile, await savedOutput(page));
       run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(edited.words[1].start + 0.05), '-i', editedFile, '-frames:v', '1', '-vf', 'scale=360:-1', path.join(shots, 'fotograma-corregido.png')]);
     }
+
+    // Subtítulos «limpios» con palabras clave en dorado (palabras simuladas, sin Whisper).
+    const withCaptions = await page.evaluate(async duration => {
+      const p = window.ShortsApp.state.project;
+      const text = ShortsCore.SCENES.map(k => ShortsEffects.stripMarks(p.script[k])).join(' ').split(/\s+/);
+      const step = (duration - 0.3) / text.length;
+      p.captions = { source: ShortsExport.captionSource(p), words: text.map((t, i) => ({ text: t, start: 0.15 + i * step, end: 0.15 + (i + 0.85) * step })), edited: true };
+      p.options.loop = true; p.options.captions = true;
+      const blobs = {};
+      for (const key of ShortsCore.SCENES) blobs[key] = await ShortsStore.getBlob(p.takes[key].blob);
+      const r = await ShortsExport.render({ project: p, blobs, base: new URL('./', location.href).href });
+      await ShortsStore.putBlob('prueba-subtitulos', r.blob);
+      return { key: 'prueba-subtitulos', words: r.captions.words.length, effects: r.effects };
+    }, info.duration - 1.6);
+    console.log('Con subtítulos:', JSON.stringify(withCaptions));
+    const capFile = path.join(work, 'subtitulos.mp4');
+    fs.writeFileSync(capFile, await savedOutput(page, withCaptions.key));
+    run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', capFile, '-vf', 'fps=2,scale=270:-1,tile=8x4', '-frames:v', '1', path.join(shots, 'subtitulos-hoja.png')]);
+    fs.copyFileSync(capFile, path.join(shots, 'subtitulos.mp4'));
 
     // Respaldo en tiempo real (navegadores sin WebCodecs).
     const realtime = await page.evaluate(async () => {

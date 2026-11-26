@@ -52,8 +52,14 @@ Abre **[jeffer91.github.io/videoslistodoble/shorts](https://jeffer91.github.io/v
    - limpia la voz y la deja en −14 LUFS con picos por debajo de −1 dBFS;
    - escribe los **subtítulos** con Whisper dentro del navegador, palabra por palabra, y corrige la ortografía con tu guion (nombres como «Lewandowski» salen tal como los escribiste);
    - monta el video vertical 1080 × 1920 con fondo desenfocado, marco dorado, título, subtítulos con la palabra activa en dorado, logo, acercamientos en cada corte y el sello «Récord confirmado» al final.
-4. **Compartir** envía el MP4 directamente a TikTok, Instagram o YouTube; también puedes **Descargar** el video.
-5. **Corregir subtítulos** permite cambiar cualquier frase y volver a exportar sin repetir la transcripción.
+4. **Efectos** (se activan en «Efectos» al crear el Short y con marcas dentro del guion, que el teleprompter no muestra):
+   - `[IMAGEN: Estadio Azteca]` pantalla dividida con la foto arriba y tú abajo; `[TITULAR: …]` titular en caja blanca sobre la división;
+   - `[DATO: 44 goles]` contador animado con golpe; `[JUGADOR: Kane | Bayern | Inglaterra | 32 años]` ficha; `[VS: Kane 44 goles | Haaland 38 goles]` comparación; `[MARCADOR: México 2-1 Brasil | Final 2005]`; `[MAPA: México]`;
+   - `[PASO: Gancho visual]` insignia numerada; `[REC]` visor de cámara; `[TEXTO: fino | grueso]` texto con dos pesos; `[ZOOM]`; `[FLECHA: este es él]`; `[TEMBLOR]`;
+   - automáticos: zoom de énfasis, subtítulos «limpios» (1-3 palabras al centro) o «impacto», palabras clave (cifras y nombres) en color, animación pop, sonidos sincronizados, barra de progreso, color uniforme y final en bucle opcional.
+   - Las fotos se buscan solas en Wikimedia Commons (licencias libres) o puedes subir las tuyas; al terminar se muestran los créditos para la descripción. «Copiar formato del guion» prepara las instrucciones para pedirle el guion con marcas a Claude.
+5. **Compartir** envía el MP4 directamente a TikTok, Instagram o YouTube; también puedes **Descargar** el video.
+6. **Corregir subtítulos** permite cambiar cualquier frase y volver a exportar sin repetir la transcripción.
 
 La primera vez que se usan los subtítulos, el navegador descarga el modelo de Whisper desde Hugging Face (calidad *Normal*: `whisper-base`, o *Ligera*: `whisper-tiny`) y lo guarda para las siguientes veces. Con WebGPU se usa la tarjeta gráfica; si no, el procesador. Si la descarga o el modelo fallan, el Short se exporta igual, sin subtítulos.
 

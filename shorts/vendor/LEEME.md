@@ -23,3 +23,5 @@ Transformers.js y el motor ONNX **no** se guardan en el repositorio porque pesan
 - `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` y `ort-wasm-simd-threaded.{mjs,wasm}` (onnxruntime-web, MIT). La segunda variante es para Safari anterior a 26 sin WebGPU.
 
 Los modelos (`onnx-community/whisper-base_timestamped` y `onnx-community/whisper-tiny_timestamped`) se descargan de Hugging Face la primera vez y quedan guardados en el navegador.
+
+- `paises.json`: contornos de países (Natural Earth 1:110m, dominio público) con nombres en español para la marca `[MAPA: …]`. Se regenera con `scripts/build-map-data.cjs`.

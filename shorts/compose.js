@@ -53,12 +53,13 @@ const ShortsCompose = (() => {
   }
 
   const CAPTION_FONT = size => '900 ' + size + 'px "Arial Black", "DM Sans", "Segoe UI", Roboto, Arial, sans-serif';
-  const CAPTION = { size: 70, lineHeight: 86, maxWidth: 920, centerY: 1500, active: '#ffd552', text: '#ffffff', stroke: '#000000' };
+  const CAPTION = { size: 70, lineHeight: 86, maxWidth: 920, centerY: 1500, active: '#ffd552', key: '#6dffaa', text: '#ffffff', stroke: '#000000' };
 
   /** Subtítulo en mayúsculas con contorno; la palabra que se está diciendo va en dorado. */
-  function drawCaption(ctx, state) {
+  function drawCaption(ctx, state, centerY = CAPTION.centerY) {
     const { page, active, age } = state;
     ctx.save();
+    ctx.translate(0, centerY - CAPTION.centerY);
     ctx.font = CAPTION_FONT(CAPTION.size);
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
@@ -73,7 +74,7 @@ const ShortsCompose = (() => {
       line.push(i); width += line.length > 1 ? space + widths[i] : widths[i];
     });
     if (line.length) lines.push({ items: line, width });
-    const pop = age < 0.12 ? 0.86 + 0.14 * (age / 0.12) : 1;
+    const pop = typeof ShortsEffects !== 'undefined' ? ShortsEffects.popScale(age, 0.86) : (age < 0.12 ? 0.86 + 0.14 * (age / 0.12) : 1);
     const top = CAPTION.centerY - (lines.length - 1) * CAPTION.lineHeight / 2;
     ctx.translate(W / 2, CAPTION.centerY);
     ctx.scale(pop, pop);
@@ -93,7 +94,7 @@ const ShortsCompose = (() => {
         ctx.strokeStyle = CAPTION.stroke;
         ctx.textAlign = 'center';
         ctx.strokeText(words[i], 0, 4);
-        ctx.fillStyle = isActive ? CAPTION.active : CAPTION.text;
+        ctx.fillStyle = isActive ? CAPTION.active : page.words[i].key ? CAPTION.key : CAPTION.text;
         ctx.fillText(words[i], 0, 4);
         ctx.restore();
         x += w + space * fit;
@@ -102,10 +103,21 @@ const ShortsCompose = (() => {
     ctx.restore();
   }
 
-  function createComposer({ title, logo, plate, options = {}, captions = null }) {
-    const titleImage = titlePlate(title);
+  /**
+   * fx (opcional): { events, zooms, assets, duration, headline } de ShortsEffects/ShortsFx.
+   * Sin fx se dibuja el Short clásico.
+   */
+  function createComposer({ title, logo, plate, options = {}, captions = null, fx = null }) {
+    const FXS = typeof ShortsEffects !== 'undefined' ? ShortsEffects : null;
+    const opts = FXS ? FXS.settings(options) : options;
+    const effects = Boolean(fx && FXS && typeof ShortsFx !== 'undefined' && opts.effects !== false);
+    const plateTitle = effects ? fx.headline || title : title;
+    const titleImage = effects ? ShortsFx.headlinePlate(plateTitle, opts.titleStyle) : titlePlate(title);
     const small = canvas(54, 96);
     const smallCtx = small.getContext('2d');
+    const events = effects ? fx.events || [] : [];
+    const zooms = effects ? fx.zooms || [] : [];
+    let firstFrame = null;
 
     function background(ctx, source) {
       const size = sizeOf(source);
@@ -129,7 +141,7 @@ const ShortsCompose = (() => {
       ctx.fillRect(0, 0, W, H);
     }
 
-    function presenter(ctx, source, sceneKey, zoom) {
+    function presenter(ctx, source, sceneKey, zoom, grade) {
       const r = C.presenterRect(sceneKey);
       const outer = 11, edge = 6;
       ctx.fillStyle = FRAME.dark;
@@ -139,7 +151,9 @@ const ShortsCompose = (() => {
         const crop = C.coverCrop(size.width, size.height, r.w, r.h);
         const w = crop.sw / zoom, h = crop.sh / zoom;
         const sx = crop.sx + (crop.sw - w) / 2, sy = crop.sy + (crop.sh - h) * 0.4;
+        if (grade) ctx.filter = grade;
         ctx.drawImage(source, sx, sy, w, h, r.x, r.y, r.w, r.h);
+        if (grade) ctx.filter = 'none';
       }
       ctx.lineWidth = edge;
       ctx.strokeStyle = FRAME.gold;
@@ -152,36 +166,90 @@ const ShortsCompose = (() => {
       return r;
     }
 
+    /** Presentador en la mitad inferior (pantalla dividida). */
+    function presenterSplit(ctx, source, zoom, grade) {
+      const r = { x: 0, y: ShortsFx.PANEL_H, w: W, h: H - ShortsFx.PANEL_H };
+      ctx.fillStyle = '#06140e';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      if (grade) ctx.filter = grade;
+      ShortsFx.cover(ctx, source, r.x, r.y, r.w, r.h, zoom, 0.32);
+      if (grade) ctx.filter = 'none';
+      return r;
+    }
+
     /**
      * info: { sceneKey, segment, local, t, stamp } — stamp es el tiempo transcurrido del sello o null.
      */
     function draw(ctx, source, info) {
       ctx.save();
-      background(ctx, source);
-      const zoom = C.punchZoom(info.segment);
-      presenter(ctx, source, info.sceneKey, zoom);
+      const t = info.t;
+      const active = effects ? FXS.activeAt(events, t) : [];
+      const panel = active.find(e => FXS.PANEL.has(e.type));
+      const grade = effects ? ShortsFx.gradeFilter(ctx, opts.grade) : '';
+      const zoom = C.punchZoom(info.segment) * (effects ? FXS.zoomAt(zooms, t) : 1);
+      const shake = effects ? FXS.shakeAt(events, t) : { x: 0, y: 0 };
+      ctx.save();
+      if (shake.x || shake.y) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.translate(shake.x, shake.y); ctx.translate(W / 2, H / 2); ctx.scale(1.03, 1.03); ctx.translate(-W / 2, -H / 2); }
+      let rect, titleY, pillY, captionY, textY;
+      if (panel && info.stamp === null) {
+        rect = presenterSplit(ctx, source, zoom, grade);
+        ShortsFx.drawPanel(ctx, panel, t, fx.assets, grade);
+        titleY = titleImage ? ShortsFx.PANEL_H - titleImage.height / 2 : null;
+        pillY = 250;
+        captionY = opts.captionStyle === 'limpio' ? 1470 : 1500;
+        textY = 1420;
+      } else {
+        background(ctx, source);
+        rect = presenter(ctx, source, info.sceneKey, zoom, grade);
+        titleY = titleImage ? 150 : null;
+        pillY = titleImage ? 150 + titleImage.height + 18 : 250;
+        captionY = opts.captionStyle === 'limpio' && effects ? 1250 : CAPTION.centerY;
+        textY = 1150;
+      }
       const light = C.flash(info.segment, info.local);
       if (light > 0.01) {
         ctx.fillStyle = 'rgba(255,255,255,' + light.toFixed(3) + ')';
         ctx.fillRect(0, 0, W, H);
       }
-      if (titleImage) ctx.drawImage(titleImage, Math.round((W - titleImage.width) / 2), 160);
-      if (captions && info.stamp === null) {
-        const state = C.captionAt(captions, info.t);
-        if (state) drawCaption(ctx, state);
+      if (titleImage) ctx.drawImage(titleImage, Math.round((W - titleImage.width) / 2), Math.round(titleY));
+      let hideCaptions = false;
+      if (effects && info.stamp === null) {
+        const step = active.find(e => e.type === 'paso');
+        const rec = active.find(e => e.type === 'rec');
+        if (step) ShortsFx.drawStep(ctx, step, t, pillY);
+        else if (rec) ShortsFx.drawRec(ctx, rec, t, rect, pillY);
+        const text = active.find(e => e.type === 'texto');
+        if (text) { ShortsFx.drawTwoWeight(ctx, text, t, textY); hideCaptions = true; }
+        const arrow = active.find(e => e.type === 'flecha');
+        if (arrow) ShortsFx.drawArrow(ctx, arrow, t, panel && arrow.onPanel ? { x: W / 2, y: ShortsFx.PANEL_H * 0.42 } : { x: rect.x + rect.w / 2, y: rect.y + Math.min(rect.h * 0.3, 420) });
       }
+      if (captions && info.stamp === null && !hideCaptions) {
+        const state = C.captionAt(captions, t);
+        if (state) {
+          if (effects && opts.captionStyle === 'limpio') ShortsFx.drawCaptionClean(ctx, state, captionY);
+          else drawCaption(ctx, state, captionY);
+        }
+      }
+      ctx.restore();
       ctx.fillStyle = STRIP;
       ctx.fillRect(0, H - 16, W, 16);
       if (logo && options.logo !== false) {
         const size = 58;
-        const p = C.logoPosition(info.t, W, H, size, size);
+        const p = C.logoPosition(t, W, H, size, size);
         ctx.drawImage(logo, p.x, p.y, size, size);
       }
+      if (effects && opts.progress) ShortsFx.drawProgress(ctx, t, fx.duration);
       if (info.stamp !== null && info.stamp !== undefined && plate) {
         const fade = Math.min(1, info.stamp / 0.2);
         ctx.fillStyle = 'rgba(0,0,0,' + (0.55 * fade).toFixed(3) + ')';
         ctx.fillRect(0, 0, W, H);
         ctx.drawImage(plate, 0, Math.round(C.stampDrop(info.stamp) * H), W, H);
+      }
+      // Final en bucle: los últimos 0,35 s funden con el primer fotograma.
+      if (effects && opts.loop) {
+        if (!firstFrame && t < 0.5 / C.FPS) { firstFrame = canvas(W, H); firstFrame.getContext('2d').drawImage(ctx.canvas, 0, 0); }
+        const k = firstFrame && fx.duration ? (t - (fx.duration - 0.35)) / 0.35 : -1;
+        if (k > 0) { ctx.globalAlpha = Math.min(1, k); ctx.drawImage(firstFrame, 0, 0); ctx.globalAlpha = 1; }
       }
       ctx.restore();
     }

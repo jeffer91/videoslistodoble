@@ -40,7 +40,9 @@ const ShortsStore = (() => {
     const now = new Date().toISOString();
     return {
       id: newId(), title: '', script: { hook: '', body: '', closing: '' }, takes: {},
-      options: { cutSilences: true, captions: true, captionQuality: 'base', stamp: true, logo: true }, output: null, captions: null,
+      options: { cutSilences: true, captions: true, captionQuality: 'base', stamp: true, logo: true,
+        effects: true, captionStyle: 'limpio', titleStyle: 'caja', zoom: true, sfx: true, progress: true, grade: true, loop: false, recHook: false },
+      output: null, captions: null, photos: {},
       createdAt: now, updatedAt: now, ...fields
     };
   }
@@ -62,6 +64,7 @@ const ShortsStore = (() => {
     if (project) {
       for (const take of Object.values(project.takes || {})) if (take?.blob) await deleteBlob(take.blob);
       if (project.output?.blob) await deleteBlob(project.output.blob);
+      for (const photo of Object.values(project.photos || {})) if (photo?.blob) await deleteBlob(photo.blob);
     }
     await run('projects', 'readwrite', s => s.delete(id));
   }

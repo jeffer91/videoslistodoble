@@ -111,3 +111,18 @@ label.inline { font-weight: 500; padding: .35rem 0; }
 .caption-row { display: grid; grid-template-columns: 3rem 1fr; align-items: center; gap: .5rem; font-weight: 500; }
 .caption-row input { margin-top: 0; }
 .caption-row small { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Efectos: marcas y fotos */
+details.marks ul { margin: 8px 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+details.marks code, .photos code { background: rgba(213,173,75,.15); color: #ffdf88; padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+.copy-box { width: 100%; margin-top: 8px; font-size: 13px; }
+.photos h2 { margin-bottom: 4px; }
+.photo-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 10px; }
+.photo-row { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: center; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
+.photo-row img, .photo-row .thumb-empty { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; display: grid; place-items: center; background: rgba(255,255,255,.06); font-weight: 800; color: #ffdf88; }
+.photo-row div { display: grid; gap: 2px; min-width: 0; }
+.photo-row small { opacity: .75; }
+.photo-row .credit { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-actions { grid-column: 1 / -1; display: flex !important; gap: 8px; flex-wrap: wrap; }
+.photo-actions .secondary, .photo-actions label.button { padding: 8px 14px; font-size: 14px; cursor: pointer; }
+details.credits textarea { width: 100%; font-size: 12px; }

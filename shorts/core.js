@@ -562,7 +562,7 @@
       const last = group[group.length - 1];
       const chars = group.reduce((n, w) => n + w.text.length + 1, text.length);
       if (last && (group.length >= maxWords || chars > maxChars || word.start - last.end > gap || /[.!?;:,]$/.test(last.text))) flush();
-      group.push({ text, start: word.start, end: Math.max(word.end, word.start + 0.05) });
+      group.push({ text, start: word.start, end: Math.max(word.end, word.start + 0.05), ...(word.key ? { key: true } : {}) });
     }
     flush();
     pages.forEach((page, i) => {

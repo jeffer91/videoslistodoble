@@ -66,9 +66,13 @@ const ShortsExport = (() => {
     report('audio', 1, 'Voz a ' + (Number.isFinite(sound.lufs) ? sound.lufs.toFixed(1) : '—') + ' LUFS');
 
     const captions = options.captions === false ? null : await captionWords({ project, parts, timeline, options, report, signal });
-    const pages = captions?.words?.length ? C.captionPages(captions.words) : null;
+    const FX = ShortsEffects;
+    const look = FX.settings(options);
+    const words = captions?.words?.length ? captions.words.map((w, i, all) => ({ ...w, key: FX.isKeyword(all, i) })) : null;
+    const pages = words ? C.captionPages(words, look.effects !== false && look.captionStyle === 'limpio' ? { maxWords: 3, maxChars: 18 } : {}) : null;
+    const fx = look.effects === false ? null : await prepareEffects({ project, timeline, words, sound, base, look, report, signal });
 
-    const composer = ShortsCompose.createComposer({ title: project.title, logo: media.logo, plate: media.plate, options, captions: pages });
+    const composer = ShortsCompose.createComposer({ title: project.title, logo: media.logo, plate: media.plate, options, captions: pages, fx });
     const stats = { rawSeconds, finalSeconds: timeline.duration, removedSeconds: Math.max(0, rawSeconds - timeline.content), lufs: sound.lufs };
 
     let result = null;
@@ -81,9 +85,40 @@ const ShortsExport = (() => {
         report('video', 0, 'Cambiando a exportación en tiempo real');
       }
     }
-    if (!result) result = await renderRealtime({ blobs, timeline, sound, composer, report, signal, preview });
+    try {
+      if (!result) result = await renderRealtime({ blobs, timeline, sound, composer, report, signal, preview });
+    } finally { fx?.assets.close(); }
     report('done', 1, 'Short listo');
-    return { ...result, stats, timeline, captions };
+    return { ...result, stats, timeline, captions, effects: fx ? { events: fx.events.length, zooms: fx.zooms.length, photos: fx.photos, sounds: fx.sounds } : null };
+  }
+
+  /** Programa los efectos, prepara fotos y mapa y mezcla los sonidos en la pista. */
+  async function prepareEffects({ project, timeline, words, sound, base, look, report, signal }) {
+    const FX = ShortsEffects;
+    const { events } = FX.schedule(project, timeline, words);
+    const zooms = FX.emphasisZooms(timeline, words, events, look.zoom);
+    const queries = FX.photoQueries(project.script);
+    if (queries.length) {
+      report('video', 0, 'Buscando fotos para las marcas');
+      const r = await ShortsImages.ensure(project, queries, { signal, onProgress: (p, message) => report('video', 0, message) });
+      if (r.searched) await ShortsStore.save(project).catch(() => {});
+    }
+    aborted(signal);
+    const photos = await ShortsImages.load(project, queries);
+    const map = events.some(e => e.type === 'mapa')
+      ? await fetch(new URL('vendor/paises.json', base).href).then(r => r.ok ? r.json() : null).catch(() => null) : null;
+    let sounds = 0;
+    if (look.sfx) {
+      const bank = { pop: FX.popSound(SR), whoosh: FX.whooshSound(SR), hit: FX.hitSound(SR) };
+      for (const cue of FX.soundCues(events, zooms)) {
+        if (cue.at >= timeline.content) continue;
+        sound.mono = C.mixAt(sound.mono, bank[cue.kind], SR, cue.at, cue.gainDb);
+        sounds++;
+      }
+      if (sounds) sound.mono = C.limit(sound.mono, SR);
+    }
+    return { events, zooms, duration: timeline.duration, headline: FX.headline(project), photos: photos.size, sounds,
+      assets: { photo: query => photos.get(query), map, close: photos.close } };
   }
 
   /** Identifica las tomas y el recorte usados, para reutilizar subtítulos ya hechos o corregidos. */
@@ -100,7 +135,7 @@ const ShortsExport = (() => {
         key: part.key,
         samples: C.joinRanges([part], SR),
         offset: (timeline.segments.find(s => s.scene === part.key) || { outStart: 0 }).outStart,
-        script: project.script?.[part.key] || ''
+        script: ShortsEffects.stripMarks(project.script?.[part.key] || '')
       }));
       const result = await ShortsWhisper.transcribe(scenes, {
         quality: options.captionQuality || 'base', signal,
