@@ -58,12 +58,39 @@ function plan(project) {
   return { pieces, missing };
 }
 
+/**
+ * Foto de fondo de la cartela: la elegida, o en automático la primera foto de la
+ * sección (sin contar los gráficos de datos). null = fondo gráfico.
+ */
+function transitionImage(root, project, section) {
+  const choice = section.transition?.image || 'auto';
+  if (choice === 'none') return null;
+  const usable = image => {
+    if (!image) return false;
+    const file = directStore.resolveFile(root, project.id, image.file);
+    return fs.existsSync(file);
+  };
+  if (choice !== 'auto') { const chosen = project.images.find(i => i.id === choice); return usable(chosen) ? chosen : null; }
+  for (const imageId of section.imageIds || []) {
+    const image = project.images.find(i => i.id === imageId);
+    if (image && !image.source?.stat && usable(image)) return image;
+  }
+  return null;
+}
+
+/** Fondo de la cartela: foto (si hay) o el fondo gráfico del estilo. */
+async function transitionBackground(root, project, section, style) {
+  const image = transitionImage(root, project, section);
+  const file = image ? await graphics.photoBackground(root, directStore.resolveFile(root, project.id, image.file)) : await graphics.background(root, style);
+  return { file, image };
+}
+
 async function renderTransition(ctx, piece, output) {
   const { root, media, signal, quality } = ctx;
   const frames = Math.round(piece.duration * FPS);
   const d = frames / FPS;
   const section = piece.section;
-  const bg = await graphics.background(root, piece.style);
+  const { file: bg } = await transitionBackground(root, ctx.project, section, piece.style);
   const intro = section.intro;
   const title = await graphics.titleCard(root, { label: intro ? 'Once Records presenta' : sectionLabel(section),
     title: section.transition.title || (intro ? ctx.project.title : section.title) });
@@ -426,4 +453,4 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
   }
 }
 
-module.exports = { exportProject, plan, chapterList, renderTransition, renderSegment, renderEndscreen, renderAudio, QUALITY, safeName };
+module.exports = { exportProject, plan, chapterList, transitionImage, transitionBackground, renderTransition, renderSegment, renderEndscreen, renderAudio, QUALITY, safeName };

@@ -143,6 +143,12 @@ function imageBackground(root, imageFile) {
   return cached(root, ['bgimg', imageFile, stat.size, stat.mtimeMs], sharp => sharp(imageFile).resize(PAN_W, PAN_H, { fit: 'cover' }).blur(28).modulate({ brightness: 0.55, saturation: 1.1 }));
 }
 
+/** Fondo de la cartela de transición con una foto: casi nítida y oscurecida para que el título se lea. */
+function photoBackground(root, imageFile) {
+  const stat = fs.statSync(imageFile);
+  return cached(root, ['bgphoto', imageFile, stat.size, stat.mtimeMs], sharp => sharp(imageFile).resize(PAN_W, PAN_H, { fit: 'cover', position: 'attention' }).blur(2.5).modulate({ brightness: 0.6, saturation: 1.05 }));
+}
+
 /** Máscara blanca con esquinas redondeadas para recortar al presentador o la imagen. */
 function mask(root, w, h, radius) {
   return cached(root, ['mask', w, h, radius], () => '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><rect width="' + w + '" height="' + h + '" fill="#000"/><rect width="' + w + '" height="' + h + '" rx="' + radius + '" fill="#fff"/></svg>');
@@ -269,4 +275,4 @@ function endscreen(root, { title }) {
   });
 }
 
-module.exports = { ctaCard, endscreen, background, imageBackground, mask, foreground, titleCard, sweep, statCard, backgroundSvg, PAN_W, PAN_H, cacheDir };
+module.exports = { ctaCard, endscreen, background, imageBackground, photoBackground, mask, foreground, titleCard, sweep, statCard, backgroundSvg, PAN_W, PAN_H, cacheDir };

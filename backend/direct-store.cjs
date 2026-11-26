@@ -56,7 +56,8 @@ function resolveFile(root, id, relative) {
 }
 
 function defaultTransition(title) {
-  return { enabled: true, style: 'auto', duration: 4, title: title || '', sound: 'impacto', volume: 0.8 };
+  // image: 'auto' (primera foto de la sección), 'none' (solo gráfico) o el id de una imagen del proyecto.
+  return { enabled: true, style: 'auto', duration: 4, title: title || '', sound: 'impacto', volume: 0.8, image: 'auto' };
 }
 
 function newSection(input = {}, index = 0) {
@@ -89,6 +90,7 @@ function read(root, id) {
   for (const section of project.sections || []) {
     section.cuts ||= []; section.ctas ||= []; section.ctaOff ||= [];
     if (section.auto === undefined) section.auto = null;
+    if (section.transition && !section.transition.image) section.transition.image = 'auto';
   }
   return project;
 }
@@ -213,7 +215,8 @@ function updateSection(root, { id, sectionId, patch = {} }) {
   if (patch.transition) {
     const t = { ...s.transition, ...patch.transition };
     s.transition = { enabled: t.enabled !== false, style: pick(t.style, TRANSITION_STYLES, 'auto'), duration: clamp(t.duration, 2, 8, 4),
-      title: text(t.title, 140), sound: pick(t.sound, SOUNDS, 'impacto'), volume: clamp(t.volume, 0, 1.5, 0.8) };
+      title: text(t.title, 140), sound: pick(t.sound, SOUNDS, 'impacto'), volume: clamp(t.volume, 0, 1.5, 0.8),
+      image: t.image === 'none' || (t.image && project.images.some(i => i.id === t.image)) ? t.image : 'auto' };
   }
   if (patch.audio) {
     const a = { ...s.audio, ...patch.audio };
@@ -501,6 +504,7 @@ function removeImage(root, { id, imageId }) {
   for (const s of project.sections) {
     s.imageIds = s.imageIds.filter(x => x !== imageId);
     for (const l of s.layouts) if (l.imageId === imageId) l.imageId = null;
+    if (s.transition?.image === imageId) s.transition.image = 'auto';
   }
   if (project.settings.background.imageId === imageId) project.settings.background.imageId = null;
   write(root, project);

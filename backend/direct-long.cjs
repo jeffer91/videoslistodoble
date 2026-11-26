@@ -124,6 +124,14 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
   }
 
   /** Busca una imagen para un nombre: primero la biblioteca propia, después Wikimedia Commons. */
+  function transitionQuery(project, section) {
+    const mark = Layout.marks(section.text).marks.find(m => m.type === 'imagen' && m.value.trim());
+    if (mark) return mark.value.trim();
+    const known = intel.entities(Layout.stripMarks(section.title + ' ' + section.text)).find(e => e.known);
+    if (known) return known.name;
+    return section.intro ? project.title : section.title;
+  }
+
   async function imageFor(id, query, notes) {
     const project = directStore.read(root, id);
     const tagged = auto.imageTagged(project, query);
@@ -446,10 +454,25 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       if (index < 0) throw Error('Sección no encontrada');
       const section = project.sections[index];
       const style = intel.resolvedStyles(project)[index];
-      const bg = await graphics.background(root, style);
+      const { file: bg, image } = await render.transitionBackground(root, project, section, style);
       const title = await graphics.titleCard(root, { label: section.intro ? 'Once Records presenta' : 'Sección ' + String(section.number).padStart(2, '0'),
         title: section.transition.title || (section.intro ? project.title : section.title) });
-      return { style, background: 'records://direct/graphic/' + path.basename(bg), title: 'records://direct/graphic/' + path.basename(title) };
+      return { style, image: image ? { id: image.id, name: image.name } : null, enabled: project.settings.transitions.enabled && section.transition.enabled,
+        background: 'records://direct/graphic/' + path.basename(bg), title: 'records://direct/graphic/' + path.basename(title) };
+    },
+    // Busca una foto para la cartela: primera marca [IMAGEN: …], si no el personaje conocido o el título.
+    'transition.findPhoto': async ({ id, sectionId }) => {
+      const project = directStore.read(root, id);
+      const section = project.sections.find(s => s.id === sectionId);
+      if (!section) throw Error('Sección no encontrada');
+      const query = transitionQuery(project, section);
+      const notes = [];
+      const image = await imageFor(id, query, notes);
+      if (!image) throw Error(notes[0] || 'No se encontró una foto para «' + query + '»');
+      const latest = directStore.read(root, id);
+      const fresh = latest.sections.find(s => s.id === sectionId);
+      return { query, image: { id: image.id, name: image.name }, project: directStore.updateSection(root, { id, sectionId,
+        patch: { imageIds: [...new Set([...fresh.imageIds, image.id])], transition: { image: image.id } } }) };
     },
 
     // Audio

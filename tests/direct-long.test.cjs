@@ -229,6 +229,43 @@ test('copia de seguridad con grabaciones: exportar e importar', { timeout: 12000
 });
 
 // ── Funciones inteligentes ─────────────────────────────────────────────────
+test('cartela de transición: foto automática, elegida o solo gráfico', { timeout: 120000 }, async () => {
+  const root = tempRoot();
+  try {
+    const sharp = require('sharp');
+    const p = directStore.createProject(root, { title: 'Formato Mundial sub 17' });
+    let project = directStore.importScript(root, { id: p.id, text: ONCE });
+    const s1 = project.sections[1];
+    assert.equal(s1.transition.image, 'auto');
+    assert.equal(render.transitionImage(root, project, s1), null, 'Sin fotos: fondo gráfico');
+    const stat = await directStore.saveImage(root, p.id, await sharp({ create: { width: 1600, height: 900, channels: 3, background: '#123' } }).png().toBuffer(), { name: 'Gráfico · 44 goles', source: { provider: 'Once Records', stat: '44|goles' } });
+    const kane = await directStore.saveImage(root, p.id, await sharp({ create: { width: 1920, height: 1080, channels: 3, background: '#c33' } }).jpeg().toBuffer(), { name: 'Kane' });
+    const stadium = await directStore.saveImage(root, p.id, await sharp({ create: { width: 1920, height: 1080, channels: 3, background: '#3c3' } }).jpeg().toBuffer(), { name: 'Estadio' });
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { imageIds: [stat.image.id, kane.image.id, stadium.image.id] } });
+    assert.equal(render.transitionImage(root, project, project.sections[1]).id, kane.image.id, 'Automático: primera foto, sin contar gráficos de datos');
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { image: stadium.image.id } } });
+    assert.equal(render.transitionImage(root, project, project.sections[1]).id, stadium.image.id, 'Foto elegida');
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { image: 'no-existe' } } });
+    assert.equal(project.sections[1].transition.image, 'auto', 'Un id desconocido vuelve a automático');
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { image: 'none' } } });
+    assert.equal(render.transitionImage(root, project, project.sections[1]), null, 'Solo gráfico');
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { image: kane.image.id, title: 'Otro título' } } });
+    assert.equal(project.sections[1].transition.image, kane.image.id, 'Cambiar otro campo conserva la foto');
+    project = directStore.removeImage(root, { id: p.id, imageId: kane.image.id });
+    assert.equal(project.sections[1].transition.image, 'auto', 'Borrar la foto elegida vuelve a automático');
+
+    // La cartela renderizada usa la foto: el fondo verde del «estadio» domina la imagen.
+    const bg = await render.transitionBackground(root, project, project.sections[1], 'estadio');
+    assert.equal(bg.image.id, stadium.image.id);
+    const out = path.join(root, 'cartela.mp4');
+    await render.renderTransition({ root, media, project, quality: 'draft', signal: new AbortController().signal }, { kind: 'transition', section: project.sections[1], style: 'estadio', duration: 2 }, out);
+    const frame = path.join(root, 'cartela.png');
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-ss', '1.2', '-i', out, '-frames:v', '1', frame]);
+    const { channels } = await sharp(frame).extract({ left: 0, top: 0, width: 1920, height: 220 }).stats();
+    assert.ok(channels[1].mean > channels[0].mean * 1.5 && channels[1].mean > channels[2].mean * 1.5, 'El fondo de la cartela es la foto (' + channels.map(c => c.mean.toFixed(0)).join('/') + ')');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('detecta jugadores, clubes, estadios y propone composiciones editables', () => {
   const names = intel.entities('Cristiano Ronaldo marcó en el Santiago Bernabéu ante el Atlético de Madrid en la Champions League con Ancelotti.');
   const types = Object.fromEntries(names.map(e => [e.name, e.type]));

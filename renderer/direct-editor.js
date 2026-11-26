@@ -136,6 +136,8 @@
       '<label class="dl-check"><input type="checkbox" id="ed-tr-on" ' + (t.enabled ? 'checked' : '') + '> Mostrar transición antes de esta sección</label>' +
       '<label class="dl-field">Estilo<select id="ed-tr-style"><option value="auto">Automático según el contenido</option>' + Object.entries(L.BACKGROUND_NAMES).map(([k, v]) => '<option value="' + k + '"' + (t.style === k ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select></label>' +
       '<label class="dl-field">Título<input id="ed-tr-title" maxlength="140" value="' + esc(t.title) + '" placeholder="' + esc(s.title) + '"></label>' +
+      '<label class="dl-field">Fondo<select id="ed-tr-image"><option value="auto"' + ((t.image || 'auto') === 'auto' ? ' selected' : '') + '>Automático: primera foto de la sección</option><option value="none"' + (t.image === 'none' ? ' selected' : '') + '>Solo fondo gráfico (estilo)</option>' +
+        S.project.images.filter(i => !i.source?.stat).map(i => '<option value="' + esc(i.id) + '"' + (t.image === i.id ? ' selected' : '') + '>' + esc(String(i.name || 'Foto').slice(0, 70)) + '</option>').join('') + '</select></label>' +
       '<label class="dl-field">Duración <output>' + t.duration + ' s</output><input type="range" id="ed-tr-dur" min="2" max="8" step="0.5" value="' + t.duration + '"></label>' +
       '<div class="dl-two tight"><label class="dl-field">Sonido<select id="ed-tr-sound">' + [['ninguno', 'Sin sonido'], ['impacto', 'Impacto'], ['whoosh', 'Whoosh'], ['estadio', 'Estadio'], ['multitud', 'Multitud'], ['cinematico', 'Cinematográfico'], ['musica', 'Música breve']].map(([k, v]) => '<option value="' + k + '"' + (t.sound === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
       '<label class="dl-field">Volumen<input type="range" id="ed-tr-vol" min="0" max="1.5" step="0.05" value="' + t.volume + '"></label></div>' +
@@ -600,7 +602,7 @@
         return draw();
       }
       if (t.id.startsWith('ed-tr-')) {
-        const patch = { enabled: q('#ed-tr-on').checked, style: q('#ed-tr-style').value, title: q('#ed-tr-title').value, duration: Number(q('#ed-tr-dur').value), sound: q('#ed-tr-sound').value, volume: Number(q('#ed-tr-vol').value) };
+        const patch = { enabled: q('#ed-tr-on').checked, style: q('#ed-tr-style').value, title: q('#ed-tr-title').value, duration: Number(q('#ed-tr-dur').value), sound: q('#ed-tr-sound').value, volume: Number(q('#ed-tr-vol').value), image: q('#ed-tr-image').value };
         const saved = await api.call('section.update', { id: p.id, sectionId: s.id, patch: { transition: patch } });
         s.transition = saved.sections.find(x => x.id === s.id).transition;
         const tl = q('#ed-timeline'); if (tl) { tl.outerHTML = timeline(); bindTimeline(); }

@@ -89,6 +89,7 @@
     if (S.page !== 'project') return;
     if (S.tab === 'grabacion') Recorder.mountStage();
     if (S.tab === 'edicion') window.DirectEditor?.mount(S, { call, refresh, render, toast, section });
+    if (S.tab === 'guion') loadCards();
   }
 
   function storagePanel() {
@@ -206,6 +207,59 @@
     return state === 'listo' ? ' · ⚡ lista' : state === 'trabajando' ? ' · ⚡ procesando…' : state === 'error' ? ' · ⚠ revisar' : '';
   }
 
+  // ── Cartela de transición en la pestaña Guion ─────────────────────────────
+  function photoOptions(selected) {
+    const photos = S.project.images.filter(i => !i.source?.stat);
+    return '<option value="auto"' + (selected === 'auto' ? ' selected' : '') + '>Automático: primera foto de la sección</option>' +
+      '<option value="none"' + (selected === 'none' ? ' selected' : '') + '>Solo fondo gráfico</option>' +
+      (photos.length ? '<optgroup label="Fotos del proyecto">' + photos.map(i => '<option value="' + esc(i.id) + '"' + (selected === i.id ? ' selected' : '') + '>' + esc(String(i.name || 'Foto').slice(0, 70)) + '</option>').join('') + '</optgroup>' : '');
+  }
+
+  function cardBlock(s) {
+    const id = esc(s.id);
+    return '<div class="dl-card"><div class="dl-card-thumb" data-card="' + id + '"><span class="dl-card-wait">Preparando cartela…</span></div>' +
+      '<div class="dl-card-side"><strong>Cartela de transición</strong><small class="dl-card-info" data-card-info="' + id + '"></small>' +
+      '<label class="dl-field">Fondo<select data-card-image="' + id + '">' + photoOptions(s.transition.image || 'auto') + '</select></label>' +
+      '<div class="dl-row wrap">' + btn('card-find', '🔍 Buscar foto', 'secondary', 'data-id="' + id + '" title="Usa la primera marca [IMAGEN: …] de la sección, o el personaje o el título"') +
+      btn('card-upload', 'Subir foto', 'secondary', 'data-id="' + id + '"') + '</div></div></div>';
+  }
+
+  const cardCache = new Map();
+  function cardKey(s, index) {
+    return JSON.stringify([S.project.title, index, s.title, s.number, s.intro, s.transition, s.imageIds, S.project.images.length,
+      S.project.settings.transitions.enabled, index ? S.project.sections[index - 1].transition.style : '']);
+  }
+
+  function loadCards(only = null) {
+    if (S.tab !== 'guion' || !S.project) return;
+    S.project.sections.forEach((s, index) => {
+      if (only && s.id !== only) return;
+      const key = cardKey(s, index);
+      let entry = cardCache.get(s.id);
+      if (!entry || entry.key !== key) { entry = { key, data: call('graphics.transition', { id: S.project.id, sectionId: s.id }) }; cardCache.set(s.id, entry); }
+      entry.data.then(d => paintCard(s.id, d)).catch(error => {
+        cardCache.delete(s.id);
+        const el = q('[data-card="' + CSS.escape(s.id) + '"]');
+        if (el) el.innerHTML = '<span class="dl-card-wait">' + esc(error.message) + '</span>';
+      });
+    });
+  }
+
+  function paintCard(sectionId, d) {
+    const el = q('[data-card="' + CSS.escape(sectionId) + '"]');
+    if (!el) return;
+    el.innerHTML = '<img alt="" src="' + esc(d.background) + '"><img alt="Cartela" src="' + esc(d.title) + '">';
+    el.classList.toggle('off', !d.enabled);
+    const info = q('[data-card-info="' + CSS.escape(sectionId) + '"]');
+    if (info) info.textContent = (d.image ? 'Fondo: foto «' + String(d.image.name || '').slice(0, 50) + '»' : 'Fondo: gráfico · ' + (L.BACKGROUND_NAMES[d.style] || d.style)) +
+      (d.enabled ? '' : ' · transición desactivada (actívala en Edición)');
+  }
+
+  async function setCardImage(sectionId, image) {
+    setProject(await call('section.update', { id: S.project.id, sectionId, patch: { transition: { image } } }));
+    render();
+  }
+
   function scriptTab() {
     const p = S.project;
     const preview = S.preview;
@@ -231,7 +285,7 @@
         btn('section-down', '↓', 'secondary', 'data-id="' + esc(s.id) + '" ' + (i < p.sections.length - 1 ? '' : 'disabled') + ' title="Bajar"') +
         btn('section-remove', '✕', 'danger', 'data-id="' + esc(s.id) + '" title="Eliminar sección"') + '</div></div>' +
         '<textarea data-field="text" rows="5" aria-label="Texto narrable">' + esc(s.text) + '</textarea>' +
-        '<small>' + s.text.split(/\s+/).filter(Boolean).length + ' palabras · ≈ ' + clock(s.text.split(/\s+/).filter(Boolean).length / 2.5) + ' de lectura' + (s.take ? ' · grabada (' + clock(s.take.duration) + ')' : '') + '</small></article>').join('') :
+        '<small>' + s.text.split(/\s+/).filter(Boolean).length + ' palabras · ≈ ' + clock(s.text.split(/\s+/).filter(Boolean).length / 2.5) + ' de lectura' + (s.take ? ' · grabada (' + clock(s.take.duration) + ')' : '') + '</small>' + cardBlock(s) + '</article>').join('') :
         '<p class="dl-note">Aún no hay secciones. Importa o pega tu guion.</p>') + '</section>';
     return '<div class="dl-two">' + importer + list + '</div>';
   }
@@ -679,6 +733,21 @@
     if (action === 'pilot-settings') return pilotSettings();
     if (action === 'pilot-run') { const r = await call('auto.run', { id: S.project.id }); toast('Piloto automático: procesando ' + r.queued + ' sección(es)'); return; }
     if (action === 'copy-template') { await copyTemplate(); return; }
+    if (action === 'card-find') {
+      target.disabled = true; target.textContent = 'Buscando…';
+      try {
+        const r = await call('transition.findPhoto', { id: S.project.id, sectionId: id });
+        setProject(r.project); toast('Foto para la cartela: ' + r.image.name + ' (búsqueda: ' + r.query + ')');
+      } finally { render(); }
+      return;
+    }
+    if (action === 'card-upload') {
+      const r = await call('image.import', { id: S.project.id, sectionId: id });
+      if (r.errors?.length) toast(r.errors[0], true);
+      setProject(r.project);
+      if (r.added?.length) return setCardImage(id, r.added[0].id);
+      return render();
+    }
     if (action === 'yt-suggest') {
       const meta = await call('youtube.suggest', { id: S.project.id });
       q('#dl-yt-title').value = meta.title; q('#dl-yt-desc').value = meta.description; q('#dl-yt-tags').value = meta.tags.join(', ');
@@ -861,6 +930,7 @@
         const fresh = updated.sections.find(s => s.id === sectionId);
         const local = section(sectionId);
         if (local && fresh) Object.assign(local, { title: fresh.title, text: fresh.text });
+        if (patch.title !== undefined) loadCards(sectionId);
         S.saving = 'Guardado automáticamente · ' + new Date().toLocaleTimeString('es-EC');
       } catch (error) { S.saving = 'No se pudo guardar: ' + error.message; toast(error.message, true); }
       const el2 = q('#dl-save'); if (el2) el2.textContent = S.saving;
@@ -909,6 +979,7 @@
     const t = event.target;
     const run = promise => promise.catch(error => toast(error.message, true));
     if (t.id === 'dl-cam' || t.id === 'dl-mic') return run(Recorder.open());
+    if (t.dataset.cardImage) return run(setCardImage(t.dataset.cardImage, t.value));
     if (t.id === 'dl-music-on') return run(settingsPatch(['music', 'enabled'], t.checked));
     if (t.id === 'dl-ducking') return run(settingsPatch(['music', 'ducking'], t.checked));
     if (t.id === 'dl-music-volume') return run(settingsPatch(['music', 'volume'], Number(t.value)));
