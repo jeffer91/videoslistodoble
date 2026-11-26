@@ -214,8 +214,9 @@
       '<li><code>[IMAGEN: Harry Kane Bayern 2024]</code> muestra esa foto en ese momento</li><li><code>[DATO: 44 goles]</code> crea un gráfico de la cifra</li>' +
       '<li><code>[MÚSICA: épica | emotiva | tensión | ambiental]</code> música de la sección</li><li><code>[TRANSICIÓN: estadio | túnel | césped | luces | gráfico | movimiento]</code></li>' +
       '<li><code>[COMPOSICIÓN: A–E]</code> fuerza una distribución</li><li><code>[PREGUNTA: ¿Kane ganará la Champions?]</code> tarjeta «Comenta» y primer comentario en YouTube</li>' +
-      '<li><code>[CTA: suscribir | like | comentar]</code> llamado a la acción en ese momento</li></ul>' + btn('copy-template', 'Copiar instrucciones para pedir el guion a Claude', 'secondary') + '</details>' +
-      '<div class="dl-row">' + btn('script-file', 'Subir documento') + '</div>' +
+      '<li><code>[CTA: suscribir | like | comentar]</code> llamado a la acción en ese momento</li></ul></details>' +
+      '<div class="dl-row wrap">' + btn('script-file', 'Subir documento') + btn('copy-template', '📋 Copiar formato del guion', 'secondary', 'title="Copia las instrucciones y el formato exacto para pedir el guion a Claude"') + '</div>' +
+      '<p class="dl-note">«Copiar formato» copia las instrucciones con el tema de este proyecto. Pégalas en Claude y sube o pega aquí el guion que te devuelva.</p>' +
       '<label class="dl-field">O pega el guion completo, una sección o un párrafo<textarea id="dl-paste" rows="8" placeholder="━━━━━━━━━━━━━━━━━━\nSECCIÓN 01 · EL COMIENZO\n━━━━━━━━━━━━━━━━━━\n\nDurante años…"></textarea></label>' +
       '<div class="dl-row wrap"><label class="dl-field inline">Cómo añadirlo<select id="dl-mode">' +
       (p.sections.length ? '<option value="append">Como nuevas secciones al final</option><option value="append-text">Al final del texto de la sección seleccionada</option>' : '') +
@@ -754,20 +755,44 @@
       publishAt: when ? new Date(when).toISOString() : null, comment: q('#dl-yt-comment').value } }));
   }
 
-  const TEMPLATE = ['Escribe el guion de un video largo para el canal de fútbol Once Records sobre: <TEMA>.',
-    'Formato obligatorio de cada sección:', '━━━━━━━━━━━━━━━━━━', 'SECCIÓN 01 · TÍTULO', '━━━━━━━━━━━━━━━━━━', '',
-    'Dentro del texto narrable añade estas marcas donde deban ocurrir (no se leen en voz alta):',
-    '[IMAGEN: nombre del jugador, club o estadio y año] cuando convenga mostrar una foto;',
-    '[DATO: cifra y concepto] para cada estadística importante (ej. [DATO: 44 goles]);',
-    '[MÚSICA: épica|emotiva|tensión|ambiental] al inicio de cada sección;',
-    '[TRANSICIÓN: estadio|túnel|césped|luces|gráfico|movimiento] al inicio de cada sección;',
-    '[PREGUNTA: pregunta para los comentarios] una vez, cerca del final;',
-    '[CTA: suscribir] hacia el primer minuto y [CTA: comentar] al final.',
-    'Empieza con un gancho de 2-3 frases antes de la SECCIÓN 01 y escribe frases cortas para leer en teleprompter.'].join('\n');
+  const RULE = '━━━━━━━━━━━━━━━━━━';
+  function scriptTemplate(topic) {
+    const tema = String(topic || '').trim() || '<TEMA>';
+    return ['Escribe el guion de un video largo para el canal de fútbol Once Records sobre: ' + tema + '.',
+      '',
+      'REGLAS DE FORMATO (obligatorias, el guion se importa automáticamente):',
+      '1. Empieza con un gancho de 2-3 frases ANTES de la SECCIÓN 01, sin encabezado (será la introducción).',
+      '2. Divide el resto en secciones numeradas. Cada sección empieza exactamente con estas tres líneas:',
+      RULE, 'SECCIÓN 01 · TÍTULO CORTO', RULE,
+      '3. Numera 01, 02, 03… sin saltos. Después del encabezado, deja una línea en blanco y escribe el texto narrable.',
+      '4. Frases cortas, fáciles de leer en teleprompter. Nada de viñetas, tablas, negritas ni markdown.',
+      '5. Responde SOLO con el guion: sin introducciones, notas ni comentarios tuyos.',
+      '',
+      'MARCAS (van entre corchetes dentro del texto, justo donde deben ocurrir; no se leen en voz alta):',
+      '[MÚSICA: épica|emotiva|tensión|ambiental] al inicio de cada sección;',
+      '[TRANSICIÓN: estadio|túnel|césped|luces|gráfico|movimiento] al inicio de cada sección;',
+      '[IMAGEN: jugador, club o estadio y año] cuando convenga mostrar una foto (ej. [IMAGEN: Harry Kane Bayern 2024]);',
+      '[DATO: cifra y concepto] para cada estadística importante (ej. [DATO: 44 goles]);',
+      '[COMPOSICIÓN: A|B|C|D|E] solo si quieres forzar una distribución concreta;',
+      '[CTA: suscribir] hacia el primer minuto y [CTA: comentar] al final;',
+      '[PREGUNTA: pregunta para los comentarios] una sola vez, cerca del final.',
+      '',
+      'EJEMPLO DEL FORMATO:',
+      'Gancho de dos o tres frases que atrapen desde el primer segundo.',
+      '',
+      RULE, 'SECCIÓN 01 · EL COMIENZO', RULE,
+      '',
+      '[MÚSICA: épica] [TRANSICIÓN: estadio] Texto narrable de la sección… [IMAGEN: Estadio Azteca 1986] Más texto… [DATO: 44 goles]',
+      '',
+      RULE, 'SECCIÓN 02 · SIGUIENTE TÍTULO', RULE,
+      '',
+      '[MÚSICA: tensión] [TRANSICIÓN: túnel] Texto narrable…'].join('\n');
+  }
 
   async function copyTemplate() {
-    try { await navigator.clipboard.writeText(TEMPLATE); toast('Instrucciones copiadas: pégalas en Claude y cambia <TEMA>'); }
-    catch { const root = modal('<h2>Instrucciones para Claude</h2><textarea rows="14" readonly>' + esc(TEMPLATE) + '</textarea><div class="dl-row"><button class="secondary" id="dl-modal-close">Cerrar</button></div>'); root.querySelector('#dl-modal-close').onclick = closeModal; }
+    const text = scriptTemplate(S.project?.title);
+    try { await navigator.clipboard.writeText(text); toast('Formato copiado' + (S.project?.title ? ' con el tema «' + S.project.title + '»' : '') + '. Pégalo en Claude.'); }
+    catch { const root = modal('<h2>Formato del guion para Claude</h2><p class="dl-note">No se pudo copiar automáticamente. Selecciona el texto y cópialo con Ctrl+C.</p><textarea rows="16" readonly>' + esc(text) + '</textarea><div class="dl-row"><button class="secondary" id="dl-modal-close">Cerrar</button></div>'); root.querySelector('#dl-modal-close').onclick = closeModal; root.querySelector('textarea')?.select(); }
   }
 
   async function saveCues() {
