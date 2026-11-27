@@ -308,6 +308,24 @@ async function listen(root, { wav }, media = require('./media.cjs')) {
   finally { listening = null; fs.rmSync(temp, { recursive: true, force: true }); }
 }
 
+/**
+ * Texto de los últimos segundos antes de un punto de la toma (para colocar el
+ * teleprompter al continuar una grabación). Sin Whisper devuelve ''.
+ */
+async function heardBefore(root, file, end, media = require('./media.cjs'), seconds = 8) {
+  const config = whisperConfig(root);
+  if (!config.ready) return '';
+  const temp = media.temporary(root);
+  try {
+    const wave = path.join(temp, 'antes.wav');
+    const from = Math.max(0, Number(end) - seconds);
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-ss', from.toFixed(3), '-t', (Number(end) - from).toFixed(3), '-i', file,
+      '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wave]);
+    const result = await media.command(config.whisper, ['-m', config.model, '-f', wave, '-l', 'es', '-nt', '-np', '-t', '4'], AbortSignal.timeout(20000));
+    return result.stdout.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+}
+
 // ── Imágenes con licencia libre (Wikimedia Commons) ─────────────────────────
 const COMMONS = 'https://commons.wikimedia.org/w/api.php';
 const AGENT = 'OnceRecordsStudio/0.12 (https://github.com/jeffer91/videoslistodoble)';
@@ -401,5 +419,5 @@ function attribution(item) {
   return (item.title ? '«' + item.title.replace(/\.[a-z]+$/i, '') + '» · ' : '') + item.author + ' · ' + item.license + ' · Wikimedia Commons';
 }
 
-module.exports = { entities, classify, statistic, statistics, sentences, estimateWords, propose, mood, transitionStyle, resolvedStyles, suggestTitles,
+module.exports = { heardBefore, entities, classify, statistic, statistics, sentences, estimateWords, propose, mood, transitionStyle, resolvedStyles, suggestTitles,
   whisperConfig, transcribeFile, listen, searchImages, downloadImage, parseCommons, attribution, GAZETTEER };

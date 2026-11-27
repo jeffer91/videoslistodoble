@@ -396,6 +396,29 @@ async function inspectTake(root, { id, takeId }, media = require('./media.cjs'))
   return { ...info, ok, size: fs.statSync(file).size };
 }
 
+/**
+ * El WebM de MediaRecorder no trae duración ni índice, y el reproductor no
+ * permite adelantarlo bien. Se reescribe sin recodificar (copia de flujos) con
+ * índice; si algo falla se conserva el archivo tal como se grabó.
+ */
+async function indexTake(root, { id, takeId }, media = require('./media.cjs')) {
+  const file = takeFile(root, id, takeId);
+  if (!fs.existsSync(file)) return false;
+  const temp = file + '.indexado.webm';
+  try {
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-c', 'copy', '-f', 'webm', temp]);
+    const before = await media.probe(file), after = await media.probe(temp);
+    if (!(after.width > 0 && after.hasAudio === before.hasAudio && after.duration >= before.duration - 0.5)) throw Error('Índice incompleto');
+    fs.renameSync(temp, file);
+    const draft = draftOf(root, id, takeId);
+    store.atomic(path.join(tempDir(root, id, takeId), 'toma.json'), { ...draft, bytes: fs.statSync(file).size, indexed: true });
+    return true;
+  } catch {
+    fs.rmSync(temp, { force: true });
+    return false;
+  }
+}
+
 function discardTake(root, { id, takeId }) {
   fs.rmSync(tempDir(root, id, takeId), { recursive: true, force: true });
   return true;
@@ -441,6 +464,89 @@ async function commitTake(root, { id, takeId }, media = require('./media.cjs')) 
   if (previous && previous.id !== takeId) removeTakeFiles(root, id, previous);
   discardTake(root, { id, takeId });
   return { project, sectionId: draft.sectionId, take: target.take };
+}
+
+// ── Continuar una toma desde un punto («Bueno hasta aquí») ──────────────────
+// La parte buena (hasta el corte) y la continuación se unen con un fundido
+// corto en un borrador nuevo. Nada se borra hasta que la unión se verifica, y
+// la toma activa solo se sustituye al guardar, como cualquier otra toma.
+const SPLICE_FADE = 0.25;
+
+function spliceSource(root, id, source) {
+  if (source?.kind === 'draft') {
+    const draft = draftOf(root, id, source.takeId);
+    const file = takeFile(root, id, source.takeId);
+    if (!fs.existsSync(file)) throw Error('La toma de referencia ya no existe');
+    return { file, sectionId: draft.sectionId };
+  }
+  if (source?.kind === 'active') {
+    const s = section(read(root, id), source.sectionId);
+    if (!s.take) throw Error('La sección no tiene toma activa');
+    return { file: resolveFile(root, id, s.take.original), sectionId: s.id };
+  }
+  throw Error('Origen de la toma inválido');
+}
+
+function spliceFile(root, id, source) { return spliceSource(root, id, source).file; }
+
+/** Ajusta el corte a la pausa de voz más cercana (sin cortar a media palabra). */
+function snapToPause(at, silences, fade = SPLICE_FADE) {
+  const inside = silences.find(x => x.start <= at && x.end >= at);
+  if (inside) return Math.max(at, inside.start + Math.min(fade, (inside.end - inside.start) / 2));
+  const before = silences.filter(x => x.end <= at + 0.05).at(-1);
+  if (before) return before.start + Math.min(fade, (before.end - before.start) / 2);
+  return at;
+}
+
+async function resumePoint(root, { id, source, at }, media = require('./media.cjs')) {
+  const { file } = spliceSource(root, id, source);
+  const info = await media.probe(file);
+  if (!info.duration) throw Error('No se pudo leer la duración de la toma');
+  const wanted = Math.max(1, Math.min(info.duration, Number(at) || 0));
+  const from = Math.max(0, wanted - 2.5);
+  const r = await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-nostats', '-ss', from.toFixed(3), '-t', (wanted + 0.3 - from).toFixed(3), '-i', file,
+    '-vn', '-af', 'silencedetect=noise=-35dB:d=0.12', '-f', 'null', process.platform === 'win32' ? 'NUL' : '-']);
+  const starts = [...r.stderr.matchAll(/silence_start:\s*(-?[0-9.]+)/g)].map(m => Math.max(0, Number(m[1])) + from);
+  const ends = [...r.stderr.matchAll(/silence_end:\s*([0-9.]+)/g)].map(m => Number(m[1]) + from);
+  const silences = starts.map((start, i) => ({ start, end: ends[i] ?? wanted + 0.3 }));
+  const cut = frame(Math.max(1, Math.min(info.duration, snapToPause(wanted, silences))));
+  return { cut, wanted: frame(wanted), duration: frame(info.duration), snapped: Math.abs(cut - wanted) > 0.02 };
+}
+
+async function joinTake(root, { id, source, cut, takeId }, media = require('./media.cjs')) {
+  const base = spliceSource(root, id, source);
+  const continuation = draftOf(root, id, takeId);
+  if (continuation.sectionId !== base.sectionId) throw Error('La continuación es de otra sección');
+  const next = await inspectTake(root, { id, takeId }, media);
+  if (!next.ok) throw Error('La continuación no tiene suficiente imagen y sonido. Repítela.');
+  const info = await media.probe(base.file);
+  const c = Math.max(SPLICE_FADE + 0.5, Math.min(info.duration, Number(cut) || 0));
+  const W = info.width || 1080, H = info.height || 1080, D = SPLICE_FADE;
+  const joined = beginTake(root, { id, sectionId: base.sectionId });
+  const out = takeFile(root, id, joined.id);
+  const partial = out + '.parcial.webm';
+  const prep = ',fps=30,scale=' + W + ':' + H + ',setsar=1,format=yuv420p';
+  const graph = '[0:v]trim=end=' + c.toFixed(3) + ',setpts=PTS-STARTPTS' + prep + '[a];' +
+    '[1:v]setpts=PTS-STARTPTS' + prep + '[b];' +
+    '[a][b]xfade=transition=fade:duration=' + D + ':offset=' + (c - D).toFixed(3) + '[v];' +
+    '[0:a]atrim=end=' + c.toFixed(3) + ',asetpts=PTS-STARTPTS,aresample=48000[x];' +
+    '[1:a]asetpts=PTS-STARTPTS,aresample=48000[y];[x][y]acrossfade=d=' + D + ':c1=tri:c2=tri[au]';
+  try {
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-i', base.file, '-i', takeFile(root, id, takeId),
+      '-filter_complex', graph, '-map', '[v]', '-map', '[au]', '-c:v', 'libvpx', '-deadline', 'realtime', '-cpu-used', '8', '-threads', String(Math.min(16, require('node:os').cpus().length)), '-slices', '4', '-b:v', '7M',
+      '-c:a', 'libopus', '-b:a', '160k', '-f', 'webm', partial]);
+    fs.renameSync(partial, out);
+    const result = await inspectTake(root, { id, takeId: joined.id }, media);
+    if (!result.ok) throw Error('La unión no se pudo verificar');
+    const draft = { ...joined, chunks: 1, bytes: result.size, joined: { cut: frame(c), from: source.kind } };
+    store.atomic(path.join(tempDir(root, id, joined.id), 'toma.json'), draft);
+    discardTake(root, { id, takeId });
+    return { ...draft, duration: result.duration, size: result.size, cut: frame(c) };
+  } catch (error) {
+    // La continuación se conserva (queda en «Tomas recuperables») y la toma buena no se toca.
+    discardTake(root, { id, takeId: joined.id });
+    throw Error('No se pudo unir la continuación: ' + String(error.message).slice(0, 300));
+  }
 }
 
 /** Copia MP4 indexada (H.264 CFR 30 FPS + AAC 48 kHz) para buscar con precisión y exportar. */
@@ -663,6 +769,6 @@ module.exports = {
   DIR, LAYOUTS, BACKGROUNDS, MOODS, SOUNDS, SUB_STYLES, FRAME, frame,
   projectDir, resolveFile, listProjects, createProject, getProject, renameProject, deleteProject, write, read,
   importScript, updateSection, addSection, removeSection, moveSection, saveSettings, normalizeLayouts, normalizeWords, progress, summary,
-  storageInfo, ensureSpace, beginTake, appendTake, pendingTakes, inspectTake, discardTake, commitTake, prepareMaster, takeFile,
+  storageInfo, ensureSpace, beginTake, appendTake, pendingTakes, inspectTake, discardTake, commitTake, resumePoint, joinTake, spliceFile, indexTake, snapToPause, SPLICE_FADE, prepareMaster, takeFile,
   saveImage, importImageFile, removeImage, importAudioFile, removeAudio, exportBackup, importBackup
 };

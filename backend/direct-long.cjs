@@ -308,9 +308,16 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
     // Grabación
     'take.begin': data => directStore.beginTake(root, data),
     'take.append': data => directStore.appendTake(root, data),
-    'take.inspect': data => directStore.inspectTake(root, data, media),
+    'take.inspect': async data => { await directStore.indexTake(root, data, media); return directStore.inspectTake(root, data, media); },
     'take.discard': data => directStore.discardTake(root, data),
     'take.pending': ({ id }) => directStore.pendingTakes(root, id),
+    'take.resume': async data => {
+      const point = await directStore.resumePoint(root, data, media);
+      // Con Whisper instalado se reconoce lo último dicho para colocar el teleprompter.
+      point.heard = await intel.heardBefore(root, directStore.spliceFile(root, data.id, data.source), point.cut, media).catch(() => '');
+      return point;
+    },
+    'take.join': data => directStore.joinTake(root, data, media),
     'take.commit': async data => {
       const result = await directStore.commitTake(root, data, media);
       if (result.project.settings.autopilot.enabled) queuePilot(data.id, result.sectionId);

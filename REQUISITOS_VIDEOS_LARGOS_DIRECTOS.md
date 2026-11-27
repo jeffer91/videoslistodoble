@@ -44,6 +44,8 @@ Los proyectos se guardan en una carpeta propia (`Directos/`), separada de `Proye
 
 **Una toma por sección.** La toma nueva se graba en `Temporales/`. Solo cuando se confirma, se verifica con FFprobe (imagen, sonido y duración), se copia a `Tomas/` comprobando el tamaño y se actualiza el proyecto. La toma anterior se borra después. Si algo falla, la toma activa queda intacta y la nueva sigue disponible como «toma recuperable».
 
+**Continuar una toma desde un punto («Bueno hasta aquí»).** En la revisión de una toma (o en «Ver la toma activa») se pausa el video en el último momento bueno y se pulsa «✂ Bueno hasta aquí». El corte se ajusta a la pausa de voz más cercana (`silencedetect`) para no cortar a media palabra. El teleprompter se coloca en la frase siguiente (con Whisper reconoce los últimos 8 s; sin Whisper estima la posición) y se puede tocar otra palabra para corregirlo. «Grabar desde aquí» reproduce los últimos 3 s buenos (preroll) y graba solo la continuación. La parte buena y la nueva se unen con un fundido de 0,25 s (imagen y sonido) en un borrador nuevo. «Descartar y repetir» vuelve a la misma marca y se puede marcar de nuevo sobre la toma unida tantas veces como haga falta. Nada se borra hasta guardar: la toma activa solo se sustituye con el mismo guardado verificado de siempre, y entonces se eliminan los borradores intermedios. Al detener, el WebM de MediaRecorder se reescribe con índice (sin recodificar) para poder adelantarlo en la revisión.
+
 **Edición no destructiva.** La toma original (WebM) no se modifica. En segundo plano se crea una copia MP4 indexada (H.264, 30 FPS constantes) para buscar con precisión y exportar. Las composiciones, imágenes, títulos, música y subtítulos se guardan como datos del proyecto.
 
 **Vista previa igual a la exportación.** `renderer/direct-layout.js` calcula la geometría de las distribuciones A–E y lo usan tanto el canvas del editor como FFmpeg. Las capas gráficas (fondo y marcos) son los mismos PNG en ambos casos.
@@ -123,6 +125,7 @@ Para publicar el comentario, YouTube exige el permiso `youtube.force-ssl`. La co
 | Cinco tipos de entrada de guion | `direct-long.test.cjs`: TXT, MD, DOCX, PDF y texto pegado |
 | Secciones de Once Records | `direct-long.test.cjs` y e2e: números, títulos, texto sin separadores |
 | Una toma por sección | `direct-long.test.cjs`: la toma dañada no reemplaza a la activa; la nueva sí, y la anterior se borra después |
+| Continuar desde un punto | `direct-long.test.cjs`: corte en la pausa, unión con fundido sobre borrador y sobre toma activa, nada se borra antes de guardar; `tests/direct-desktop.cjs`: marcar, tocar la palabra, grabar desde aquí, repetir desde la misma marca y guardar |
 | Teleprompter fuera de la grabación | e2e: luminosidad de la toma real con el teleprompter abierto |
 | Proyectos locales recuperables y copias | `direct-long.test.cjs`: crear, renombrar, eliminar con confirmación, exportar/importar `.tar` con grabaciones |
 | Distribuciones visuales a lo largo de la toma | `direct-long.test.cjs`: exportación con A, B, C, D y E en una misma toma |

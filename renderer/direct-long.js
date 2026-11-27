@@ -306,10 +306,13 @@
       '<div class="dl-stage-empty" id="dl-stage-empty"><p>La cámara se mostrará en formato cuadrado 1:1, centrada.</p>' + btn('camera-on', 'Activar cámara y micrófono') + '</div></div>' +
       '<div class="dl-controls"><div class="dl-row wrap" id="dl-live">' + btn('rec-start', '● Iniciar grabación', 'dl-rec', 'disabled') + btn('rec-stop', '■ Detener', 'danger', 'disabled') +
       '<span class="dl-mic"><meter id="dl-meter" min="0" max="60" low="25" high="55" optimum="45"></meter><small id="dl-meter-text">Micrófono</small></span><small id="dl-write"></small></div>' +
-      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-keep-next', 'Guardar y seguir', 'secondary', 'title="Guarda la toma y graba la siguiente sección tras 3 s"') + btn('rec-retry', 'Descartar y repetir', 'secondary') + '</div>' +
+      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-keep-next', 'Guardar y seguir', 'secondary', 'title="Guarda la toma y graba la siguiente sección tras 3 s"') + btn('rec-retry', 'Descartar y repetir', 'secondary') +
+        btn('rec-mark', '✂ Bueno hasta aquí', 'secondary', 'title="Pausa el video en el último momento bueno: se conserva hasta ahí y grabas solo lo que sigue"') + '</div>' +
+      '<div class="dl-row wrap dl-splice" id="dl-splicebar" hidden><span id="dl-splice-info"></span>' + btn('rec-splice-start', '● Grabar desde aquí', 'dl-rec') + btn('rec-splice-cancel', 'Cancelar', 'secondary') + '</div>' +
       (s.take ? '<p class="dl-note">Una sola toma por sección. Si grabas de nuevo, la toma actual se conserva hasta que la nueva quede verificada en el disco.</p>' : '') +
       '<div class="dl-two tight"><label class="dl-field">Cámara<select id="dl-cam"></select></label><label class="dl-field">Micrófono<select id="dl-mic"></select></label></div></div>' +
-      (s.take ? '<details class="dl-panel"><summary>Ver la toma activa</summary><video controls preload="metadata" src="' + fileUrl(s.take.master || s.take.original) + '"></video></details>' : '') + '</section>' +
+      (s.take ? '<details class="dl-panel"><summary>Ver la toma activa</summary><video id="dl-active-video" controls preload="metadata" src="' + fileUrl(s.take.master || s.take.original) + '"></video>' +
+        '<div class="dl-row wrap">' + btn('rec-mark-active', '✂ Bueno hasta aquí · seguir grabando desde este punto', 'secondary') + '</div><p class="dl-note">Pausa el video en el último momento bueno. Se conserva hasta ahí y grabas solo lo que sigue; la toma activa no cambia hasta que guardes la nueva.</p></details>' : '') + '</section>' +
       '<div class="dl-panel dl-prompter-panel"><h2>Teleprompter</h2>' +
       '<div class="dl-seg"><button data-dl="prompter-mode" data-mode="auto" class="' + (DirectPrompter.state().mode === 'auto' ? 'active' : '') + '">A · Automático</button><button data-dl="prompter-mode" data-mode="voice" class="' + (DirectPrompter.state().mode === 'voice' ? 'active' : '') + '">B · Seguimiento por voz</button></div>' +
       '<div class="dl-row wrap">' + btn('prompter-toggle', '▶ Iniciar / pausar', 'secondary') + btn('prompter-back', '⟲ Retroceder', 'secondary') + btn('prompter-forward', 'Avanzar ⟳', 'secondary') + btn('prompter-reset', 'Inicio', 'secondary') + '</div>' +
@@ -428,6 +431,9 @@
   const Recorder = (function () {
     let stream = null, recorder = null, draw = 0, meter = 0, audioCtx = null, take = null, writes = Promise.resolve(), sequence = 0, writeError = null, started = 0, inspecting = false;
     let lastVoice = 0, watcher = 0, countdown = 0, session = true;
+    // Continuación: { source, sectionId, cut, snapped, heard, index, drafts } mientras se graba «desde aquí».
+    let splice = null;
+    const PREROLL = 3;
     const MIN_AUTO_SAVE = 3;
 
     function busy() { return Boolean(recorder); }
@@ -435,7 +441,107 @@
     function mountStage() {
       const s = section();
       DirectPrompter.mount(q('#dl-prompter-host'), s?.text || '');
+      if (splice && splice.sectionId !== s?.id) splice = null;
       if (stream) attach();
+      applySplice();
+    }
+
+    const takeUrl = takeId => 'records://direct/take/' + encodeURIComponent(S.project.id) + '/' + encodeURIComponent(takeId);
+    const sourceUrl = source => source.kind === 'draft' ? takeUrl(source.takeId) : fileUrl(S.project.sections.find(x => x.id === source.sectionId).take.original);
+
+    function applySplice() {
+      const bar = q('#dl-splicebar');
+      if (!bar) return;
+      const setup = Boolean(splice) && !take && !recorder;
+      bar.hidden = !setup;
+      if (!setup) { DirectPrompter.pickable(false); return; }
+      q('#dl-splice-info').textContent = 'Se conserva hasta ' + clock(splice.cut) + (splice.snapped ? ' (ajustado a la pausa)' : '') + '. ' +
+        (splice.heard ? 'El teleprompter quedó en la frase siguiente; si no es ahí, toca la palabra correcta.' : 'Toca en el teleprompter la palabra desde la que sigues.') +
+        ' Antes de grabar escucharás los últimos ' + PREROLL + ' s.';
+      DirectPrompter.seek(splice.index);
+      DirectPrompter.pickable(true, i => { if (splice) splice.index = i; });
+    }
+
+    /** «Bueno hasta aquí»: marca el punto de la toma en revisión ('review') o de la toma activa ('active'). */
+    async function mark(kind) {
+      if (recorder || inspecting) return;
+      const s = section();
+      const video = q(kind === 'active' ? '#dl-active-video' : '#dl-review');
+      if (kind === 'review' && !take) return;
+      if (!video || !(video.currentTime >= 1)) throw Error('Adelanta el video hasta el último momento bueno y vuelve a pulsar «Bueno hasta aquí»');
+      video.pause();
+      const source = kind === 'active' ? { kind: 'active', sectionId: s.id } : { kind: 'draft', takeId: take.id };
+      toast('Buscando la pausa más cercana…');
+      const point = await call('take.resume', { id: S.project.id, source, at: video.currentTime });
+      const words = DirectPrompter.state().words;
+      const guess = Math.round(words * Math.min(1, point.cut / (point.duration || point.cut)));
+      const found = point.heard ? DirectPrompter.locate(point.heard, guess) : -1;
+      const drafts = [...(splice?.drafts || []), ...(source.kind === 'draft' ? [source.takeId] : [])];
+      splice = { source, sectionId: s.id, cut: point.cut, snapped: point.snapped, heard: found >= 0, index: found >= 0 ? found : guess, drafts };
+      // El borrador marcado pasa a ser la base: no se borra hasta guardar la toma unida.
+      take = null;
+      closeReview();
+      showCamera();
+      applySplice();
+    }
+
+    function showCamera() {
+      const review = q('#dl-review');
+      if (review) review.hidden = true;
+      if (q('#dl-camera')) q('#dl-camera').hidden = false;
+      if (q('#dl-reviewbar')) q('#dl-reviewbar').hidden = true;
+      if (q('#dl-live')) q('#dl-live').hidden = false;
+    }
+
+    /** Preroll: reproduce los últimos segundos buenos y después graba solo la continuación. */
+    async function startSplice() {
+      if (!splice || recorder || inspecting) return;
+      if (!stream) await open();
+      DirectPrompter.pickable(false);
+      q('#dl-splicebar').hidden = true;
+      const review = q('#dl-review');
+      const from = Math.max(0, splice.cut - PREROLL);
+      review.src = sourceUrl(splice.source);
+      q('#dl-camera').hidden = true;
+      review.hidden = false;
+      const w = q('#dl-write');
+      if (w) w.textContent = 'Preroll: escucha el final de la parte buena…';
+      await new Promise(resolve => review.addEventListener('loadedmetadata', resolve, { once: true }));
+      review.currentTime = from;
+      await review.play().catch(() => {});
+      await new Promise(resolve => {
+        const limit = setTimeout(done, (splice.cut - from + 1.5) * 1000);
+        function done() { clearTimeout(limit); review.removeEventListener('timeupdate', check); resolve(); }
+        function check() { if (review.currentTime >= splice.cut - 0.05 || review.ended) done(); }
+        review.addEventListener('timeupdate', check);
+      });
+      review.pause();
+      closeReview();
+      showCamera();
+      if (w) w.textContent = '';
+      await start();
+    }
+
+    function cancelSplice() {
+      if (!splice) return;
+      const base = splice.source;
+      splice = null;
+      DirectPrompter.pickable(false);
+      DirectPrompter.reset();
+      q('#dl-splicebar').hidden = true;
+      if (base.kind === 'draft') reviewDraft(base.takeId, 'Toma en revisión');
+    }
+
+    async function reviewDraft(takeId, label, at = 0) {
+      take = { id: takeId };
+      q('#dl-live').hidden = true;
+      q('#dl-reviewbar').hidden = false;
+      q('#dl-review-info').textContent = label;
+      q('#dl-camera').hidden = true;
+      const review = q('#dl-review');
+      review.hidden = false;
+      review.src = takeUrl(takeId);
+      if (at > 0) review.addEventListener('loadedmetadata', () => { review.currentTime = at; }, { once: true });
     }
 
     async function open() {
@@ -587,6 +693,18 @@
       try {
         info = await call('take.inspect', { id: S.project.id, takeId: take.id });
         if (!info.ok) throw Error('La toma no tiene suficiente imagen y sonido. Repite la grabación.');
+        if (splice) {
+          const w = q('#dl-write');
+          if (w) w.textContent = 'Uniendo con la parte buena… (unos segundos por cada minuto grabado)';
+          let joined;
+          try { joined = await call('take.join', { id: S.project.id, source: splice.source, cut: splice.cut, takeId: take.id }); }
+          catch (error) { take = null; showCamera(); applySplice(); throw error; }
+          finally { if (w) w.textContent = ''; }
+          take = { id: joined.id };
+          DirectPrompter.reset();
+          await reviewDraft(joined.id, 'Toma unida de ' + clock(joined.duration) + ' · revisa la unión en ' + clock(joined.cut), Math.max(0, joined.cut - PREROLL));
+          return;
+        }
         q('#dl-live').hidden = true;
         q('#dl-reviewbar').hidden = false;
         q('#dl-review-info').textContent = 'Toma de ' + clock(info.duration) + ' · ' + Math.round(info.size / 1048576) + ' MB';
@@ -633,6 +751,12 @@
       if (el) el.disabled = true;
       const result = await call('take.commit', { id: S.project.id, takeId: current.id });
       take = null;
+      if (splice) {
+        // Ya está guardada la toma unida: los borradores intermedios sobran.
+        for (const id of splice.drafts) if (id !== current.id) await call('take.discard', { id: S.project.id, takeId: id }).catch(() => {});
+        splice = null;
+        S.pending = await call('take.pending', { id: S.project.id }).catch(() => S.pending);
+      }
       setProject(result.project);
       S.saving = 'Toma guardada';
       const next = S.project.sections.find(s => !s.take);
@@ -649,6 +773,7 @@
       if (take) await call('take.discard', { id: S.project.id, takeId: take.id }).catch(() => {});
       take = null;
       closeReview();
+      if (splice) { showCamera(); return applySplice(); } // Repite solo desde la misma marca.
       DirectPrompter.reset();
       render();
     }
@@ -667,9 +792,10 @@
       DirectPrompter.unmount();
       // Una toma sin confirmar no se borra: queda en «Tomas recuperables».
       take = null;
+      splice = null;
     }
 
-    return { mountStage, open, start, stop, keep, keepAndNext, retry, close, busy, next, cancelSession, stream: () => stream };
+    return { mountStage, open, start, stop, keep, keepAndNext, retry, close, busy, next, cancelSession, mark, startSplice, cancelSplice, splicing: () => Boolean(splice) && !take, stream: () => stream };
   })();
 
   // ── Eventos ───────────────────────────────────────────────────────────────
@@ -756,7 +882,11 @@
     }
     if (action === 'lib-add') { const r = await call('library.add', { tags: q('#dl-lib-tags').value }); if (r.errors.length) toast(r.errors[0], true); S.library = r.items; return render(); }
     if (action === 'lib-remove') { if (!confirm('¿Quitar esta foto de la biblioteca?')) return; S.library = await call('library.remove', { id }); return render(); }
-    if (action === 'rec-start') return Recorder.start();
+    if (action === 'rec-start') return Recorder.splicing() ? Recorder.startSplice() : Recorder.start();
+    if (action === 'rec-mark') return Recorder.mark('review');
+    if (action === 'rec-mark-active') return Recorder.mark('active');
+    if (action === 'rec-splice-start') return Recorder.startSplice();
+    if (action === 'rec-splice-cancel') return Recorder.cancelSplice();
     if (action === 'rec-stop') return Recorder.stop();
     if (action === 'rec-keep') return Recorder.keep();
     if (action === 'rec-keep-next') return Recorder.keepAndNext();

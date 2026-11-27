@@ -79,6 +79,12 @@ details.dl-panel video,.dl-export video{width:100%;border-radius:12px;background
 .dl-prompter.voice .dl-w.now{color:#f2d79f;text-decoration:underline 3px #31c870;text-underline-offset:8px}
 .dl-prompter.listening::after{content:'● voz';position:absolute;right:12px;bottom:6px;font:700 11px Inter,Arial,sans-serif;color:#31c870}
 .dl-prompter-panel input[type=range]{width:100%}
+/* Continuar una toma: el punto de continuación se elige tocando una palabra. */
+.dl-prompter-host.picking{pointer-events:auto}
+.dl-prompter-host.picking .dl-w{cursor:pointer;border-radius:4px}
+.dl-prompter-host.picking .dl-w:hover{background:rgba(212,177,95,.28)}
+.dl-prompter .dl-w.resume{color:#f2d79f;text-decoration:underline 3px #d4b15f;text-underline-offset:8px}
+.dl-splice{background:rgba(212,177,95,.1);border:1px solid rgba(212,177,95,.45);border-radius:10px;padding:8px 12px}
 /* Editor */
 .dl-editor{display:grid;grid-template-columns:230px minmax(520px,1fr) 360px;gap:16px;align-items:start}
 .dl-ed-main{display:grid;gap:10px;min-width:0}

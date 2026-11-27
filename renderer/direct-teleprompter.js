@@ -46,6 +46,12 @@
     state.tokens = L.tokens(state.text);
     state.scroll = 0;
     state.cursor = 0;
+    container.onclick = event => {
+      const word = state.picking && event.target.closest?.('.dl-w');
+      if (!word) return;
+      seek(Number(word.dataset.i));
+      state.onPick?.(state.cursor);
+    };
     container.innerHTML = '<div class="dl-prompter" style="--dl-size:' + state.size + 'px;--dl-opacity:' + state.opacity + '">' +
       '<div class="dl-prompter-mask"><div class="dl-prompter-text">' + markup() + '</div></div><div class="dl-prompter-guide"></div>' +
       '<div class="dl-prompter-status" aria-live="polite"></div></div>';
@@ -54,6 +60,7 @@
 
   function unmount() {
     stop();
+    pickable(false);
     stopVoice();
     if (state.root) state.root.innerHTML = '';
     state.root = null;
@@ -110,7 +117,31 @@
     paint();
   }
 
-  function reset() { state.scroll = 0; state.cursor = 0; paint(); }
+  function reset() { state.scroll = 0; state.cursor = 0; clearResume(); paint(); }
+
+  // ── Continuar una toma desde un punto ─────────────────────────────────────
+  function clearResume() { el('.dl-prompter-text')?.querySelectorAll('.dl-w.resume').forEach(w => w.classList.remove('resume')); }
+
+  /** Coloca el texto para leer desde la palabra «index» (en la línea guía). */
+  function seek(index) {
+    state.cursor = Math.max(0, Math.min(state.tokens.length, Math.round(Number(index) || 0)));
+    const text = el('.dl-prompter-text');
+    const target = text?.querySelector('.dl-w[data-i="' + Math.min(state.cursor, state.tokens.length - 1) + '"]');
+    clearResume();
+    if (target) { state.scroll = target.offsetTop - text.parentElement.clientHeight * 0.3; target.classList.add('resume'); }
+    paint();
+    return state.cursor;
+  }
+
+  /** Índice de la palabra siguiente a lo último dicho, o -1 si no hay coincidencia fiable. */
+  function locate(heard, guess = 0) { return L.align(state.tokens, heard, guess, { back: 400, ahead: 400 }); }
+
+  /** Mientras está activo, tocar una palabra la elige como punto de continuación. */
+  function pickable(on, onPick) {
+    state.picking = Boolean(on);
+    state.onPick = on ? onPick : null;
+    state.root?.classList.toggle('picking', state.picking);
+  }
 
   /** ¿Se llegó al final del texto? (para detener la grabación automáticamente). */
   function atEnd() {
@@ -248,5 +279,5 @@
     } finally { v.pending = false; }
   }
 
-  window.DirectPrompter = { mount, unmount, start, stop, toggle, jump, reset, atEnd, setSize, setSpeed, setOpacity, setMode, state: () => ({ mode: state.mode, running: state.running, speed: state.speed, size: state.size, opacity: state.opacity, cursor: state.cursor, words: state.tokens.length }), wav };
+  window.DirectPrompter = { mount, unmount, start, stop, toggle, jump, reset, seek, locate, pickable, atEnd, setSize, setSpeed, setOpacity, setMode, state: () => ({ mode: state.mode, running: state.running, speed: state.speed, size: state.size, opacity: state.opacity, cursor: state.cursor, words: state.tokens.length }), wav };
 })();

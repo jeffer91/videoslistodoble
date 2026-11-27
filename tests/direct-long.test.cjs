@@ -203,6 +203,61 @@ test('una sola toma activa por sección: la anterior se conserva hasta verificar
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('el corte «bueno hasta aquí» se ajusta a la pausa de voz más cercana', () => {
+  const pauses = [{ start: 2.8, end: 3.4 }, { start: 9, end: 9.5 }];
+  assert.equal(directStore.snapToPause(3.6, pauses), 2.8 + directStore.SPLICE_FADE, 'Retrocede a la pausa anterior');
+  assert.equal(directStore.snapToPause(3.3, pauses), 3.3, 'Dentro de la pausa se respeta el punto elegido');
+  assert.equal(directStore.snapToPause(2.9, pauses), 2.8 + directStore.SPLICE_FADE, 'Deja un respiro al principio de la pausa');
+  assert.equal(directStore.snapToPause(1.5, pauses), 1.5, 'Sin pausa anterior se usa el punto elegido');
+});
+
+test('continuar una toma desde un punto: se conserva lo bueno y se une la continuación con fundido', { timeout: 180000 }, async () => {
+  const root = tempRoot();
+  try {
+    const good = path.join(root, 'buena.webm'), more = path.join(root, 'continuacion.webm');
+    // Toma de 6 s con una pausa de voz entre 2,8 s y 3,4 s.
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x480:r=30:d=6',
+      '-f', 'lavfi', '-i', 'sine=f=220:d=6,volume=enable=between(t\\,2.8\\,3.4):volume=0', '-c:v', 'libvpx', '-b:v', '600k', '-c:a', 'libopus', good]);
+    await makeTake(more, 3);
+    const p = directStore.createProject(root, { title: 'Continuar' });
+    const project = directStore.importScript(root, { id: p.id, text: ONCE });
+    const sectionId = project.sections[1].id;
+
+    // 1) Sobre un borrador en revisión (todavía sin guardar).
+    const draft = await addTake(root, p.id, sectionId, good);
+    assert.equal(await directStore.indexTake(root, { id: p.id, takeId: draft.id }), true, 'El borrador se indexa para poder adelantarlo');
+    assert.ok((await directStore.inspectTake(root, { id: p.id, takeId: draft.id })).duration > 5.5);
+    const source = { kind: 'draft', takeId: draft.id };
+    const point = await directStore.resumePoint(root, { id: p.id, source, at: 3.7 });
+    assert.ok(point.snapped && point.cut >= 2.8 && point.cut <= 3.2, 'Corte en la pausa: ' + point.cut);
+    const cont = await addTake(root, p.id, sectionId, more);
+    const joined = await directStore.joinTake(root, { id: p.id, source, cut: point.cut, takeId: cont.id });
+    assert.ok(Math.abs(joined.duration - (point.cut + 3 - directStore.SPLICE_FADE)) < 0.25, 'Duración unida: ' + joined.duration);
+    const info = await directStore.inspectTake(root, { id: p.id, takeId: joined.id });
+    assert.ok(info.ok && info.width === 640 && info.height === 480);
+    const ids = directStore.pendingTakes(root, p.id).map(t => t.id);
+    assert.ok(ids.includes(draft.id), 'La parte buena no se borra hasta guardar');
+    assert.ok(!ids.includes(cont.id), 'La continuación ya está dentro de la unión');
+    await directStore.commitTake(root, { id: p.id, takeId: joined.id });
+    assert.equal(directStore.read(root, p.id).sections[1].take.id, joined.id);
+
+    // 2) Sobre la toma activa: no cambia hasta guardar la nueva unión.
+    const active = directStore.read(root, p.id).sections[1].take;
+    const again = await addTake(root, p.id, sectionId, more);
+    const second = await directStore.joinTake(root, { id: p.id, source: { kind: 'active', sectionId }, cut: 2, takeId: again.id });
+    assert.equal(directStore.read(root, p.id).sections[1].take.id, active.id, 'La toma activa sigue intacta');
+    assert.ok(Math.abs(second.duration - (2 + 3 - directStore.SPLICE_FADE)) < 0.25);
+    await directStore.commitTake(root, { id: p.id, takeId: second.id });
+    assert.ok(!fs.existsSync(directStore.resolveFile(root, p.id, active.original)), 'La anterior se borra solo después de guardar');
+
+    // Una continuación dañada no toca nada y queda recuperable.
+    const broken = directStore.beginTake(root, { id: p.id, sectionId });
+    directStore.appendTake(root, { id: p.id, takeId: broken.id, sequence: 0, data: Buffer.alloc(4096, 7).toString('base64') });
+    await assert.rejects(directStore.joinTake(root, { id: p.id, source: { kind: 'active', sectionId }, cut: 2, takeId: broken.id }));
+    assert.ok(directStore.pendingTakes(root, p.id).some(t => t.id === broken.id));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('copia de seguridad con grabaciones: exportar e importar', { timeout: 120000 }, async () => {
   const root = tempRoot();
   const other = tempRoot();

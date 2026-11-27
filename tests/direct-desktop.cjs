@@ -101,6 +101,34 @@ async function run() {
     const lum = s => s.channels.slice(0, 3).reduce((a, c) => a + c.mean, 0) / 3;
     assert.ok(lum(top) > lum(bottom) * 0.6, 'La zona del teleprompter no aparece en la toma (' + lum(top).toFixed(1) + ' / ' + lum(bottom).toFixed(1) + ')');
 
+    // «Bueno hasta aquí»: se conserva la toma activa hasta un punto y solo se graba lo que sigue.
+    await page.locator('.dl-sections button').nth(1).click();
+    await page.getByText('Ver la toma activa').click();
+    const before = await page.evaluate(() => window.DirectLong.state.project.sections[1].take);
+    await page.waitForFunction(() => document.querySelector('#dl-active-video')?.readyState >= 1);
+    await page.evaluate(() => { document.querySelector('#dl-active-video').currentTime = 2; });
+    await page.waitForFunction(() => document.querySelector('#dl-active-video').currentTime >= 1.9);
+    await page.getByRole('button', { name: /Bueno hasta aquí · seguir/ }).click();
+    await page.locator('#dl-splicebar').waitFor({ state: 'visible', timeout: 30000 });
+    assert.match(await page.locator('#dl-splice-info').innerText(), /Se conserva hasta 0:0[12]/);
+    await page.locator('#dl-prompter-host .dl-w[data-i="4"]').click();
+    assert.equal(await page.evaluate(() => DirectPrompter.state().cursor), 4, 'Tocar una palabra elige desde dónde seguir');
+    for (const attempt of [0, 1]) {
+      await page.getByRole('button', { name: '● Grabar desde aquí' }).click();
+      await page.getByText(/Guardando en disco/).waitFor({ timeout: 25000 });
+      await page.waitForTimeout(2600);
+      await page.getByRole('button', { name: '■ Detener' }).click();
+      await page.getByText(/Toma unida de/).waitFor({ timeout: 90000 });
+      assert.equal((await page.evaluate(() => window.DirectLong.state.project.sections[1].take)).id, before.id, 'La toma activa no cambia antes de guardar');
+      // Primer intento: «Descartar y repetir» vuelve a la misma marca, no al principio.
+      if (!attempt) { await page.getByRole('button', { name: 'Descartar y repetir' }).click(); await page.locator('#dl-splicebar').waitFor({ state: 'visible' }); }
+    }
+    await page.getByRole('button', { name: 'Reemplazar la toma activa' }).click();
+    await page.waitForFunction(id => window.DirectLong.state.project.sections[1].take.id !== id, before.id, { timeout: 30000 });
+    const spliced = await page.evaluate(() => window.DirectLong.state.project.sections[1].take);
+    assert.ok(spliced.duration > 3 && spliced.duration < before.duration + 3.5, 'Toma unida: ' + spliced.duration + ' s (antes ' + before.duration + ' s)');
+    assert.equal(await page.evaluate(() => window.DirectLong.call('take.pending', { id: window.DirectLong.state.project.id }).then(l => l.length)), 0, 'Sin borradores sobrantes');
+
     // Edición con propuesta inteligente.
     await page.getByRole('button', { name: '3 · Edición' }).click();
     await page.locator('#ed-canvas').waitFor();
