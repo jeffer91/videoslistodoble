@@ -101,12 +101,14 @@ Este apartado sirve para documentales, historias y análisis de varios minutos g
    - **A · Automático**: con velocidad, pausa, retroceso y avance.
    - **B · Seguimiento por voz**: avanza mientras hablas. Con Whisper instalado, recoloca la posición también cuando repites una frase.
    Cada sección guarda una sola toma. Si grabas otra, la anterior se conserva hasta que la nueva queda verificada.
+   **Subsecciones para tomas cortas**: si una sección es larga, divídela en el guion con líneas `▸ SUBSECCIÓN 1.1 · PAPÁ Y MAMÁ`, `▸ SUBSECCIÓN 1.2 · LOS HERMANOS`… (1.x en la sección 01, 2.x en la 02). El teleprompter muestra solo la subsección que toca y la grabas sola; **Grabar 1.2 (sigue la toma)** continúa la toma con 3 s de preroll y un fundido suave. Si te equivocas, repites solo esa subsección con **↺ Repetir** (las siguientes se vuelven a grabar a continuación). Las subsecciones solo te guían: no se leen, no salen en el video ni crean capítulos.
 4. En **Edición**, cambia la distribución en cualquier momento de la toma:
    - A · presentador grande;
    - B · presentador e imagen;
    - C · presentador en una esquina;
    - D · imagen a pantalla completa;
    - E · fondo deportivo.
+   **Narrador en las transiciones**: en cada sección (no en la introducción) una voz dice el título de la transición, por ejemplo «Padres de la Patria», mientras corre la cartela con una **música de tráiler impactante**. Esa música es gratis porque la app la crea en tu equipo. La voz entra a los 0,7 s, después del golpe inicial; la música baja sola mientras habla y la cartela se alarga si hace falta para que la frase quepa (máximo 10 s). Pulsa **🎙 Escuchar narrador** en la transición para oírlo. La voz es Piper (es_MX «ald», libre y gratuita): se descarga una sola vez (≈ 85 MB) y después funciona sin internet. Puedes desactivar el narrador o la música en cada transición.
    **Proponer composición** analiza la narración y sugiere cambios editables. **Detectar menciones** busca fotos con licencia libre en Wikimedia Commons; también puedes subir las tuyas. Configura además la transición de cada sección.
 5. En **Música y efectos**, elige la música de cada sección. Studio crea la música y los efectos en tu equipo y añade ducking automático. En **Subtítulos**, transcribe con Whisper, corrige el texto y elige si quieres el .srt o los subtítulos integrados.
 6. En **Exportar y publicar**, genera una vista previa rápida o el MP4 final de 1920 × 1080 con los capítulos calculados. Después puedes publicarlo en YouTube con la autorización oficial de Google.
@@ -122,7 +124,7 @@ Con el **piloto automático** solo tienes que pasar el guion y grabar:
   - añade los llamados a la acción.
 - **Con todo grabado**, exporta el MP4 final con pantalla final, título, descripción, etiquetas y revisión final, y puede publicarlo en YouTube o programarlo.
 
-Pide el guion a Claude con el botón **Copiar instrucciones** para incluir marcas como `[IMAGEN: Harry Kane Bayern]`, `[DATO: 44 goles]` o `[PREGUNTA: ¿Kane ganará la Champions?]`.
+Pide el guion a Claude con el botón **📋 Copiar formato del guion**: copia al portapapeles de Windows las instrucciones con el tema del proyecto, las subsecciones 1.1, 1.2… y marcas como `[IMAGEN: Harry Kane Bayern]`, `[DATO: 44 goles]` o `[PREGUNTA: ¿Kane ganará la Champions?]`.
 
 Detalles técnicos, funciones locales o con internet y pruebas: [Requisitos de Videos largos directos](REQUISITOS_VIDEOS_LARGOS_DIRECTOS.md).
 

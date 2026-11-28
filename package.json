@@ -1,6 +1,6 @@
 {
   "name": "11-records-studio-desktop",
-  "version": "0.12.7",
+  "version": "0.13.0",
   "private": true,
   "description": "Estudio local para crear, revisar y publicar videos de 11 Récords",
   "main": "main.cjs",
@@ -14,7 +14,7 @@
     "prestart": "node scripts/ensure-deps.cjs",
     "studio": "node scripts/studio.cjs",
     "test:desktop": "node tests/studio-desktop.cjs",
-    "test:direct": "node tests/direct-desktop.cjs",
+    "test:direct": "node tests/direct-desktop.cjs && node tests/direct-parts-desktop.cjs",
     "test:shorts": "node tests/shorts-browser.cjs",
     "pages": "node scripts/build-pages.cjs",
     "predist:win": "python scripts/build-animation.py"

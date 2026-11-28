@@ -1,6 +1,7 @@
 'use strict';
 /** Pruebas del apartado «Videos largos directos» (backend y lógica compartida). */
-process.env.RECORDS_DEEPFILTER = ''; // sin descargas: limpieza de voz con filtros clásicos
+process.env.RECORDS_DEEPFILTER = '';
+process.env.RECORDS_PIPER ??= 'off'; // el narrador (Piper) se prueba aparte: sin descargas // sin descargas: limpieza de voz con filtros clásicos
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -14,6 +15,7 @@ const directStore = require('../backend/direct-store.cjs');
 const intel = require('../backend/direct-intel.cjs');
 const captions = require('../backend/direct-captions.cjs');
 const render = require('../backend/direct-render.cjs');
+const directAudio = require('../backend/direct-audio.cjs');
 const { createYouTube } = require('../backend/direct-youtube.cjs');
 const Layout = require('../renderer/direct-layout.js');
 
@@ -258,6 +260,113 @@ test('continuar una toma desde un punto: se conserva lo bueno y se une la contin
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+// ── Subsecciones en cadena ─────────────────────────────────────────────────
+const ROONEY = ['Gancho.', '', '━━━━━━━━━━━━━━━━━━', 'SECCIÓN 01 · LA HISTORIA DE WAYNE ROONEY', '━━━━━━━━━━━━━━━━━━', '',
+  '[MÚSICA: emotiva] [TRANSICIÓN: estadio]', '', '▸ SUBSECCIÓN 1.1 · PAPÁ Y MAMÁ', 'Su padre era boxeador. [IMAGEN: Wayne Rooney niño]', '',
+  '▸ SUBSECCIÓN 1.2 · LOS HERMANOS', 'Tenía dos hermanos menores.', '', '**Subsección 1.3: Croxteth**', 'Creció en Croxteth.', '',
+  '━━━━━━━━━━━━━━━━━━', 'SECCIÓN 02 · EVERTON', '━━━━━━━━━━━━━━━━━━', '', 'Debutó a los 16 años.'].join('\n');
+
+test('reconoce subsecciones 1.1, 1.2… que guían la grabación sin leerse ni salir en el video', async () => {
+  const sections = scripts.parseSections(ROONEY);
+  assert.deepEqual(sections.map(s => s.title), ['Introducción', 'LA HISTORIA DE WAYNE ROONEY', 'EVERTON'], 'SUBSECCIÓN no abre una sección nueva');
+  const parts = Layout.subsections(sections[1].text);
+  assert.deepEqual(parts.map(p => [p.label, p.title]), [['1.1', 'PAPÁ Y MAMÁ'], ['1.2', 'LOS HERMANOS'], ['1.3', 'Croxteth']]);
+  assert.match(parts[0].text, /^\[MÚSICA: emotiva\]/, 'Las marcas previas van con la primera subsección');
+  assert.match(parts[0].text, /\[IMAGEN: Wayne Rooney niño\]/);
+  assert.equal(parts[1].text, 'Tenía dos hermanos menores.');
+  assert.deepEqual(parts.map(p => p.word), [0, 4, 8], 'Primera palabra de cada subsección dentro de la sección');
+  const clean = Layout.stripMarks(sections[1].text);
+  assert.ok(!/SUBSECCI|Subsecci|PAPÁ|Croxteth\*/.test(clean), 'El encabezado no pasa al teleprompter: ' + clean);
+  assert.match(clean, /Creció en Croxteth\./);
+  const marks = Layout.marks(sections[1].text).marks;
+  assert.deepEqual(marks.filter(m => m.type === 'imagen').map(m => m.word), [4], 'Las demás marcas mantienen su posición');
+  assert.equal(Layout.subsections(sections[2].text).length, 0);
+  assert.equal(Layout.subsections('▸ subseccion 2,1 - inicio\nHola.')[0].label, '2.1', 'Acepta minúsculas, sin tilde y coma');
+  // En un PDF las líneas de subsección no se pegan al párrafo anterior (el PDF de prueba solo admite Latin-1: «-» en vez de «▸»).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'direct-sub-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'guion.pdf'), pdf(ROONEY.replace(/━+/g, '==================').replace(/▸/g, '-').split('\n')));
+    const fromPdf = scripts.parseSections((await scripts.readScriptFile(path.join(dir, 'guion.pdf'))).text);
+    assert.deepEqual(Layout.subsections(fromPdf[1].text).map(p => p.label), ['1.1', '1.2', '1.3']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('progreso de la cadena: cuántas subsecciones tiene la toma y cuál sigue', () => {
+  const text = scripts.parseSections(ROONEY)[1].text;
+  let c = Layout.chainProgress({ text, take: null });
+  assert.equal(c.done, 0); assert.equal(c.next.label, '1.1'); assert.equal(c.complete, false);
+  c = Layout.chainProgress({ text, take: { chain: [{ label: '1.1', start: 0 }, { label: '1.2', start: 20 }] } });
+  assert.equal(c.done, 2); assert.equal(c.next.label, '1.3');
+  c = Layout.chainProgress({ text, take: { chain: [{ label: '1.1', start: 0 }, { label: '1.2', start: 20 }, { label: '1.3', start: 41 }] } });
+  assert.equal(c.complete, true); assert.equal(c.next, null);
+  assert.equal(Layout.chainProgress({ text, take: { duration: 90 } }).complete, true, 'Una toma antigua sin cadena cuenta como completa');
+  assert.equal(Layout.chainProgress({ text: 'Sin subsecciones.', take: { duration: 9 } }).complete, true);
+  assert.equal(Layout.chainProgress({ text: 'Sin subsecciones.', take: null }).complete, false);
+  // El corte de «siguiente subsección» deja un respiro en el silencio final.
+  assert.equal(directStore.endOfVoice(30, [{ start: 27.5, end: 30 }]), 27.9);
+  assert.equal(directStore.endOfVoice(30, [{ start: 10, end: 11 }]), 30, 'Sin silencio al final se usa toda la toma');
+  assert.deepEqual(directStore.normalizeChain([{ label: '1.1', start: 0 }, { label: 'x', start: 3 }, { label: '1.2', start: 0 }, { label: '1.3', start: 12 }], 10), [{ label: '1.1', start: 0 }]);
+});
+
+test('grabación en cadena: cada subsección sigue la toma y se puede repetir desde una', { timeout: 180000 }, async () => {
+  const root = tempRoot();
+  try {
+    const part = path.join(root, 'parte.webm'), quiet = path.join(root, 'parte-silencio.webm');
+    await makeTake(part, 3);
+    // 3 s de voz y 2 s de silencio al final (como tras la parada automática).
+    await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x480:r=30:d=5',
+      '-f', 'lavfi', '-i', 'sine=f=220:d=5,volume=enable=gt(t\\,3):volume=0', '-c:v', 'libvpx', '-b:v', '600k', '-c:a', 'libopus', quiet]);
+    const p = directStore.createProject(root, { title: 'Rooney' });
+    let project = directStore.importScript(root, { id: p.id, text: ROONEY });
+    const sectionId = project.sections[1].id;
+    const add = async (file, label) => {
+      const draft = directStore.beginTake(root, { id: p.id, sectionId, part: label });
+      const data = fs.readFileSync(file);
+      directStore.appendTake(root, { id: p.id, takeId: draft.id, sequence: 0, data: data.toString('base64') });
+      return draft;
+    };
+    // 1.1
+    const first = await add(quiet, '1.1');
+    await directStore.commitTake(root, { id: p.id, takeId: first.id });
+    let take = directStore.read(root, p.id).sections[1].take;
+    assert.deepEqual(take.chain, [{ label: '1.1', start: 0 }]);
+    assert.equal(directStore.progress(directStore.read(root, p.id)).recorded, 0, 'Con subsecciones pendientes la sección no cuenta como grabada');
+    // 1.2 a continuación: se corta en el silencio final, no en el último fotograma.
+    const active = { kind: 'active', sectionId };
+    const tail = await directStore.tailPoint(root, { id: p.id, source: active });
+    assert.ok(tail.cut > 3 && tail.cut < 3.6, 'Corte tras la voz: ' + tail.cut);
+    const second = await add(part);
+    const joined = await directStore.joinTake(root, { id: p.id, source: active, cut: tail.cut, takeId: second.id, part: '1.2' });
+    assert.deepEqual(joined.chain.map(x => x.label), ['1.1', '1.2']);
+    assert.ok(Math.abs(joined.chain[1].start - (tail.cut - directStore.SPLICE_FADE)) < 0.05);
+    await directStore.commitTake(root, { id: p.id, takeId: joined.id });
+    // 1.3
+    const third = await add(part);
+    const tail2 = await directStore.tailPoint(root, { id: p.id, source: active });
+    const joined3 = await directStore.joinTake(root, { id: p.id, source: active, cut: tail2.cut, takeId: third.id, part: '1.3' });
+    await directStore.commitTake(root, { id: p.id, takeId: joined3.id });
+    project = directStore.read(root, p.id);
+    take = project.sections[1].take;
+    assert.deepEqual(take.chain.map(x => x.label), ['1.1', '1.2', '1.3']);
+    assert.ok(Layout.chainProgress(project.sections[1]).complete);
+    assert.equal(directStore.progress(project).recorded, 1);
+    // Repetir 1.2: se conserva 1.1 entera y la cadena vuelve a quedar en 1.2.
+    const start12 = take.chain[1].start;
+    const redo = await add(part);
+    const again = await directStore.joinTake(root, { id: p.id, source: active, cut: start12, takeId: redo.id, part: '1.2' });
+    assert.deepEqual(again.chain.map(x => x.label), ['1.1', '1.2']);
+    assert.ok(Math.abs(again.duration - (start12 + 3 - directStore.SPLICE_FADE)) < 0.25, 'Duración: ' + again.duration);
+    // «Bueno hasta aquí» dentro de 1.2 no añade otra subsección.
+    await directStore.commitTake(root, { id: p.id, takeId: again.id });
+    const fix = await add(part);
+    const fixed = await directStore.joinTake(root, { id: p.id, source: active, cut: start12 + 1.5, takeId: fix.id, part: '1.2' });
+    assert.deepEqual(fixed.chain.map(x => x.label), ['1.1', '1.2']);
+    // Sin `part` (sección sin subsecciones) la toma no lleva cadena.
+    const plain = directStore.beginTake(root, { id: p.id, sectionId: project.sections[2].id });
+    assert.equal(plain.chain, undefined);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('copia de seguridad con grabaciones: exportar e importar', { timeout: 120000 }, async () => {
   const root = tempRoot();
   const other = tempRoot();
@@ -395,6 +504,137 @@ test('subtítulos SRT y ASS con resaltado de palabra', () => {
   const part = captions.ass(words, { style: 'clasico' }, 1920, 1080, { from: 2, to: 4 });
   const times = [...part.matchAll(/Dialogue: 0,([\d:.]+),([\d:.]+)/g)].map(m => m.slice(1).map(t => t.split(':').reduce((a, b) => a * 60 + Number(b), 0)));
   assert.ok(times.length >= 2 && times.every(([a, b]) => a >= 0 && b <= 2.001 && b > a), 'Tiempos recortados al tramo');
+});
+
+// ── Narrador de las transiciones ───────────────────────────────────────────
+const narrator = require('../backend/direct-narrator.cjs');
+
+test('narrador: solo el título, nunca en la intro, y la transición se alarga para que quepa la voz', () => {
+  const root = tempRoot();
+  try {
+    const p = directStore.createProject(root, { title: 'Próceres' });
+    let project = directStore.importScript(root, { id: p.id, text: 'Gancho.\n\nSECCIÓN 01 · PADRES DE LA PATRIA\n\nTexto.\n\nSECCIÓN 02 · La Independencia\n\nMás texto.' });
+    const [intro, s1, s2] = project.sections;
+    assert.equal(s1.transition.narrator, true, 'Narrador activado por defecto');
+    assert.equal(s1.transition.music, 'trailer');
+    assert.equal(narrator.narratorText(s1), 'Padres de la patria', 'Solo el título, sin gritar en mayúsculas');
+    assert.equal(narrator.narratorText(s2), 'La Independencia');
+    assert.equal(narrator.wants(project, intro), false, 'La introducción no lleva narrador');
+    assert.equal(narrator.wants(project, s1), true);
+    // El título propio de la transición manda.
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { title: 'Los próceres', duration: 9.5, music: 'ninguna' } } });
+    const t = project.sections[1].transition;
+    assert.equal(narrator.narratorText(project.sections[1]), 'Los próceres');
+    assert.equal(t.duration, 9.5, 'La duración admite hasta 10 s');
+    assert.equal(t.music, 'ninguna');
+    // Tiempos: entra a 0,7 s y deja 1 s al final; nunca más de 10 s.
+    assert.equal(narrator.transitionLength(4, { duration: 1.6 }), 4);
+    assert.equal(narrator.transitionLength(2, { duration: 1.6 }), 3.3);
+    assert.equal(narrator.transitionLength(3, { duration: 30 }), 10);
+    assert.equal(narrator.transitionLength(3, null), 3);
+    // Una locución guardada solo vale para el mismo texto.
+    const hash = narrator.hashOf('Los próceres');
+    project = directStore.setNarration(root, { id: p.id, sectionId: s1.id, narration: { text: 'Los próceres', hash, voice: 'x', duration: 2.4 } });
+    assert.equal(narrator.current(null, project, project.sections[1]).duration, 2.4);
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { title: 'Otro título', duration: 2 } } });
+    assert.equal(project.sections[1].transition.narration.text, 'Los próceres', 'Cambiar otros campos no borra la locución');
+    assert.equal(narrator.current(null, project, project.sections[1]), null, 'Con otro título hay que generarla de nuevo');
+    project = directStore.updateSection(root, { id: p.id, sectionId: s1.id, patch: { transition: { narrator: false } } });
+    assert.equal(narrator.wants(project, project.sections[1]), false);
+    // Proyectos antiguos sin los campos nuevos.
+    const file = path.join(root, 'Directos', p.id, 'proyecto.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const sec of raw.sections) { delete sec.transition.narrator; delete sec.transition.music; delete sec.transition.narration; }
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const old = directStore.read(root, p.id);
+    assert.equal(old.sections[2].transition.narrator, true);
+    assert.equal(old.sections[2].transition.music, 'trailer');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('música de tráiler gratis creada en el equipo: golpe al entrar, base bajo la voz y golpe final', { timeout: 120000 }, async () => {
+  const root = tempRoot();
+  try {
+    const file = await directAudio.sting(root, 5, media);
+    assert.equal(file, directAudio.stingFile(root, 5.04), 'Se reutiliza por décimas de segundo');
+    const info = await media.probe(file);
+    assert.ok(info.duration > 5 && info.duration < 7.5, 'Duración ' + info.duration);
+    const level = async (start) => {
+      const r = await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-ss', String(start), '-t', '0.4', '-i', file, '-af', 'volumedetect', '-f', 'null', '-']);
+      return Number(/mean_volume: (-?[\d.]+)/.exec(r.stderr)[1]);
+    };
+    const [hit, bed, last] = [await level(0), await level(2), await level(4.1)];
+    assert.ok(hit > bed + 2 && last > bed + 2, 'Golpes por encima de la base: ' + [hit, bed, last].join(' / '));
+    assert.ok(bed > -40, 'La base suena bajo la voz: ' + bed);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Con RECORDS_TEST_PIPER y RECORDS_TEST_PIPER_MODEL (un piper y una voz .onnx) se prueba la voz real.
+test('narrador real: Piper dice el título en la transición, que se alarga para la voz', { timeout: 600000, skip: !process.env.RECORDS_TEST_PIPER && 'sin Piper de prueba' }, async () => {
+  const root = tempRoot();
+  const saved = [process.env.RECORDS_PIPER, process.env.RECORDS_PIPER_MODEL];
+  process.env.RECORDS_PIPER = process.env.RECORDS_TEST_PIPER;
+  process.env.RECORDS_PIPER_MODEL = process.env.RECORDS_TEST_PIPER_MODEL;
+  try {
+    const file = path.join(root, 'toma.webm');
+    await makeTake(file, 5);
+    const p = directStore.createProject(root, { title: 'Próceres' });
+    let project = directStore.importScript(root, { id: p.id, text: 'Gancho inicial.\n\nSECCIÓN 01 · PADRES DE LA PATRIA\n\nTexto narrable.' });
+    for (const section of project.sections) {
+      const draft = await addTake(root, p.id, section.id, file);
+      await directStore.commitTake(root, { id: p.id, takeId: draft.id });
+    }
+    directStore.saveSettings(root, { id: p.id, settings: { transitions: { duration: 2 }, cta: { endscreen: false, enabled: false } } });
+    for (const s of directStore.read(root, p.id).sections) directStore.updateSection(root, { id: p.id, sectionId: s.id, patch: { transition: { duration: 2 } } });
+    const spoken = await narrator.speak(root, 'Padres de la patria', {}, media);
+    assert.ok(spoken.duration > 0.6 && spoken.duration < 6, 'Voz de ' + spoken.duration + ' s');
+    const events = [];
+    const entry = await render.exportProject(root, p.id, { quality: 'draft', send: e => events.push(e) });
+    project = directStore.read(root, p.id);
+    const n = project.sections[1].transition.narration;
+    assert.equal(n.text, 'Padres de la patria');
+    assert.equal(project.sections[0].transition.narration, null, 'La intro no lleva narrador');
+    const length = narrator.transitionLength(2, n);
+    assert.ok(length > 2, 'La transición se alarga para la voz: ' + length);
+    const output = directStore.resolveFile(root, p.id, entry.file);
+    const info = await media.probe(output);
+    assert.ok(Math.abs(info.duration - (2 + 5 + length + 5)) < 0.3, 'Duración ' + info.duration);
+    assert.deepEqual(entry.chapters.map(c => c.start), [0, 7]);
+    // Volumen medio en una ventana del video final.
+    const level = async (start, length = 0.5) => {
+      const r = await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-ss', String(start), '-t', String(length), '-i', output, '-af', 'highpass=f=300,lowpass=f=3400,volumedetect', '-f', 'null', '-']);
+      return Number(/mean_volume: (-?[\d.]+)/.exec(r.stderr)[1]);
+    };
+    const voice = await level(7 + narrator.START + 0.1, Math.min(0.8, n.duration - 0.2));
+    const before = await level(7 + 0.15, 0.4);
+    assert.ok(voice > -32, 'Se oye al narrador: ' + voice);
+    assert.ok(voice > before + 3, 'La voz entra tras el golpe inicial: ' + before + ' → ' + voice);
+    // Mismo texto: la locución se reutiliza, no se genera otra.
+    const again = await narrator.prepare(root, p.id, {}, media);
+    assert.equal(again.warning, null);
+    assert.equal(fs.readdirSync(path.join(root, 'Recursos', 'Directos', 'Narrador')).filter(f => f.endsWith('.m4a')).length, 1);
+  } finally {
+    [process.env.RECORDS_PIPER, process.env.RECORDS_PIPER_MODEL] = saved;
+    if (saved[0] === undefined) delete process.env.RECORDS_PIPER;
+    if (saved[1] === undefined) delete process.env.RECORDS_PIPER_MODEL;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sin narrador disponible se exporta igual y se avisa', async () => {
+  const root = tempRoot();
+  try {
+    const p = directStore.createProject(root, { title: 'Sin red' });
+    const project = directStore.importScript(root, { id: p.id, text: 'Gancho.\n\nSECCIÓN 01 · PADRES DE LA PATRIA\n\nTexto.' });
+    const file = path.join(root, 'Directos', p.id, 'proyecto.json');
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    raw.sections[1].take = { id: 'x', original: 'x', duration: 5 };
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const result = await narrator.prepare(root, p.id, {}, media);
+    assert.match(result.warning, /Narrador no disponible/);
+    const plan = render.plan(result.project);
+    assert.equal(plan.pieces.find(x => x.kind === 'transition' && x.section.id === project.sections[1].id).duration, 4, 'Sin voz, la duración configurada');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 // ── Exportación ────────────────────────────────────────────────────────────

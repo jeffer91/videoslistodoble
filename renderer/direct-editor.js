@@ -11,7 +11,7 @@
   const E = { segment: null, playing: false, frame: 0, video: null, canvas: null, ctx: null, pps: 40, undo: [], images: new Map(), layers: new Map(), pendingLayers: new Map(),
     saveTimer: 0, transition: null, drag: null, ctaPlan: {}, ctaLayers: new Map() };
   const ACTIONS = new Set(['ed-play', 'ed-split', 'ed-delete', 'ed-layout', 'ed-side', 'ed-corner', 'ed-propose', 'ed-apply', 'ed-discard', 'ed-undo', 'ed-entities', 'ed-search', 'ed-entity',
-    'ed-use-image', 'ed-own-images', 'ed-paste-image', 'ed-remove-image', 'ed-transition-preview', 'ed-seg', 'ed-zoom-in', 'ed-zoom-out', 'ed-transcribe', 'ed-open-source', 'ed-select-image', 'ed-tag', 'ed-cut', 'ed-cta', 'ed-cta-add', 'ed-cuts-auto']);
+    'ed-use-image', 'ed-own-images', 'ed-paste-image', 'ed-remove-image', 'ed-transition-preview', 'ed-narrator-preview', 'ed-seg', 'ed-zoom-in', 'ed-zoom-out', 'ed-transcribe', 'ed-open-source', 'ed-select-image', 'ed-tag', 'ed-cut', 'ed-cta', 'ed-cta-add', 'ed-cuts-auto']);
   const COLORS = { A: '#2fbf6b', B: '#d4b15f', C: '#55d3c2', D: '#c46be0', E: '#e0784a' };
 
   const esc = v => window.DirectLong.esc(v);
@@ -59,7 +59,7 @@
     return '<div class="dl-timeline" id="ed-timeline"><div class="dl-tl-labels"><span>Tiempo</span><span>Transición</span><span>Composición</span><span>Imágenes</span><span>Subtítulos</span><span>Voz</span><span>Música</span><span>Cortes</span><span>Llamados</span></div>' +
       '<div class="dl-tl-scroll"><div class="dl-tl-inner" style="width:' + width + 'px">' +
       '<div class="dl-tl-ruler">' + ticks.join('') + '</div>' +
-      '<div class="dl-tl-track">' + (S.project.settings.transitions.enabled && s.transition.enabled ? '<span class="dl-tl-block trans" style="left:0;width:' + Math.min(width, 120) + 'px" title="Entra antes de la sección">◆ ' + esc(s.transition.style === 'auto' ? 'Automática' : L.BACKGROUND_NAMES[s.transition.style]) + ' · ' + s.transition.duration + ' s</span>' : '<span class="dl-tl-empty">Sin transición</span>') + '</div>' +
+      '<div class="dl-tl-track">' + (S.project.settings.transitions.enabled && s.transition.enabled ? '<span class="dl-tl-block trans" style="left:0;width:' + Math.min(width, 120) + 'px" title="Entra antes de la sección">◆ ' + esc(s.transition.style === 'auto' ? 'Automática' : L.BACKGROUND_NAMES[s.transition.style]) + ' · ' + trLength(s) + ' s' + (trLength(s) !== s.transition.duration ? ' 🎙' : '') + '</span>' : '<span class="dl-tl-empty">Sin transición</span>') + '</div>' +
       '<div class="dl-tl-track">' + segs.map((g, i) => '<button data-dl="ed-seg" data-index="' + i + '" class="dl-tl-block seg ' + (g.filler ? 'filler ' : '') + ((current() === g || (g.id && g.id === E.segment)) ? 'sel' : '') + '" style="left:' + px(g.start) + 'px;width:' + px(g.end - g.start) + 'px;--c:' + COLORS[L.effective(g, hasImage(g))] + '" title="' + esc(L.NAMES[g.layout] + (g.reason ? ' · ' + g.reason : '')) + '">' +
         '<b>' + L.effective(g, hasImage(g)) + '</b> ' + esc(L.NAMES[L.effective(g, hasImage(g))]) + (g.source === 'auto' ? ' · IA' : '') + '</button>' + (i < segs.length - 1 && !g.filler && !segs[i + 1].filler ? '<span class="dl-tl-handle" data-handle="' + i + '" style="left:' + px(g.end) + 'px"></span>' : '')).join('') + '</div>' +
       '<div class="dl-tl-track">' + segs.filter(g => hasImage(g)).map(g => '<span class="dl-tl-block img" style="left:' + px(g.start) + 'px;width:' + px(g.end - g.start) + 'px">▧ ' + esc(S.project.images.find(i => i.id === g.imageId).name) + '</span>').join('') + '</div>' +
@@ -130,6 +130,31 @@
       '<p class="dl-note">Las sugerencias vienen de Wikimedia Commons (requiere internet) y solo incluyen licencias libres. Una imagen en internet no es de uso libre por defecto: revisa licencia, autor y derechos de imagen.</p></section>';
   }
 
+  /** Duración real de la cartela: con narrador se alarga para que quepa la voz (como al exportar). */
+  function trLength(s) {
+    const t = s.transition, n = t.narration;
+    const said = (t.title || s.title || '').trim();
+    if (s.intro || t.narrator === false || S.project.settings.transitions.narrator === false || !n?.duration || !n.text) return t.duration;
+    if (n.text.toLocaleLowerCase('es') !== said.toLocaleLowerCase('es')) return t.duration;
+    return Math.min(10, Math.max(t.duration, Math.ceil((0.7 + n.duration + 1) * 10) / 10));
+  }
+
+  /** Narrador: una voz dice el título mientras corre la cartela (nunca en la introducción). */
+  function narratorPanel(s) {
+    const t = s.transition;
+    if (s.intro) return '<p class="dl-note">La introducción no lleva narrador.</p>';
+    const on = t.narrator !== false && S.project.settings.transitions.narrator !== false;
+    const said = t.title || s.title;
+    const n = t.narration && t.narration.text ? t.narration : null;
+    const length = on ? trLength(s) : t.duration;
+    return '<div class="dl-narrator">' +
+      '<label class="dl-check"><input type="checkbox" id="ed-tr-narrator" ' + (on ? 'checked' : '') + '> 🎙 Narrador dice el título: «' + esc(said) + '»</label>' +
+      '<label class="dl-field">Música de la transición<select id="ed-tr-music">' + [['trailer', 'Tráiler impactante (golpes y tensión · gratis, creada en tu PC)'], ['ninguna', 'Sin música propia (sigue la de la sección)']]
+        .map(([k, v]) => '<option value="' + k + '"' + ((t.music || 'trailer') === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      (on ? '<small class="dl-note">' + (n ? 'Voz de ' + n.duration.toFixed(1) + ' s · la transición dura ' + length.toFixed(1) + ' s (entra a los 0,7 s y termina 1 s antes de la sección).' : 'La voz se genera en tu PC al escucharla o al exportar.') + '</small>' +
+        btn('ed-narrator-preview', '🎙 Escuchar narrador', 'secondary') : '') + '</div>';
+  }
+
   function transitionPanel() {
     const s = section(), t = s.transition;
     return '<section class="dl-panel"><h2>Transición de entrada</h2>' +
@@ -138,7 +163,8 @@
       '<label class="dl-field">Título<input id="ed-tr-title" maxlength="140" value="' + esc(t.title) + '" placeholder="' + esc(s.title) + '"></label>' +
       '<label class="dl-field">Fondo<select id="ed-tr-image"><option value="auto"' + ((t.image || 'auto') === 'auto' ? ' selected' : '') + '>Automático: primera foto de la sección</option><option value="none"' + (t.image === 'none' ? ' selected' : '') + '>Solo fondo gráfico (estilo)</option>' +
         S.project.images.filter(i => !i.source?.stat).map(i => '<option value="' + esc(i.id) + '"' + (t.image === i.id ? ' selected' : '') + '>' + esc(String(i.name || 'Foto').slice(0, 70)) + '</option>').join('') + '</select></label>' +
-      '<label class="dl-field">Duración <output>' + t.duration + ' s</output><input type="range" id="ed-tr-dur" min="2" max="8" step="0.5" value="' + t.duration + '"></label>' +
+      '<label class="dl-field">Duración <output>' + t.duration + ' s</output><input type="range" id="ed-tr-dur" min="2" max="10" step="0.5" value="' + t.duration + '"></label>' +
+      narratorPanel(s) +
       '<div class="dl-two tight"><label class="dl-field">Sonido<select id="ed-tr-sound">' + [['ninguno', 'Sin sonido'], ['impacto', 'Impacto'], ['whoosh', 'Whoosh'], ['estadio', 'Estadio'], ['multitud', 'Multitud'], ['cinematico', 'Cinematográfico'], ['musica', 'Música breve']].map(([k, v]) => '<option value="' + k + '"' + (t.sound === k ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
       '<label class="dl-field">Volumen<input type="range" id="ed-tr-vol" min="0" max="1.5" step="0.05" value="' + t.volume + '"></label></div>' +
       btn('ed-transition-preview', '▶ Ver transición', 'secondary') + '</section>';
@@ -509,13 +535,41 @@
       if (E.video) E.video.pause();
       E.playing = false;
       await new Promise(r => setTimeout(r, 250));
-      E.transition = { start: performance.now(), duration: s.transition.duration, layers };
+      E.transition = { start: performance.now(), duration: trLength(s), layers };
       if (s.transition.sound !== 'ninguno') {
         const audio = new Audio(await api.call('audio.sample', { kind: 'sfx', name: s.transition.sound }));
         audio.volume = Math.min(1, s.transition.volume);
         audio.play().catch(() => {});
       }
+      // Con la voz ya generada, «Ver transición» también suena con narrador y tráiler.
+      const length = trLength(s);
+      if (length !== s.transition.duration || (s.transition.narration && !s.intro && s.transition.narrator !== false)) {
+        const n = s.transition.narration;
+        if (n?.hash && trLength(s) >= s.transition.duration && n.text.toLocaleLowerCase('es') === (s.transition.title || s.title).trim().toLocaleLowerCase('es')) {
+          if (s.transition.music !== 'ninguna') { const m = new Audio('records://direct/sting/' + Math.round(length * 10)); m.volume = 0.35; m.play().catch(() => {}); }
+          const v = new Audio('records://direct/narrator/' + n.hash + '.m4a');
+          setTimeout(() => v.play().catch(() => {}), 700);
+        }
+      }
       return drawTransition();
+    }
+    if (action === 'ed-narrator-preview') {
+      target.disabled = true;
+      const label = target.textContent;
+      target.textContent = 'Generando la voz…';
+      try {
+        const r = await api.call('narrator.preview', { id: p.id, sectionId: s.id });
+        s.transition = r.project.sections.find(x => x.id === s.id).transition;
+        Object.assign(S.project, { sections: S.project.sections.map(x => x.id === s.id ? { ...x, transition: s.transition } : x) });
+        const box = q('.dl-narrator'); if (box) box.outerHTML = narratorPanel(s);
+        // Mezcla de prueba: impacto, tráiler y la voz con los mismos tiempos que en el video.
+        const play = (url, volume, delay = 0) => { const a = new Audio(url); a.volume = volume; setTimeout(() => a.play().catch(() => {}), delay); return a; };
+        if (s.transition.sound !== 'ninguno') play(await api.call('audio.sample', { kind: 'sfx', name: s.transition.sound }), Math.min(1, s.transition.volume));
+        if (r.sting) play(r.sting, 0.35);
+        play(r.url, 1, Math.round(r.start * 1000));
+        api.toast('Narrador: «' + r.text + '» · transición de ' + r.length.toFixed(1) + ' s');
+      } finally { const b = q('[data-action="ed-narrator-preview"]'); if (b) { b.disabled = false; b.textContent = label; } }
+      return;
     }
     if (action === 'ed-cut') {
       const cuts = s.cuts.map(c => c.id === target.dataset.id ? { ...c, enabled: !c.enabled } : c);
@@ -602,10 +656,12 @@
         return draw();
       }
       if (t.id.startsWith('ed-tr-')) {
-        const patch = { enabled: q('#ed-tr-on').checked, style: q('#ed-tr-style').value, title: q('#ed-tr-title').value, duration: Number(q('#ed-tr-dur').value), sound: q('#ed-tr-sound').value, volume: Number(q('#ed-tr-vol').value), image: q('#ed-tr-image').value };
+        const patch = { enabled: q('#ed-tr-on').checked, style: q('#ed-tr-style').value, title: q('#ed-tr-title').value, duration: Number(q('#ed-tr-dur').value), sound: q('#ed-tr-sound').value, volume: Number(q('#ed-tr-vol').value), image: q('#ed-tr-image').value,
+          ...(q('#ed-tr-narrator') ? { narrator: q('#ed-tr-narrator').checked, music: q('#ed-tr-music').value } : {}) };
         const saved = await api.call('section.update', { id: p.id, sectionId: s.id, patch: { transition: patch } });
         s.transition = saved.sections.find(x => x.id === s.id).transition;
         const tl = q('#ed-timeline'); if (tl) { tl.outerHTML = timeline(); bindTimeline(); }
+        if (t.id === 'ed-tr-narrator' || t.id === 'ed-tr-title') { const box = q('.dl-narrator'); if (box) box.outerHTML = narratorPanel(s); }
       }
     } catch (error) { api.toast(error.message, true); }
   }

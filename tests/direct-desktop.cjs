@@ -1,4 +1,5 @@
 'use strict';
+process.env.RECORDS_PIPER ??= 'off'; // el narrador (Piper) se prueba aparte: sin descargas
 /**
  * Prueba de extremo a extremo del apartado «Videos largos directos» en Electron
  * con cámara y micrófono simulados: guion → grabación con teleprompter →

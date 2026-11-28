@@ -14,6 +14,7 @@ const path = require('node:path');
 const Layout = require('../renderer/direct-layout.js');
 const graphics = require('./direct-graphics.cjs');
 const audio = require('./direct-audio.cjs');
+const narrator = require('./direct-narrator.cjs');
 const captions = require('./direct-captions.cjs');
 const intel = require('./direct-intel.cjs');
 const directStore = require('./direct-store.cjs');
@@ -48,7 +49,12 @@ function plan(project) {
   project.sections.forEach((section, index) => {
     if (!section.take) { missing.push(section.title); return; }
     const transition = project.settings.transitions.enabled && section.transition.enabled;
-    if (transition) pieces.push({ kind: 'transition', section, style: styles[index], duration: section.transition.duration || project.settings.transitions.duration });
+    if (transition) {
+      // Con narrador, la cartela dura lo necesario para que la voz quepa entera.
+      const base = section.transition.duration || project.settings.transitions.duration;
+      const narration = narrator.current(null, project, section);
+      pieces.push({ kind: 'transition', section, style: styles[index], duration: narrator.transitionLength(base, narration), narration });
+    }
     pieces.push({ kind: 'section', section, duration: Layout.keptDuration(section.cuts, section.take.duration) });
   });
   const cta = project.settings.cta || {};
@@ -203,7 +209,14 @@ async function renderAudio(ctx, timeline, total, output) {
   const voices = [];
   const gain = project.settings.voice.gain || 1;
   for (const item of timeline) {
-    if (item.kind === 'transition') {
+    if (item.kind === 'transition' && item.narration && fs.existsSync(narrator.fileFor(root, item.narration.hash))) {
+      // El narrador entra tras el golpe inicial y va en la pista de voz: la música baja sola (ducking).
+      const index = add(['-i', narrator.fileFor(root, item.narration.hash)]);
+      const delay = Math.round(narrator.START * 1000);
+      graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo,volume=' + gain + ',adelay=' + delay + '|' + delay +
+        ',apad=whole_dur=' + item.duration.toFixed(4) + ',atrim=0:' + item.duration.toFixed(4) + ',asetpts=N/SR/TB[nar' + voices.length + ']');
+      voices.push('[nar' + voices.length + ']');
+    } else if (item.kind === 'transition') {
       voices.push('[sil' + voices.length + ']');
       graph.push('anullsrc=r=48000:cl=stereo,atrim=0:' + item.duration.toFixed(4) + ',asetpts=N/SR/TB[sil' + (voices.length - 1) + ']');
     } else if (item.kind === 'endscreen') {
@@ -232,6 +245,20 @@ async function renderAudio(ctx, timeline, total, output) {
   const music = [];
   if (project.settings.music.enabled) {
     const sources = new Map();
+    // Música de tráiler bajo las transiciones con narrador; la música de la sección entra al terminar.
+    for (const item of timeline) {
+      if (item.kind !== 'transition' || item.section.intro || item.section.transition.music === 'ninguna' || !item.narration) continue;
+      const file = await audio.sting(root, item.duration, media);
+      const index = add(['-i', file]);
+      const offset = Math.round(item.start * 1000);
+      const len = item.duration + 1.2;
+      const volume = (item.section.audio.volume ?? project.settings.music.volume) * 1.6;
+      graph.push('[' + index + ':a]aresample=48000,aformat=channel_layouts=stereo,atrim=0:' + len.toFixed(4) + ',asetpts=N/SR/TB,afade=t=out:st=' + (len - 1.1).toFixed(3) + ':d=1.1,volume=' + volume.toFixed(3) +
+        ',adelay=' + offset + '|' + offset + '[sting' + music.length + ']');
+      music.push('[sting' + music.length + ']');
+      const group = ctx.sectionsOnTimeline.find(g => g.section.id === item.section.id);
+      if (group && group.start === item.start) group.start = item.start + item.duration - 0.3;
+    }
     for (const group of ctx.sectionsOnTimeline) {
       const sec = group.section;
       if (sec.audio.mood === 'ninguna') continue;
@@ -333,6 +360,9 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
     send({ stage: 'prepare', percent: Math.round(5 * i / recorded.length), message: 'Preparando la toma de «' + piece.section.title + '»' });
     await directStore.prepareMaster(root, { id, sectionId: piece.section.id }, signal, media);
   }
+  // Narrador de las transiciones (Piper, local). Sin él se exporta igual y se avisa.
+  const narration = await narrator.prepare(root, id, { signal, send }, media);
+  if (narration.warning) send({ stage: 'prepare', percent: 5, message: narration.warning, warning: narration.warning });
   project = directStore.read(root, id);
   const fresh = plan(project).pieces;
   const temp = media.temporary(root);
@@ -361,7 +391,7 @@ async function exportProject(root, id, { quality = 'final', signal = new AbortCo
         const file = path.join(temp, 'p' + files.length + '.mp4');
         const count = piece.kind === 'transition' ? await renderTransition(ctx, piece, file) : await renderEndscreen(ctx, piece, file);
         files.push(file);
-        timeline.push({ kind: piece.kind, section: piece.section, start: frames / FPS, duration: count / FPS });
+        timeline.push({ kind: piece.kind, section: piece.section, start: frames / FPS, duration: count / FPS, narration: piece.narration || null });
         frames += count;
         done++;
         continue;

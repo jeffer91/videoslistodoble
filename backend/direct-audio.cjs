@@ -124,6 +124,47 @@ function ensure(root, kind, name, media = require('./media.cjs')) {
   return task;
 }
 
+// ── Música de tráiler para las transiciones con narrador ────────────────────
+// Golpe de metales graves (braam) al entrar, tambores, una subida de tensión
+// bajo la voz del narrador y un golpe final justo cuando empieza la sección.
+// Se crea a la medida de cada transición (en décimas de segundo).
+const STING_VERSION = 1;
+function stingExpression(seconds) {
+  const d = seconds, end = Math.max(1.6, d - 0.9);
+  const braam = (at, gain) => {
+    const u = '(t-' + f(at) + ')';
+    const chord = [N.D2, N.A2, N.D3, N.F3].map(n => '(' + tone(note(n), [1, 0.75, 0.55, 0.4, 0.28, 0.18]).replace(/\*t\)/g, '*' + u + ')') + ')').join('+');
+    return 'if(gte(t,' + f(at) + '),(' + chord + ')*' + f(gain) + '*min(1,' + u + '/0.04)*exp(-1.15*' + u + ')+0.9*sin(2*PI*(34+120*exp(-9*' + u + '))*' + u + ')*exp(-2.2*' + u + '),0)';
+  };
+  // Tambores cada 0,75 s entre el primer y el último golpe.
+  const drums = 'if(gt(t,1)*lt(t,' + f(end - 0.3) + '),0.7*sin(2*PI*(55+85*exp(-28*mod(t-1,0.75)))*mod(t-1,0.75))*exp(-9*mod(t-1,0.75)),0)';
+  // Subida: ruido filtrado y tono que asciende hasta el golpe final.
+  const x = 'min(1,max(0,(t-0.8)/' + f(Math.max(0.5, end - 0.8)) + '))';
+  const riser = 'if(lt(t,' + f(end) + '),(random(1)*2-1)*pow(' + x + ',2)*0.22+sin(2*PI*(140+520*pow(' + x + ',2))*t)*pow(' + x + ',1.5)*0.12,0)';
+  return braam(0, 0.05) + '+' + braam(end, 0.06) + '+' + drums + '+' + riser;
+}
+
+function stingFile(root, seconds) {
+  const tenths = Math.round(Math.min(12, Math.max(2, Number(seconds) || 4)) * 10);
+  return path.join(libraryDir(root), 'sting-trailer-' + tenths + '-v' + STING_VERSION + '.m4a');
+}
+
+/** Devuelve la música de tráiler para una transición de `seconds`; la crea la primera vez. */
+function sting(root, seconds, media = require('./media.cjs')) {
+  const file = stingFile(root, seconds);
+  if (fs.existsSync(file)) return Promise.resolve(file);
+  if (pending.has(file)) return pending.get(file);
+  const d = Number(path.basename(file).split('-')[2]) / 10;
+  const partial = file.replace(/\.m4a$/, '.parcial.m4a');
+  const task = media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    "aevalsrc=exprs='" + stingExpression(d) + "':s=" + RATE + ':d=' + (d + 1.6).toFixed(2),
+    '-af', 'highpass=f=28,lowpass=f=9000,aecho=0.8:0.7:80|170|300:0.3|0.2|0.12,loudnorm=I=-18:TP=-2:LRA=11,aresample=48000,afade=t=out:st=' + (d + 0.9).toFixed(2) + ':d=0.7',
+    '-ac', '2', '-c:a', 'aac', '-b:a', '192k', partial]).then(() => { fs.renameSync(partial, file); return file; })
+    .finally(() => pending.delete(file));
+  pending.set(file, task);
+  return task;
+}
+
 function catalog() {
   return {
     music: Object.entries(MUSIC).map(([id, v]) => ({ id, label: v.label, seconds: v.seconds, license: 'Original de la aplicación · uso libre en YouTube' })),
@@ -131,4 +172,4 @@ function catalog() {
   };
 }
 
-module.exports = { ensure, fileFor, catalog, musicExpression, soundGraph, MUSIC, SOUNDS, libraryDir };
+module.exports = { ensure, fileFor, sting, stingFile, stingExpression, catalog, musicExpression, soundGraph, MUSIC, SOUNDS, libraryDir };

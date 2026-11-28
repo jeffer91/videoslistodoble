@@ -114,13 +114,69 @@
 
   // ── Marcas del guion: [IMAGEN: …], [DATO: …], [MÚSICA: …], [PREGUNTA: …], [CTA: …] ─
   const MARK_TYPES = { imagen: 'imagen', foto: 'imagen', dato: 'dato', estadistica: 'dato', musica: 'musica', pregunta: 'pregunta', cta: 'cta', llamado: 'cta',
-    composicion: 'composicion', plano: 'composicion', transicion: 'transicion' };
+    composicion: 'composicion', plano: 'composicion', transicion: 'transicion', subseccion: 'subseccion' };
   const MARK = /\[\s*([A-Za-zÁÉÍÓÚáéíóúÑñ]+)\s*:\s*([^\]\n]{1,200})\]/g;
   const fold = value => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
+  // Encabezado de subsección dentro de una sección: «▸ SUBSECCIÓN 1.2 · LA FAMILIA».
+  // Solo guía la grabación (tomas más cortas): no se lee ni sale en el video.
+  const SUBHEADER = /^[ \t]*(?:[#▸►▶>*•·\-–—]+[ \t]*)*(?:\*\*)?[ \t]*SUB[ \t-]*SECCI[OÓ]N[ \t]*(?:N[ºo°.][ \t]*)?(\d{1,3}(?:[.,]\d{1,3})?)(?![\d.,]*\d)[ \t]*(?:[·•.:|\-–—]+[ \t]*)?([^\n]*?)[ \t]*(?:\*\*)?[ \t]*$/gimu;
+
+  /** Convierte las líneas «SUBSECCIÓN 1.2 · Título» en la marca [SUBSECCIÓN: 1.2 · Título]. */
+  function subheaders(text) {
+    return String(text || '').replace(SUBHEADER, (_m, n, title) => {
+      const t = title.replace(/[━─═*#[\]]+/g, '').trim();
+      return '[SUBSECCIÓN: ' + n.replace(',', '.') + (t ? ' · ' + t : '') + ']';
+    });
+  }
+
+  /**
+   * Subsecciones de una sección, en orden: [{ label: '1.2', title, text, word }].
+   * `text` conserva las marcas de esa parte; `word` es su primera palabra narrable
+   * dentro de la sección. El texto anterior a la primera subsección va con ella.
+   * Sin encabezados de subsección devuelve [].
+   */
+  function subsections(text) {
+    const raw = subheaders(text);
+    const found = [];
+    const re = new RegExp(MARK.source, 'g');
+    let match;
+    while ((match = re.exec(raw))) {
+      if (MARK_TYPES[fold(match[1])] !== 'subseccion') continue;
+      const value = match[2].trim();
+      const head = /^(\d{1,3}(?:[.,]\d{1,3})?)\s*(?:[·•.:|\-–—]+\s*)?(.*)$/u.exec(value);
+      found.push({ at: match.index, end: re.lastIndex, label: head ? head[1].replace(',', '.') : String(found.length + 1), title: (head ? head[2] : value).trim() });
+    }
+    if (!found.length) return [];
+    return found.map((item, i) => {
+      const to = i + 1 < found.length ? found[i + 1].at : raw.length;
+      const body = (i ? '' : raw.slice(0, item.at)) + raw.slice(item.end, to);
+      return { label: item.label, title: item.title, text: body.replace(/^\s+|\s+$/g, ''), word: i ? countWords(stripMarks(raw.slice(0, item.at))) : 0 };
+    });
+  }
+
+  /**
+   * Estado de la grabación en cadena de una sección:
+   * { parts, done, next, complete }. `done` es cuántas subsecciones (en orden)
+   * ya tiene la toma activa. Una toma grabada sin subsecciones cuenta como completa.
+   */
+  function chainProgress(section) {
+    const parts = subsections(section?.text);
+    const take = section?.take;
+    if (!parts.length) return { parts, done: 0, next: null, complete: Boolean(take) };
+    let done = 0;
+    if (take && !Array.isArray(take.chain)) done = parts.length;
+    else if (take) {
+      const last = take.chain.at(-1)?.label;
+      const index = parts.findIndex(p => p.label === last);
+      done = index >= 0 ? index + 1 : Math.min(parts.length, take.chain.length);
+    }
+    return { parts, done, next: parts[done] || null, complete: done >= parts.length };
+  }
+
   /** Separa las marcas del texto narrable. `word` es el número de palabras narrables previas. */
   function marks(text) {
-    const raw = String(text || '');
+    const raw = subheaders(text);
     const list = [];
     let clean = '', last = 0, match;
     MARK.lastIndex = 0;
@@ -249,5 +305,5 @@
     return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(r).padStart(2, '0');
   }
 
-  return { W, H, FPS, NAMES, BACKGROUND_NAMES, effective, boxes, cover, fill, frames, at, normalize, tokens, similar, align, stamp, marks, stripMarks, kept, keptDuration, mapTime, skip, pieces, ctaBox };
+  return { W, H, FPS, NAMES, BACKGROUND_NAMES, effective, boxes, cover, fill, frames, at, normalize, tokens, similar, align, stamp, marks, stripMarks, subsections, chainProgress, SUBHEADER, kept, keptDuration, mapTime, skip, pieces, ctaBox };
 });

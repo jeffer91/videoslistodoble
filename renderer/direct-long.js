@@ -31,6 +31,14 @@
 
   function section(id = S.sectionId) { return S.project?.sections.find(s => s.id === id) || null; }
   function label(s) { return s.intro ? 'Intro' : String(s.number).padStart(2, '0'); }
+  /** «PAPÁ Y MAMÁ» → «Papá y mamá» (los títulos en mayúsculas se leen mejor así). */
+  function niceTitle(title) {
+    const t = String(title || '').trim();
+    const letters = t.replace(/[^\p{L}]/gu, '');
+    if (!letters || letters !== letters.toUpperCase()) return t;
+    const lower = t.toLocaleLowerCase('es');
+    return lower.charAt(0).toLocaleUpperCase('es') + lower.slice(1);
+  }
 
   // ── Activación del apartado ────────────────────────────────────────────────
   async function activate() {
@@ -199,7 +207,12 @@
   function sectionList(selectable = true) {
     return '<ol class="dl-sections">' + S.project.sections.map(s => '<li class="' + (s.id === S.sectionId ? 'active' : '') + '">' +
       '<button data-dl="select" data-id="' + esc(s.id) + '" ' + (selectable ? '' : 'disabled') + '><span class="dl-num">' + label(s) + '</span><span class="dl-sec-title">' + esc(s.title) + '</span>' +
-      '<span class="dl-sec-state ' + (s.take ? 'ok' : '') + '">' + (s.take ? '● ' + clock(s.take.duration) + autoChip(s) : 'Sin grabar') + '</span></button></li>').join('') + '</ol>';
+      '<span class="dl-sec-state ' + (s.take ? 'ok' : '') + '">' + (s.take ? '● ' + clock(s.take.duration) + partsChip(s) + autoChip(s) : 'Sin grabar' + partsChip(s)) + '</span></button></li>').join('') + '</ol>';
+  }
+
+  function partsChip(s) {
+    const c = L.chainProgress(s);
+    return c.parts.length ? ' · ' + c.done + '/' + c.parts.length + ' subsecc.' : '';
   }
 
   function autoChip(s) {
@@ -260,10 +273,16 @@
     render();
   }
 
+  function partsNote(text) {
+    const parts = L.subsections(text);
+    return parts.length ? ' · ' + parts.length + ' subsecciones (' + parts[0].label + '–' + parts.at(-1).label + ')' : '';
+  }
+
   function scriptTab() {
     const p = S.project;
     const preview = S.preview;
     const importer = '<section class="dl-panel"><h2>Importar guion</h2><p class="dl-note">PDF, Word (.docx), texto (.txt) o Markdown (.md). Los separadores ━━━ y los encabezados «SECCIÓN 01 · TÍTULO» se reconocen solos y no pasan al teleprompter.</p>' +
+      '<p class="dl-note">Para grabar en tomas cortas, divide una sección con líneas <code>▸ SUBSECCIÓN 1.1 · TÍTULO</code>, <code>▸ SUBSECCIÓN 1.2 · …</code> (1.x en la sección 01, 2.x en la 02). Solo te guían al grabar: no se leen ni salen en el video.</p>' +
       '<details class="dl-marks"><summary>Marcas para automatizar el video</summary><p class="dl-note">Escríbelas dentro del texto, donde deben ocurrir. No se leen en el teleprompter.</p><ul>' +
       '<li><code>[IMAGEN: Harry Kane Bayern 2024]</code> muestra esa foto en ese momento</li><li><code>[DATO: 44 goles]</code> crea un gráfico de la cifra</li>' +
       '<li><code>[MÚSICA: épica | emotiva | tensión | ambiental]</code> música de la sección</li><li><code>[TRANSICIÓN: estadio | túnel | césped | luces | gráfico | movimiento]</code></li>' +
@@ -276,7 +295,7 @@
       (p.sections.length ? '<option value="append">Como nuevas secciones al final</option><option value="append-text">Al final del texto de la sección seleccionada</option>' : '') +
       '<option value="replace"' + (p.sections.length ? '' : ' selected') + '>Reemplazar todas las secciones</option></select></label>' + btn('script-detect', 'Detectar secciones', 'secondary') + '</div>' +
       (preview ? '<div class="dl-preview-sections"><h3>' + preview.sections.length + ' secciones detectadas' + (preview.name ? ' en ' + esc(preview.name) : '') + '</h3><ol>' +
-        preview.sections.map(s => '<li><strong>' + (s.intro ? 'Introducción' : 'Sección ' + String(s.number).padStart(2, '0')) + ' · ' + esc(s.title) + '</strong><small>' + esc(s.text.slice(0, 140)) + (s.text.length > 140 ? '…' : '') + ' · ' + s.text.split(/\s+/).filter(Boolean).length + ' palabras</small></li>').join('') +
+        preview.sections.map(s => '<li><strong>' + (s.intro ? 'Introducción' : 'Sección ' + String(s.number).padStart(2, '0')) + ' · ' + esc(s.title) + '</strong><small>' + esc(s.text.slice(0, 140)) + (s.text.length > 140 ? '…' : '') + ' · ' + s.text.split(/\s+/).filter(Boolean).length + ' palabras' + partsNote(s.text) + '</small></li>').join('') +
         '</ol><div class="dl-row">' + btn('script-apply', 'Aplicar al proyecto') + btn('script-cancel', 'Descartar', 'secondary') + '</div></div>' : '') + '</section>';
     const list = '<section class="dl-panel"><div class="dl-row between"><h2>Secciones</h2>' + btn('section-add', '＋ Añadir sección', 'secondary') + '</div>' +
       (p.sections.length ? p.sections.map((s, i) => '<article class="dl-script-sec" data-section="' + esc(s.id) + '"><div class="dl-row between"><span class="dl-num">' + label(s) + '</span>' +
@@ -285,28 +304,33 @@
         btn('section-down', '↓', 'secondary', 'data-id="' + esc(s.id) + '" ' + (i < p.sections.length - 1 ? '' : 'disabled') + ' title="Bajar"') +
         btn('section-remove', '✕', 'danger', 'data-id="' + esc(s.id) + '" title="Eliminar sección"') + '</div></div>' +
         '<textarea data-field="text" rows="5" aria-label="Texto narrable">' + esc(s.text) + '</textarea>' +
-        '<small>' + s.text.split(/\s+/).filter(Boolean).length + ' palabras · ≈ ' + clock(s.text.split(/\s+/).filter(Boolean).length / 2.5) + ' de lectura' + (s.take ? ' · grabada (' + clock(s.take.duration) + ')' : '') + '</small>' + cardBlock(s) + '</article>').join('') :
+        '<small>' + s.text.split(/\s+/).filter(Boolean).length + ' palabras · ≈ ' + clock(s.text.split(/\s+/).filter(Boolean).length / 2.5) + ' de lectura' + partsNote(s.text) + (s.take ? ' · grabada (' + clock(s.take.duration) + ')' : '') + '</small>' + cardBlock(s) + '</article>').join('') :
         '<p class="dl-note">Aún no hay secciones. Importa o pega tu guion.</p>') + '</section>';
     return '<div class="dl-two">' + importer + list + '</div>';
   }
 
   function recordTab() {
-    if (!S.project.sections.length) return '<div class="dl-empty"><h2>Primero importa el guion</h2>' + btn('tab', 'Ir al guion', '', 'data-tab="guion"') + '</div>';
+    if (!S.project.sections.length) return '<div class="dl-empty"><h2>Primero importa el guion</h2><div class="dl-row">' + btn('tab', 'Ir al guion', '', 'data-tab="guion"') + btn('copy-template', '📋 Copiar formato del guion', 'secondary', 'title="Copia al portapapeles las instrucciones para pedir el guion a Claude"') + '</div></div>';
     const s = section();
     const pending = S.pending.filter(t => S.project.sections.some(x => x.id === t.sectionId));
+    const plan = Recorder.partFor(s);
+    const part = plan.part;
+    const startLabel = !part ? (plan.mode === 'again' ? '● Grabar la sección de nuevo' : '● Iniciar grabación') :
+      plan.mode === 'next' ? '● Grabar ' + part.label + ' (sigue la toma)' : plan.mode === 'again' ? '● Grabar de nuevo desde ' + part.label : '● Grabar ' + part.label;
     return '<div class="dl-record">' +
       '<div class="dl-panel">' + '<h2>Secciones</h2>' + sectionList() + (pending.length ? '<div class="dl-recover"><h3>Tomas recuperables</h3>' + pending.map(t => {
         const sec = S.project.sections.find(x => x.id === t.sectionId);
         return '<div class="dl-recover-item"><small>' + esc(sec?.title || '') + ' · ' + new Date(t.at).toLocaleString('es-EC') + '</small><video controls preload="none" src="records://direct/take/' + encodeURIComponent(S.project.id) + '/' + encodeURIComponent(t.id) + '"></video>' +
           '<div class="dl-row">' + btn('recover-use', 'Usar', '', 'data-id="' + esc(t.id) + '"') + btn('recover-discard', 'Descartar', 'secondary', 'data-id="' + esc(t.id) + '"') + '</div></div>';
       }).join('') + '</div>' : '') + '</div>' +
-      '<section class="dl-stage-wrap"><div class="dl-row between"><h2>' + esc(label(s) + ' · ' + s.title) + '</h2><span class="dl-take-state">' + (s.take ? 'Toma activa: ' + clock(s.take.duration) + (s.take.master ? '' : ' · preparando copia MP4') : 'Sin toma') + '</span></div>' +
+      '<section class="dl-stage-wrap"><div class="dl-row between"><h2>' + esc(label(s) + ' · ' + s.title) + (part ? ' <span class="dl-part-now">' + esc(part.label + ' · ' + niceTitle(part.title)) + '</span>' : '') + '</h2><span class="dl-take-state">' + (s.take ? 'Toma activa: ' + clock(s.take.duration) + (s.take.master ? '' : ' · preparando copia MP4') : 'Sin toma') + '</span></div>' +
       '<div class="dl-stage" id="dl-stage"><video id="dl-camera" autoplay muted playsinline></video><video id="dl-review" controls playsinline hidden></video>' +
       '<div class="dl-prompter-host" id="dl-prompter-host"></div><div class="dl-rec-badge" id="dl-rec-badge" hidden>● REC <span id="dl-clock">0:00</span></div>' +
       '<div class="dl-stage-empty" id="dl-stage-empty"><p>La cámara se mostrará en formato cuadrado 1:1, centrada.</p>' + btn('camera-on', 'Activar cámara y micrófono') + '</div></div>' +
-      '<div class="dl-controls"><div class="dl-row wrap" id="dl-live">' + btn('rec-start', '● Iniciar grabación', 'dl-rec', 'disabled') + btn('rec-stop', '■ Detener', 'danger', 'disabled') +
+      partsPanel(s, plan) +
+      '<div class="dl-controls"><div class="dl-row wrap" id="dl-live">' + btn('rec-start', startLabel, 'dl-rec', 'disabled') + btn('rec-stop', '■ Detener', 'danger', 'disabled') +
       '<span class="dl-mic"><meter id="dl-meter" min="0" max="60" low="25" high="55" optimum="45"></meter><small id="dl-meter-text">Micrófono</small></span><small id="dl-write"></small></div>' +
-      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-keep-next', 'Guardar y seguir', 'secondary', 'title="Guarda la toma y graba la siguiente sección tras 3 s"') + btn('rec-retry', 'Descartar y repetir', 'secondary') +
+      '<div class="dl-row wrap" id="dl-reviewbar" hidden><strong id="dl-review-info"></strong>' + btn('rec-keep', part ? 'Guardar ' + part.label : s.take ? 'Reemplazar la toma activa' : 'Guardar esta toma') + btn('rec-keep-next', 'Guardar y seguir', 'secondary', 'title="Guarda la toma y graba lo siguiente (subsección o sección) tras 3 s"') + btn('rec-retry', 'Descartar y repetir', 'secondary') +
         btn('rec-mark', '✂ Bueno hasta aquí', 'secondary', 'title="Pausa el video en el último momento bueno: se conserva hasta ahí y grabas solo lo que sigue"') + '</div>' +
       '<div class="dl-row wrap dl-splice" id="dl-splicebar" hidden><span id="dl-splice-info"></span>' + btn('rec-splice-start', '● Grabar desde aquí', 'dl-rec') + btn('rec-splice-cancel', 'Cancelar', 'secondary') + '</div>' +
       (s.take ? '<p class="dl-note">Una sola toma por sección. Si grabas de nuevo, la toma actual se conserva hasta que la nueva quede verificada en el disco.</p>' : '') +
@@ -321,6 +345,24 @@
       '<label class="dl-field">Opacidad del fondo<input type="range" id="dl-opacity" min="0.2" max="0.95" step="0.05" value="' + DirectPrompter.state().opacity + '"></label>' +
       '<p class="dl-note">El teleprompter es una capa de la pantalla: no se graba ni aparece en el video exportado. Atajos: espacio (pausa), ↑/↓ (retroceder/avanzar). Al iniciar la grabación arranca solo.</p>' +
       '<p class="dl-note">Modo B: se detiene cuando dejas de hablar. Con Whisper instalado (Configuración) reconoce tu voz en el equipo cada 2 s y recoloca el texto, incluso si repites una frase.</p></div></div>';
+  }
+
+  /** Subsecciones de la sección: se graban en cadena, cada una a continuación de la anterior. */
+  function partsPanel(s, plan) {
+    const c = plan.chain;
+    if (!c.parts.length) return '';
+    const legacy = s.take && !Array.isArray(s.take.chain);
+    const items = c.parts.map((p, i) => {
+      const done = i < c.done;
+      const now = plan.part && plan.part.label === p.label;
+      const words = L.stripMarks(p.text).split(/\s+/).filter(Boolean).length;
+      return '<li class="' + (now ? 'now' : done ? 'done' : '') + '"><span class="dl-part-label">' + esc(p.label) + '</span><span class="dl-part-title">' + esc(niceTitle(p.title) || 'Sin título') + '</span>' +
+        '<small>' + (done ? '✓ grabada' : now ? '● ahora' : 'pendiente') + ' · ≈ ' + clock(words / 2.5) + '</small>' +
+        (done && !legacy ? btn('part-repeat', '↺ Repetir', 'secondary', 'data-part="' + esc(p.label) + '" title="Repite esta subsección. Las siguientes se vuelven a grabar a continuación"') : '') + '</li>';
+    }).join('');
+    return '<div class="dl-parts"><div class="dl-row between"><strong>Subsecciones · ' + c.done + '/' + c.parts.length + ' grabadas</strong>' +
+      '<small class="dl-note">El teleprompter muestra solo la subsección actual. Cada una se une a la anterior con 3 s de preroll y un fundido suave.</small></div>' +
+      '<ol>' + items + '</ol>' + (legacy ? '<p class="dl-note">Esta toma se grabó entera, sin subsecciones. Para usarlas, graba la sección de nuevo desde ' + esc(c.parts[0].label) + '.</p>' : '') + '</div>';
   }
 
   function audioTab() {
@@ -431,16 +473,36 @@
   const Recorder = (function () {
     let stream = null, recorder = null, draw = 0, meter = 0, audioCtx = null, take = null, writes = Promise.resolve(), sequence = 0, writeError = null, started = 0, inspecting = false;
     let lastVoice = 0, watcher = 0, countdown = 0, session = true;
-    // Continuación: { source, sectionId, cut, snapped, heard, index, drafts } mientras se graba «desde aquí».
+    // Continuación: { source, sectionId, cut, snapped, heard, index, drafts, part, baseChain } mientras se graba «desde aquí».
     let splice = null;
+    // Subsecciones en cadena: etiqueta de la subsección elegida a mano («↺ Repetir 1.2»).
+    let focus = null, focusSection = null;
     const PREROLL = 3;
     const MIN_AUTO_SAVE = 3;
 
     function busy() { return Boolean(recorder); }
 
+    /**
+     * Qué toca grabar en una sección con subsecciones:
+     * { chain, part, mode } con mode 'first' (sin toma), 'next' (sigue la toma),
+     * 'repeat' (repetir desde una subsección ya grabada) o 'again' (todo grabado).
+     */
+    function partFor(s) {
+      const chain = L.chainProgress(s);
+      if (!chain.parts.length) return { chain, part: null, mode: null };
+      if (focusSection !== s.id) { focus = null; focusSection = s.id; }
+      const chosen = focus && chain.parts.find(p => p.label === focus);
+      if (chosen) return { chain, part: chosen, mode: s.take && chosen === chain.parts[0] ? 'again' : chosen === chain.next ? (s.take ? 'next' : 'first') : 'repeat' };
+      if (!s.take) return { chain, part: chain.parts[0], mode: 'first' };
+      if (chain.next) return { chain, part: chain.next, mode: Array.isArray(s.take.chain) ? 'next' : 'again' };
+      // Todo grabado (o una toma antigua sin subsecciones): se puede empezar de nuevo desde la primera.
+      return { chain, part: chain.parts[0], mode: 'again' };
+    }
+
     function mountStage() {
       const s = section();
-      DirectPrompter.mount(q('#dl-prompter-host'), s?.text || '');
+      const { part } = s ? partFor(s) : {};
+      DirectPrompter.mount(q('#dl-prompter-host'), part ? part.text : s?.text || '');
       if (splice && splice.sectionId !== s?.id) splice = null;
       if (stream) attach();
       applySplice();
@@ -455,6 +517,12 @@
       const setup = Boolean(splice) && !take && !recorder;
       bar.hidden = !setup;
       if (!setup) { DirectPrompter.pickable(false); return; }
+      if (splice.part && splice.index === 0 && !splice.heard) {
+        q('#dl-splice-info').textContent = 'Grabas ' + splice.part + ' a continuación (se conserva hasta ' + clock(splice.cut) + '). Antes escucharás los últimos ' + PREROLL + ' s.';
+        DirectPrompter.seek(0);
+        DirectPrompter.pickable(true, i => { if (splice) splice.index = i; });
+        return;
+      }
       q('#dl-splice-info').textContent = 'Se conserva hasta ' + clock(splice.cut) + (splice.snapped ? ' (ajustado a la pausa)' : '') + '. ' +
         (splice.heard ? 'El teleprompter quedó en la frase siguiente; si no es ahí, toca la palabra correcta.' : 'Toca en el teleprompter la palabra desde la que sigues.') +
         ' Antes de grabar escucharás los últimos ' + PREROLL + ' s.';
@@ -473,11 +541,25 @@
       const source = kind === 'active' ? { kind: 'active', sectionId: s.id } : { kind: 'draft', takeId: take.id };
       toast('Buscando la pausa más cercana…');
       const point = await call('take.resume', { id: S.project.id, source, at: video.currentTime });
+      // Con subsecciones, el teleprompter muestra la subsección donde cae el corte.
+      const baseChain = source.kind === 'active' ? s.take?.chain : take?.chain;
+      const parts = L.subsections(s.text);
+      let from = 0, until = point.duration || point.cut, part = null;
+      if (Array.isArray(baseChain) && parts.length) {
+        const i = baseChain.reduce((n, p, k) => p.start < point.cut ? k : n, 0);
+        part = parts.find(p => p.label === baseChain[i].label) || null;
+        if (part) {
+          from = baseChain[i].start;
+          until = baseChain[i + 1]?.start ?? until;
+          focus = part.label; focusSection = s.id;
+          DirectPrompter.mount(q('#dl-prompter-host'), part.text);
+        }
+      }
       const words = DirectPrompter.state().words;
-      const guess = Math.round(words * Math.min(1, point.cut / (point.duration || point.cut)));
+      const guess = Math.round(words * Math.min(1, Math.max(0, point.cut - from) / Math.max(0.1, until - from)));
       const found = point.heard ? DirectPrompter.locate(point.heard, guess) : -1;
       const drafts = [...(splice?.drafts || []), ...(source.kind === 'draft' ? [source.takeId] : [])];
-      splice = { source, sectionId: s.id, cut: point.cut, snapped: point.snapped, heard: found >= 0, index: found >= 0 ? found : guess, drafts };
+      splice = { source, sectionId: s.id, cut: point.cut, snapped: point.snapped, heard: found >= 0, index: found >= 0 ? found : guess, drafts, part: part?.label || null, baseChain: baseChain || null };
       // El borrador marcado pasa a ser la base: no se borra hasta guardar la toma unida.
       take = null;
       closeReview();
@@ -524,16 +606,18 @@
 
     function cancelSplice() {
       if (!splice) return;
+      const cancelled = splice;
       const base = splice.source;
       splice = null;
+      focus = null;
       DirectPrompter.pickable(false);
       DirectPrompter.reset();
       q('#dl-splicebar').hidden = true;
-      if (base.kind === 'draft') reviewDraft(base.takeId, 'Toma en revisión');
+      if (base.kind === 'draft') reviewDraft(base.takeId, 'Toma en revisión', 0, cancelled.baseChain);
     }
 
-    async function reviewDraft(takeId, label, at = 0) {
-      take = { id: takeId };
+    async function reviewDraft(takeId, label, at = 0, chain = null) {
+      take = { id: takeId, ...(chain ? { chain } : {}) };
       q('#dl-live').hidden = true;
       q('#dl-reviewbar').hidden = false;
       q('#dl-review-info').textContent = label;
@@ -624,7 +708,9 @@
       const camera = q('#dl-camera');
       if (!camera?.videoWidth || !stream.getAudioTracks().length) throw Error('La cámara y el micrófono deben estar listos');
       const s = section();
-      take = await call('take.begin', { id: S.project.id, sectionId: s.id });
+      // La primera subsección abre la cadena; las siguientes se unen en take.join.
+      const { part } = splice ? {} : partFor(s);
+      take = await call('take.begin', { id: S.project.id, sectionId: s.id, part: part?.label });
       sequence = 0; writeError = null; writes = Promise.resolve();
       // Lienzo cuadrado 1080 × 1080: solo recibe la imagen de la cámara (nunca el teleprompter).
       const canvas = document.createElement('canvas');
@@ -697,12 +783,11 @@
           const w = q('#dl-write');
           if (w) w.textContent = 'Uniendo con la parte buena… (unos segundos por cada minuto grabado)';
           let joined;
-          try { joined = await call('take.join', { id: S.project.id, source: splice.source, cut: splice.cut, takeId: take.id }); }
+          try { joined = await call('take.join', { id: S.project.id, source: splice.source, cut: splice.cut, takeId: take.id, part: splice.part }); }
           catch (error) { take = null; showCamera(); applySplice(); throw error; }
           finally { if (w) w.textContent = ''; }
-          take = { id: joined.id };
           DirectPrompter.reset();
-          await reviewDraft(joined.id, 'Toma unida de ' + clock(joined.duration) + ' · revisa la unión en ' + clock(joined.cut), Math.max(0, joined.cut - PREROLL));
+          await reviewDraft(joined.id, (splice.part ? splice.part + ' unida · toma de ' : 'Toma unida de ') + clock(joined.duration) + ' · revisa la unión en ' + clock(joined.cut), Math.max(0, joined.cut - PREROLL), joined.chain);
           return;
         }
         q('#dl-live').hidden = true;
@@ -725,12 +810,15 @@
     }
 
     function next() {
-      const target = S.project.sections.find(s => !s.take);
+      const current = section();
+      const here = current && partFor(current);
+      const target = here?.part && current.take ? current : S.project.sections.find(s => !L.chainProgress(s).complete);
       if (!target || !stream || !session) return;
+      const nextLabel = target === current && here.part ? here.part.label + ' · ' + niceTitle(here.part.title) : target.title;
       let n = 3;
       const stage = q('#dl-stage');
       if (!stage) return;
-      stage.insertAdjacentHTML('beforeend', '<div class="dl-countdown" id="dl-countdown"><small>Siguiente: ' + esc(target.title) + '</small><strong>3</strong>' + btn('rec-pause-session', 'Pausar la sesión', 'secondary') + '</div>');
+      stage.insertAdjacentHTML('beforeend', '<div class="dl-countdown" id="dl-countdown"><small>Siguiente: ' + esc(nextLabel) + '</small><strong>3</strong>' + btn('rec-pause-session', 'Pausar la sesión', 'secondary') + '</div>');
       clearInterval(countdown);
       countdown = setInterval(() => {
         n--;
@@ -739,7 +827,7 @@
         if (n > 0) { el.textContent = String(n); return; }
         clearInterval(countdown);
         q('#dl-countdown')?.remove();
-        start().catch(e => toast(e.message, true));
+        begin().catch(e => toast(e.message, true));
       }, 1000);
     }
 
@@ -759,8 +847,12 @@
       }
       setProject(result.project);
       S.saving = 'Toma guardada';
-      const next = S.project.sections.find(s => !s.take);
-      toast('Toma guardada' + (next ? '. Siguiente: ' + next.title : '. ¡Todas las secciones están grabadas!'));
+      focus = null;
+      const here = S.project.sections.find(x => x.id === result.sectionId);
+      const pending = here && L.chainProgress(here);
+      const next = pending?.next ? here : S.project.sections.find(s => !L.chainProgress(s).complete);
+      if (pending?.next) toast('Subsección guardada. Siguiente: ' + pending.next.label + ' · ' + niceTitle(pending.next.title));
+      else toast('Toma guardada' + (next ? '. Siguiente: ' + next.title : '. ¡Todas las secciones están grabadas!'));
       if (next) S.sectionId = next.id;
       closeReview();
       render();
@@ -768,6 +860,40 @@
     }
 
     function keepAndNext() { session = true; return keep(true); }
+
+    /** «Iniciar grabación»: con subsecciones, la siguiente se graba a continuación de la toma. */
+    async function begin() {
+      if (recorder || inspecting) return;
+      if (splice && !take) return startSplice();
+      const s = section();
+      const { part, mode } = partFor(s);
+      if (part && mode === 'next') {
+        const source = { kind: 'active', sectionId: s.id };
+        const point = await call('take.tail', { id: S.project.id, source });
+        splice = { source, sectionId: s.id, cut: point.cut, snapped: false, heard: false, index: 0, drafts: [], part: part.label, baseChain: s.take.chain };
+        return startSplice();
+      }
+      if (mode === 'repeat') { focus = null; return begin(); }
+      if (mode === 'again' && s.take && !focus && !confirm('Vas a grabar la sección de nuevo desde el principio' + (part ? ' (' + part.label + ')' : '') + '. La toma actual se conserva hasta que guardes la nueva. ¿Seguir?')) return;
+      return start();
+    }
+
+    /** «↺ Repetir 1.2»: se conserva la toma hasta el inicio de esa subsección y se graba desde ahí. */
+    function repeat(label) {
+      if (recorder || inspecting || take) return;
+      const s = section();
+      const { chain } = partFor(s);
+      const index = chain.parts.findIndex(p => p.label === label);
+      if (index < 0) return;
+      const later = chain.parts.slice(index + 1, chain.done).map(p => p.label);
+      if (later.length && !confirm('Al repetir ' + label + ' también tendrás que volver a grabar ' + later.join(', ') + ' (van en cadena). La toma actual no cambia hasta que guardes. ¿Seguir?')) return;
+      focus = label; focusSection = s.id;
+      splice = null;
+      const at = s.take?.chain?.find(p => p.label === label)?.start;
+      if (index > 0 && at > 0) splice = { source: { kind: 'active', sectionId: s.id }, sectionId: s.id, cut: at, snapped: false, heard: false, index: 0, drafts: [], part: label, baseChain: s.take.chain };
+      render();
+      if (splice) toast('Pulsa «Grabar desde aquí»: escucharás el final de ' + chain.parts[index - 1].label + ' y grabas ' + label + '.');
+    }
 
     async function retry() {
       if (take) await call('take.discard', { id: S.project.id, takeId: take.id }).catch(() => {});
@@ -795,7 +921,7 @@
       splice = null;
     }
 
-    return { mountStage, open, start, stop, keep, keepAndNext, retry, close, busy, next, cancelSession, mark, startSplice, cancelSplice, splicing: () => Boolean(splice) && !take, stream: () => stream };
+    return { mountStage, open, start, begin, repeat, partFor, stop, keep, keepAndNext, retry, close, busy, next, cancelSession, mark, startSplice, cancelSplice, splicing: () => Boolean(splice) && !take, stream: () => stream };
   })();
 
   // ── Eventos ───────────────────────────────────────────────────────────────
@@ -882,7 +1008,8 @@
     }
     if (action === 'lib-add') { const r = await call('library.add', { tags: q('#dl-lib-tags').value }); if (r.errors.length) toast(r.errors[0], true); S.library = r.items; return render(); }
     if (action === 'lib-remove') { if (!confirm('¿Quitar esta foto de la biblioteca?')) return; S.library = await call('library.remove', { id }); return render(); }
-    if (action === 'rec-start') return Recorder.splicing() ? Recorder.startSplice() : Recorder.start();
+    if (action === 'rec-start') return Recorder.begin();
+    if (action === 'part-repeat') return Recorder.repeat(target.dataset.part);
     if (action === 'rec-mark') return Recorder.mark('review');
     if (action === 'rec-mark-active') return Recorder.mark('active');
     if (action === 'rec-splice-start') return Recorder.startSplice();
@@ -971,8 +1098,14 @@
       '2. Divide el resto en secciones numeradas. Cada sección empieza exactamente con estas tres líneas:',
       RULE, 'SECCIÓN 01 · TÍTULO CORTO', RULE,
       '3. Numera 01, 02, 03… sin saltos. Después del encabezado, deja una línea en blanco y escribe el texto narrable.',
-      '4. Frases cortas, fáciles de leer en teleprompter. Nada de viñetas, tablas, negritas ni markdown.',
-      '5. Responde SOLO con el guion: sin introducciones, notas ni comentarios tuyos.',
+      '4. SUBSECCIONES: divide cada sección en subsecciones de unos 30-45 segundos de lectura (80-110 palabras), cada una con una idea completa. Son solo para grabar en tomas cortas: no se leen en voz alta.',
+      '   Cada subsección empieza con una línea propia, con el número de la sección, un punto y el número de la subsección:',
+      '   ▸ SUBSECCIÓN 1.1 · TÍTULO CORTO',
+      '   En la SECCIÓN 01 van 1.1, 1.2, 1.3…; en la SECCIÓN 02, 2.1, 2.2…; y así sucesivamente, sin saltos. Una sección corta (menos de 45 segundos) puede llevar una sola subsección.',
+      '   La introducción (el gancho) no lleva subsecciones. Pon las marcas [MÚSICA] y [TRANSICIÓN] antes de la primera subsección.',
+      '5. Frases cortas, fáciles de leer en teleprompter. Nada de viñetas, tablas, negritas ni markdown.',
+      '6. Cada subsección debe poder leerse sola: que no termine a mitad de una idea y que la siguiente empiece con una frase que enlace bien.',
+      '7. Responde SOLO con el guion: sin introducciones, notas ni comentarios tuyos.',
       '',
       'MARCAS (van entre corchetes dentro del texto, justo donde deben ocurrir; no se leen en voz alta):',
       '[MÚSICA: épica|emotiva|tensión|ambiental] al inicio de cada sección;',
@@ -988,16 +1121,34 @@
       '',
       RULE, 'SECCIÓN 01 · EL COMIENZO', RULE,
       '',
-      '[MÚSICA: épica] [TRANSICIÓN: estadio] Texto narrable de la sección… [IMAGEN: Estadio Azteca 1986] Más texto… [DATO: 44 goles]',
+      '[MÚSICA: épica] [TRANSICIÓN: estadio]',
+      '',
+      '▸ SUBSECCIÓN 1.1 · LA FAMILIA',
+      'Texto narrable de la primera parte… [IMAGEN: Estadio Azteca 1986] Más texto…',
+      '',
+      '▸ SUBSECCIÓN 1.2 · EL PRIMER CLUB',
+      'Texto narrable de la segunda parte… [DATO: 44 goles]',
       '',
       RULE, 'SECCIÓN 02 · SIGUIENTE TÍTULO', RULE,
       '',
-      '[MÚSICA: tensión] [TRANSICIÓN: túnel] Texto narrable…'].join('\n');
+      '[MÚSICA: tensión] [TRANSICIÓN: túnel]',
+      '',
+      '▸ SUBSECCIÓN 2.1 · TÍTULO CORTO',
+      'Texto narrable…',
+      '',
+      '▸ SUBSECCIÓN 2.2 · TÍTULO CORTO',
+      'Texto narrable…'].join('\n');
+  }
+
+  /** Portapapeles de Windows (proceso principal); si no responde, el del navegador. */
+  async function copyText(text) {
+    try { await call('clipboard.write', { text }); }
+    catch { await navigator.clipboard.writeText(text); }
   }
 
   async function copyTemplate() {
     const text = scriptTemplate(S.project?.title);
-    try { await navigator.clipboard.writeText(text); toast('Formato copiado' + (S.project?.title ? ' con el tema «' + S.project.title + '»' : '') + '. Pégalo en Claude.'); }
+    try { await copyText(text); toast('Formato copiado' + (S.project?.title ? ' con el tema «' + S.project.title + '»' : '') + '. Pégalo en Claude.'); }
     catch { const root = modal('<h2>Formato del guion para Claude</h2><p class="dl-note">No se pudo copiar automáticamente. Selecciona el texto y cópialo con Ctrl+C.</p><textarea rows="16" readonly>' + esc(text) + '</textarea><div class="dl-row"><button class="secondary" id="dl-modal-close">Cerrar</button></div>'); root.querySelector('#dl-modal-close').onclick = closeModal; root.querySelector('textarea')?.select(); }
   }
 
@@ -1143,6 +1294,7 @@
   });
 
   window.studio?.onDirectProgress?.(detail => {
+    if (detail.type === 'narrator') return toast(detail.message);
     if (!S.active) return;
     if (detail.kind === 'master') {
       const s = S.project?.sections.find(x => x.id === detail.sectionId);

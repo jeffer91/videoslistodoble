@@ -278,6 +278,8 @@ async function review(root, project, entry, file, media = require('./media.cjs')
   if (entry.chaptersValid) add('ok', entry.chapters.length + ' capítulos válidos para YouTube.');
   else add('aviso', 'Capítulos: ' + entry.chapterProblems.join(' · '));
   if (entry.missing?.length) add('error', 'Secciones sin grabar: ' + entry.missing.join(', '));
+  const unfinished = project.sections.map(s => ({ s, c: Layout.chainProgress(s) })).filter(x => x.s.take && !x.c.complete);
+  if (unfinished.length) add('aviso', 'Subsecciones sin grabar: ' + unfinished.map(x => x.s.title + ' (' + x.c.parts.slice(x.c.done).map(p => p.label).join(', ') + ')').join(' · '));
   const untranscribed = project.sections.filter(s => s.take && !transcriptOf(s).length).map(s => s.title);
   if (project.settings.subtitles.enabled && untranscribed.length) add('aviso', 'Sin subtítulos en: ' + untranscribed.join(', ') + ' (transcribe con Whisper).');
   else if (project.settings.subtitles.enabled) add('ok', 'Subtítulos sincronizados' + (entry.burnedSubtitles ? ' e integrados.' : ' en archivo .srt.'));

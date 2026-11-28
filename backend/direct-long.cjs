@@ -13,6 +13,7 @@ const scripts = require('./direct-script.cjs');
 const intel = require('./direct-intel.cjs');
 const graphics = require('./direct-graphics.cjs');
 const audio = require('./direct-audio.cjs');
+const narrator = require('./direct-narrator.cjs');
 const render = require('./direct-render.cjs');
 const { createYouTube } = require('./direct-youtube.cjs');
 const auto = require('./direct-auto.cjs');
@@ -298,6 +299,8 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       return { ...result, sections: scripts.parseSections(result.text) };
     },
     'script.parse': ({ text }) => scripts.parseSections(text),
+    // Copia al portapapeles de Windows (más fiable que el del navegador).
+    'clipboard.write': ({ text }) => { clipboard.writeText(String(text ?? '').slice(0, 200000)); return true; },
     'script.apply': data => directStore.importScript(root, data),
     'section.update': data => directStore.updateSection(root, data),
     'section.add': data => directStore.addSection(root, data),
@@ -318,9 +321,12 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
       return point;
     },
     'take.join': data => directStore.joinTake(root, data, media),
+    'take.tail': data => directStore.tailPoint(root, data, media),
     'take.commit': async data => {
       const result = await directStore.commitTake(root, data, media);
-      if (result.project.settings.autopilot.enabled) queuePilot(data.id, result.sectionId);
+      // Con subsecciones pendientes la toma aún crecerá: el piloto espera a la última.
+      const partial = !Layout.chainProgress(result.project.sections.find(x => x.id === result.sectionId)).complete;
+      if (result.project.settings.autopilot.enabled && !partial) queuePilot(data.id, result.sectionId);
       else queueMaster(data.id, result.sectionId);
       return result;
     },
@@ -484,6 +490,21 @@ function install({ app, root, register, dialog, shell, clipboard, safeStorage, w
 
     // Audio
     'audio.catalog': () => audio.catalog(),
+    // Narrador de las transiciones (Piper local) y música de tráiler.
+    'narrator.status': () => narrator.status(root),
+    'narrator.preview': async ({ id, sectionId }) => {
+      const project = directStore.read(root, id);
+      const section = project.sections.find(s => s.id === sectionId);
+      if (!section) throw Error('Sección no encontrada');
+      if (section.intro) throw Error('La introducción no lleva narrador');
+      const n = await narrator.speak(root, narrator.narratorText(section), { send: m => send({ type: 'narrator', message: m.message }) }, media);
+      const saved = directStore.setNarration(root, { id, sectionId, narration: n });
+      const t = saved.sections.find(s => s.id === sectionId).transition;
+      const length = narrator.transitionLength(t.duration || saved.settings.transitions.duration, t.narration);
+      await audio.sting(root, length, media);
+      return { project: saved, text: n.text, duration: n.duration, length, start: narrator.START,
+        url: 'records://direct/narrator/' + n.hash + '.m4a', sting: t.music === 'ninguna' ? null : 'records://direct/sting/' + Math.round(length * 10) };
+    },
     'audio.sample': async ({ kind, name }) => {
       await audio.ensure(root, kind === 'music' ? 'music' : 'sfx', name, media);
       return 'records://direct/library/' + (kind === 'music' ? 'music' : 'sfx') + '/' + encodeURIComponent(name);
@@ -625,6 +646,8 @@ function serve(root, request, url) {
   else if (kind === 'graphic' && pieces.length === 1 && /^[a-f0-9]{20}\.png$/.test(pieces[0])) file = path.join(graphics.cacheDir(root), pieces[0]);
   else if (kind === 'photo' && pieces.length === 1 && /^[a-f0-9-]{36}\.jpg$/.test(pieces[0])) file = path.join(library.dir(root), pieces[0]);
   else if (kind === 'thumb' && pieces.length === 1 && /^[a-f0-9]{24}\.jpg$/.test(pieces[0])) file = path.join(root, 'Recursos', 'Directos', 'Miniaturas', pieces[0]);
+  else if (kind === 'narrator' && pieces.length === 1 && /^[a-f0-9]{24}\.m4a$/.test(pieces[0])) file = narrator.fileFor(root, pieces[0].slice(0, 24));
+  else if (kind === 'sting' && pieces.length === 1 && /^\d{2,3}$/.test(pieces[0])) file = audio.stingFile(root, Number(pieces[0]) / 10);
   else if (kind === 'library' && pieces.length === 2 && ['music', 'sfx'].includes(pieces[0])) {
     try { file = audio.fileFor(root, pieces[0], pieces[1]); } catch { file = null; }
   }

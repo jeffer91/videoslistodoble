@@ -1,6 +1,7 @@
 'use strict';
 /** Pruebas de la automatización: marcas, cortes, llamados a la acción, biblioteca y piloto automático. */
 process.env.RECORDS_DEEPFILTER = '';
+process.env.RECORDS_PIPER ??= 'off'; // el narrador (Piper) se prueba aparte: sin descargas
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

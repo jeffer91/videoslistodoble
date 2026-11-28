@@ -8,6 +8,12 @@
  *   SECCIÓN 01 · EL COMIENZO
  *   ━━━━━━━━━━━━━━━━━━
  *
+ * Dentro de una sección puede haber subsecciones para grabar en tomas cortas:
+ *
+ *   ▸ SUBSECCIÓN 1.1 · LA FAMILIA
+ *
+ * Esas líneas se quedan en el texto de la sección (las entiende DirectLayout)
+ * pero nunca se leen en el teleprompter ni salen en el video.
  * Los separadores y encabezados nunca pasan al texto narrable.
  */
 const fs = require('node:fs');
@@ -19,6 +25,7 @@ const MAX_INPUT = 25 * 1024 * 1024;
 const MAX_TEXT = 400000;
 const SEPARATOR = /^\s*(?:[━─═▬■◆•·*=_~\-–—]\s*){5,}\s*$/u;
 const HEADER = /^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(SECCI[OÓ]N|SECCION|CAP[IÍ]TULO|PARTE|BLOQUE)\s*(?:N[ºo°.]\s*)?(\d{1,3})\b\s*(?:[·•.:|\-–—]+\s*)?(.*?)\s*(?:\*\*)?\s*$/iu;
+const SUBHEADER = new RegExp(require('../renderer/direct-layout.js').SUBHEADER.source, 'iu');
 const TEXT_TYPES = new Set(['.txt', '.md', '.markdown']);
 
 function cleanText(input) {
@@ -175,8 +182,8 @@ async function pdfText(buffer) {
   const merged = [];
   for (const line of pages.join('\n\n').split('\n')) {
     const previous = merged.at(-1);
-    const joinable = previous && previous.trim() && line.trim() && !SEPARATOR.test(line) && !HEADER.test(line) &&
-      !SEPARATOR.test(previous) && !HEADER.test(previous) && !/[.!?:…»"”]\s*$/.test(previous) && /^\s*[\p{Ll}0-9,(]/u.test(line);
+    const joinable = previous && previous.trim() && line.trim() && !SEPARATOR.test(line) && !HEADER.test(line) && !SUBHEADER.test(line) &&
+      !SEPARATOR.test(previous) && !HEADER.test(previous) && !SUBHEADER.test(previous) && !/[.!?:…»"”]\s*$/.test(previous) && /^\s*[\p{Ll}0-9,(]/u.test(line);
     if (joinable) merged[merged.length - 1] = previous.replace(/-\s*$/, '') + (previous.endsWith('-') ? '' : ' ') + line.trim();
     else merged.push(line);
   }

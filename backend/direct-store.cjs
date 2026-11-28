@@ -10,6 +10,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const store = require('./store.cjs');
 const scripts = require('./direct-script.cjs');
+const Layout = require('../renderer/direct-layout.js');
 
 const DIR = 'Directos';
 const LAYOUTS = ['A', 'B', 'C', 'D', 'E'];
@@ -57,7 +58,8 @@ function resolveFile(root, id, relative) {
 
 function defaultTransition(title) {
   // image: 'auto' (primera foto de la sección), 'none' (solo gráfico) o el id de una imagen del proyecto.
-  return { enabled: true, style: 'auto', duration: 4, title: title || '', sound: 'impacto', volume: 0.8, image: 'auto' };
+  // narrator: una voz dice el título (nunca en la introducción); music: música de tráiler bajo la cartela.
+  return { enabled: true, style: 'auto', duration: 4, title: title || '', sound: 'impacto', volume: 0.8, image: 'auto', narrator: true, music: 'trailer', narration: null };
 }
 
 function newSection(input = {}, index = 0) {
@@ -76,7 +78,7 @@ function defaults() {
     background: { style: 'estadio', imageId: null },
     subtitles: { enabled: true, burn: false, style: 'impacto', size: 58, position: 'bottom', highlight: true },
     music: { enabled: true, volume: 0.22, ducking: true, defaultMood: 'epica' },
-    transitions: { enabled: true, duration: 4 },
+    transitions: { enabled: true, duration: 4, narrator: true },
     voice: { gain: 1, profile: 'natural' },
     autopilot: { enabled: true, export: true, publish: false, images: true, cuts: true },
     cta: { enabled: true, reminders: true, endscreen: true, endscreenDuration: 20 },
@@ -91,6 +93,7 @@ function read(root, id) {
     section.cuts ||= []; section.ctas ||= []; section.ctaOff ||= [];
     if (section.auto === undefined) section.auto = null;
     if (section.transition && !section.transition.image) section.transition.image = 'auto';
+    if (section.transition && section.transition.narrator === undefined) Object.assign(section.transition, { narrator: true, music: 'trailer', narration: null });
   }
   return project;
 }
@@ -110,7 +113,8 @@ function mergeSettings(target, source) {
 
 function progress(project) {
   const total = project.sections.length;
-  const recorded = project.sections.filter(s => s.take).length;
+  // Una sección grabada por subsecciones cuenta cuando tiene todas.
+  const recorded = project.sections.filter(s => Layout.chainProgress(s).complete).length;
   const transcribed = project.sections.filter(s => s.take && s.transcript?.takeId === s.take.id).length;
   const edited = project.sections.filter(s => s.take && s.layouts.length).length;
   const exported = (project.exports || []).length > 0;
@@ -214,7 +218,8 @@ function updateSection(root, { id, sectionId, patch = {} }) {
   if (patch.imageIds !== undefined) s.imageIds = [...new Set((patch.imageIds || []).filter(x => project.images.some(i => i.id === x)))];
   if (patch.transition) {
     const t = { ...s.transition, ...patch.transition };
-    s.transition = { enabled: t.enabled !== false, style: pick(t.style, TRANSITION_STYLES, 'auto'), duration: clamp(t.duration, 2, 8, 4),
+    s.transition = { enabled: t.enabled !== false, style: pick(t.style, TRANSITION_STYLES, 'auto'), duration: clamp(t.duration, 2, 10, 4),
+      narrator: t.narrator !== false, music: pick(t.music, ['trailer', 'ninguna'], 'trailer'), narration: s.transition.narration || null,
       title: text(t.title, 140), sound: pick(t.sound, SOUNDS, 'impacto'), volume: clamp(t.volume, 0, 1.5, 0.8),
       image: t.image === 'none' || (t.image && project.images.some(i => i.id === t.image)) ? t.image : 'auto' };
   }
@@ -293,7 +298,10 @@ function saveSettings(root, { id, settings = {}, youtube }) {
     const x = { ...s.music, ...settings.music };
     s.music = { enabled: x.enabled !== false, volume: clamp(x.volume, 0, 1, 0.22), ducking: x.ducking !== false, defaultMood: pick(x.defaultMood, MOODS, 'epica') };
   }
-  if (settings.transitions) s.transitions = { enabled: settings.transitions.enabled !== false, duration: clamp(settings.transitions.duration, 2, 8, 4) };
+  if (settings.transitions) {
+    const t = { ...s.transitions, ...settings.transitions };
+    s.transitions = { enabled: t.enabled !== false, duration: clamp(t.duration, 2, 10, 4), narrator: t.narrator !== false };
+  }
   if (settings.voice) { const x = { ...s.voice, ...settings.voice }; s.voice = { gain: clamp(x.gain, 0.3, 3, 1), profile: pick(x.profile, ['original', 'natural', 'locutor', 'limpia', 'podcast', 'exterior'], 'natural') }; }
   if (settings.autopilot) { const x = { ...s.autopilot, ...settings.autopilot }; s.autopilot = { enabled: x.enabled !== false, export: x.export !== false, publish: x.publish === true, images: x.images !== false, cuts: x.cuts !== false }; }
   if (settings.cta) { const x = { ...s.cta, ...settings.cta }; s.cta = { enabled: x.enabled !== false, reminders: x.reminders !== false, endscreen: x.endscreen !== false, endscreenDuration: clamp(x.endscreenDuration, 5, 20, 20) }; }
@@ -341,12 +349,40 @@ function ensureSpace(root, needed = MIN_FREE) {
 function tempDir(root, id, takeId) { return path.join(projectDir(root, id), 'Temporales', validId(takeId, 'toma')); }
 function draftOf(root, id, takeId) { return store.readJSON(path.join(tempDir(root, id, takeId), 'toma.json')); }
 
-function beginTake(root, { id, sectionId }) {
+/** Guarda la locución del narrador generada para la transición de una sección. */
+function setNarration(root, { id, sectionId, narration }) {
+  const project = read(root, id);
+  const s = section(project, sectionId);
+  s.transition.narration = narration ? { text: text(narration.text, 200), hash: String(narration.hash || '').slice(0, 64), voice: String(narration.voice || '').slice(0, 60),
+    duration: frame(narration.duration) } : null;
+  write(root, project);
+  return project;
+}
+
+// ── Subsecciones en cadena ───────────────────────────────────────────────────
+// Una toma grabada por subsecciones guarda `chain`: [{ label: '1.2', start }],
+// el segundo de la toma en que empieza cada subsección. Así se sabe por dónde
+// seguir y desde dónde repetir una subsección sin rehacer las anteriores.
+const partLabel = value => /^\d{1,3}(?:\.\d{1,3})?$/.test(String(value ?? '')) ? String(value) : null;
+function normalizeChain(list, duration = Infinity) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  for (const item of list.slice(0, 200)) {
+    const label = partLabel(item?.label);
+    const start = frame(item?.start);
+    if (!label || !(start < duration) || (out.length && start <= out.at(-1).start)) continue;
+    out.push({ label, start });
+  }
+  return out.length ? out : null;
+}
+
+function beginTake(root, { id, sectionId, part }) {
   const project = read(root, id);
   section(project, sectionId);
   ensureSpace(root);
   const takeId = uid();
-  const draft = { id: takeId, projectId: id, sectionId, at: now(), chunks: 0, bytes: 0 };
+  const label = partLabel(part);
+  const draft = { id: takeId, projectId: id, sectionId, at: now(), chunks: 0, bytes: 0, ...(label ? { chain: [{ label, start: 0 }] } : {}) };
   store.atomic(path.join(tempDir(root, id, takeId), 'toma.json'), draft);
   return draft;
 }
@@ -452,8 +488,9 @@ async function commitTake(root, { id, takeId }, media = require('./media.cjs')) 
   const project = read(root, id);
   const target = section(project, draft.sectionId);
   const previous = target.take;
+  const chain = normalizeChain(draft.chain, frame(info.duration));
   target.take = { id: takeId, original: relative, master: null, duration: frame(info.duration), width: info.width, height: info.height,
-    size: copied, recordedAt: draft.at };
+    size: copied, recordedAt: draft.at, ...(chain ? { chain } : {}) };
   if (target.transcript?.takeId !== takeId) target.transcript = null;
   target.cuts = [];
   target.ctaOff = [];
@@ -477,12 +514,12 @@ function spliceSource(root, id, source) {
     const draft = draftOf(root, id, source.takeId);
     const file = takeFile(root, id, source.takeId);
     if (!fs.existsSync(file)) throw Error('La toma de referencia ya no existe');
-    return { file, sectionId: draft.sectionId };
+    return { file, sectionId: draft.sectionId, chain: draft.chain || null };
   }
   if (source?.kind === 'active') {
     const s = section(read(root, id), source.sectionId);
     if (!s.take) throw Error('La sección no tiene toma activa');
-    return { file: resolveFile(root, id, s.take.original), sectionId: s.id };
+    return { file: resolveFile(root, id, s.take.original), sectionId: s.id, chain: s.take.chain || null };
   }
   throw Error('Origen de la toma inválido');
 }
@@ -513,7 +550,35 @@ async function resumePoint(root, { id, source, at }, media = require('./media.cj
   return { cut, wanted: frame(wanted), duration: frame(info.duration), snapped: Math.abs(cut - wanted) > 0.02 };
 }
 
-async function joinTake(root, { id, source, cut, takeId }, media = require('./media.cjs')) {
+/**
+ * Final de la voz en la toma: para «Grabar la siguiente subsección» se corta en
+ * el silencio final (dejando un respiro) y no en el último fotograma.
+ */
+async function tailPoint(root, { id, source }, media = require('./media.cjs')) {
+  const { file } = spliceSource(root, id, source);
+  const info = await media.probe(file);
+  if (!info.duration) throw Error('No se pudo leer la duración de la toma');
+  const from = Math.max(0, info.duration - 8);
+  const r = await media.command(media.toolPath('ffmpeg'), ['-hide_banner', '-nostats', '-ss', from.toFixed(3), '-i', file,
+    '-vn', '-af', 'silencedetect=noise=-35dB:d=0.3', '-f', 'null', process.platform === 'win32' ? 'NUL' : '-']);
+  return { cut: frame(endOfVoice(info.duration, silenceList(r.stderr, from, info.duration))), duration: frame(info.duration) };
+}
+
+function silenceList(stderr, from, until) {
+  const starts = [...String(stderr).matchAll(/silence_start:\s*(-?[0-9.]+)/g)].map(m => Math.max(0, Number(m[1])) + from);
+  const ends = [...String(stderr).matchAll(/silence_end:\s*([0-9.]+)/g)].map(m => Number(m[1]) + from);
+  return starts.map((start, i) => ({ start, end: ends[i] ?? until }));
+}
+
+/** Si la toma termina en silencio, corta dentro de él dejando 0,4 s de respiro. */
+function endOfVoice(duration, silences, breath = 0.4) {
+  const last = silences.at(-1);
+  const minimum = SPLICE_FADE + 0.5;
+  if (!last || last.end < duration - 0.1) return duration;
+  return Math.max(minimum, Math.min(duration, last.start + Math.min(breath, (last.end - last.start) / 2)));
+}
+
+async function joinTake(root, { id, source, cut, takeId, part }, media = require('./media.cjs')) {
   const base = spliceSource(root, id, source);
   const continuation = draftOf(root, id, takeId);
   if (continuation.sectionId !== base.sectionId) throw Error('La continuación es de otra sección');
@@ -538,7 +603,13 @@ async function joinTake(root, { id, source, cut, takeId }, media = require('./me
     fs.renameSync(partial, out);
     const result = await inspectTake(root, { id, takeId: joined.id }, media);
     if (!result.ok) throw Error('La unión no se pudo verificar');
-    const draft = { ...joined, chunks: 1, bytes: result.size, joined: { cut: frame(c), from: source.kind } };
+    // Subsecciones: se conservan las que empiezan antes del corte y, si se grabó
+    // una subsección nueva, empieza donde arranca el fundido.
+    const label = partLabel(part);
+    let chain = base.chain ? base.chain.filter(p => p.start < c - 0.05) : null;
+    if (chain && label && chain.at(-1)?.label !== label) chain = [...chain, { label, start: frame(c - D) }];
+    chain = normalizeChain(chain, result.duration);
+    const draft = { ...joined, chunks: 1, bytes: result.size, joined: { cut: frame(c), from: source.kind }, ...(chain ? { chain } : {}) };
     store.atomic(path.join(tempDir(root, id, joined.id), 'toma.json'), draft);
     discardTake(root, { id, takeId });
     return { ...draft, duration: result.duration, size: result.size, cut: frame(c) };
@@ -769,6 +840,6 @@ module.exports = {
   DIR, LAYOUTS, BACKGROUNDS, MOODS, SOUNDS, SUB_STYLES, FRAME, frame,
   projectDir, resolveFile, listProjects, createProject, getProject, renameProject, deleteProject, write, read,
   importScript, updateSection, addSection, removeSection, moveSection, saveSettings, normalizeLayouts, normalizeWords, progress, summary,
-  storageInfo, ensureSpace, beginTake, appendTake, pendingTakes, inspectTake, discardTake, commitTake, resumePoint, joinTake, spliceFile, indexTake, snapToPause, SPLICE_FADE, prepareMaster, takeFile,
+  storageInfo, ensureSpace, beginTake, appendTake, pendingTakes, inspectTake, discardTake, commitTake, resumePoint, tailPoint, setNarration, endOfVoice, normalizeChain, joinTake, spliceFile, indexTake, snapToPause, SPLICE_FADE, prepareMaster, takeFile,
   saveImage, importImageFile, removeImage, importAudioFile, removeAudio, exportBackup, importBackup
 };
